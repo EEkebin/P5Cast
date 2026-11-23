@@ -15,7 +15,7 @@ struct FsrVulkanCommands {
         VkCommandBuffer cmd{};
         VkFence fence{};
         bool submitted{};
-        ComPtr<DxvkSurface> images[4];
+        ComPtr<DxvkSurface> images[5];
     } slots[3];
     unsigned next{};
 
@@ -49,15 +49,16 @@ struct FsrVulkanCommands {
         if (pool) vkDestroyCommandPool(device,pool,nullptr);
     }
 
-    template<class Record> bool WithResources(ID3D11Resource* (&textures)[4],Record record) {
+    template<size_t N,class Record> bool WithResources(ID3D11Resource* (&textures)[N],Record record) {
+        static_assert(N <= 5, "Too many shared FSR textures");
         auto& slot=slots[next++%3];
         if (!Wait(slot) || vkResetCommandBuffer(slot.cmd,0)!=VK_SUCCESS) return false;
         VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
         begin.flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         if (vkBeginCommandBuffer(slot.cmd,&begin)!=VK_SUCCESS) return false;
-        FfxApiResource resources[4]{};
-        VkImageLayout normal[4]{},compute[4]{};
-        for(unsigned i=0;i<4;i++){
+        FfxApiResource resources[N]{};
+        VkImageLayout normal[N]{},compute[N]{};
+        for(unsigned i=0;i<N;i++){
             ComPtr<DxvkSurface> surface;
             if (FAILED(textures[i]->QueryInterface(IID_PPV_ARGS(&surface)))) return false;
             slot.images[i]=surface;
@@ -67,8 +68,8 @@ struct FsrVulkanCommands {
             auto description=ffxApiGetImageResourceDescriptionVK(image,info,0);
             // DXVK permits additional compatible views; honor the actual mapped format.
             description.format=ffxApiGetSurfaceFormatVK(info.format);
-            resources[i]=ffxApiGetResourceVK(image,description,i==3?FFX_API_RESOURCE_STATE_UNORDERED_ACCESS:FFX_API_RESOURCE_STATE_COMPUTE_READ);
-            compute[i]=i==3 ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            resources[i]=ffxApiGetResourceVK(image,description,i==N-1?FFX_API_RESOURCE_STATE_UNORDERED_ACCESS:FFX_API_RESOURCE_STATE_COMPUTE_READ);
+            compute[i]=i==N-1 ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         }
         VkMemoryBarrier memory{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
         memory.srcAccessMask=VK_ACCESS_MEMORY_WRITE_BIT;
@@ -78,14 +79,14 @@ struct FsrVulkanCommands {
         vkCmdPipelineBarrier(slot.cmd,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,0,1,&memory,0,nullptr,0,nullptr);
         if(vkEndCommandBuffer(slot.cmd)!=VK_SUCCESS || vkResetFences(device,1,&slot.fence)!=VK_SUCCESS) return false;
         const VkImageSubresourceRange range={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
-        for(unsigned i=0;i<4;i++) if(normal[i]!=compute[i]) interop->TransitionSurfaceLayout(slot.images[i].Get(),&range,normal[i],compute[i]);
+        for(unsigned i=0;i<N;i++) if(normal[i]!=compute[i]) interop->TransitionSurfaceLayout(slot.images[i].Get(),&range,normal[i],compute[i]);
         interop->FlushRenderingCommands();
         VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
         submit.commandBufferCount=1; submit.pCommandBuffers=&slot.cmd;
         interop->LockSubmissionQueue();
         slot.submitted=vkQueueSubmit(queue,1,&submit,slot.fence)==VK_SUCCESS;
         interop->ReleaseSubmissionQueue();
-        for(unsigned i=0;i<4;i++) if(normal[i]!=compute[i]) interop->TransitionSurfaceLayout(slot.images[i].Get(),&range,compute[i],normal[i]);
+        for(unsigned i=0;i<N;i++) if(normal[i]!=compute[i]) interop->TransitionSurfaceLayout(slot.images[i].Get(),&range,compute[i],normal[i]);
         return slot.submitted;
     }
 };

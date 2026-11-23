@@ -142,7 +142,7 @@ internal sealed partial class Renderer
                      havePriorEnhanced ? prev.Read : curr.Read,havePriorEnhanced ? motion.Read : null,auxiliary:strokeMask.Write);
                 // The console's camera jitter is unknown. Do not invent offsets for captured pixels.
                 if(temporalFsr!=null)
-                    temporalFsr.Evaluate(context,rgba.Texture,vectors.Texture,depth.Texture,ngxOutput.Texture,frameMilliseconds,!havePriorEnhanced);
+                    temporalFsr.Evaluate(context,rgba.Texture,vectors.Texture,depth.Texture,ngxOutput.Texture,frameMilliseconds,!havePriorEnhanced,strokeMask.Texture);
                 else if(neuralRendering!=null)
                     neuralRendering.Evaluate(rgba.Texture,vectors.Texture,depth.Texture,ngxOutput.Texture,!havePriorEnhanced);
                 else ngx.Evaluate(context,rgba.Texture,vectors.Texture,depth.Texture,ngxOutput.Texture,0,0,frameMilliseconds,!havePriorEnhanced);

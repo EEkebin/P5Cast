@@ -8,6 +8,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Documents;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 
@@ -16,8 +17,8 @@ namespace Cadrivect
     internal sealed class PlaybackMeter : UserControl
     {
         static readonly string[] ModeIds={"original","sharp","fsr","rtxvideo","dlss","dlaa","fsr-temporal","dlss-nr"};
-        static readonly string[] ModeLabels={"Original","Sharpen","AMD FSR 1","RTX Video SR","DLSS","DLAA","AMD FSR Temporal","DLSS 5 NR"};
-        static readonly string[] Descriptions={"Display the source picture.","Sharpen edges at the source resolution.","AMD FidelityFX Super Resolution 1.",
+        static readonly string[] ModeLabels=PictureLabels.Modes;
+        static readonly string[] Descriptions={"Display the source picture.","Sharpen edges at the source resolution.","AMD FSR 1 enlarges and sharpens each decoded frame independently.",
             "NVIDIA RTX Video Super Resolution for SDR video.","Experimental DLSS with motion estimated from the stream.","Experimental DLAA at the source resolution.","AMD temporal upscaling. The SDK selects a provider supported by the GPU.","Experimental DLSS 5 neural rendering at source resolution. Uses motion estimated from the PS5 video. Requires Vulkan, SDR and a compatible RTX GPU."};
         const string Ink="Theme.Text", Muted="Theme.Muted", Line="Theme.Border";
         const string Mint="Theme.Accent", Amber="Theme.Generated";
@@ -78,10 +79,20 @@ namespace Cadrivect
         readonly Dictionary<string,TextBlock> values=new Dictionary<string,TextBlock>();
         readonly TextBlock submitLabel,notice,pictureScale,pictureSize;
         readonly FrameRateDial dial=new FrameRateDial();
+        internal const int DefaultDialMaximum=240;
+        const int MinDialMaximum=120,MaxDialMaximum=1000;
+        readonly Slider dialScale;
+        readonly TextBox dialScaleInput;
+        internal event Action DialMaximumChanged;
+        internal int DialMaximum {
+            get {return (int)dialScale.Value;}
+            set {dialScale.Value=Math.Max(MinDialMaximum,Math.Min(MaxDialMaximum,value));}
+        }
         Dictionary<string,object> gpu;
         int selectedMode,selectedFactor=1;
         bool syncing,hdr,directSelected;
         int requestedVideoKbps;
+        string liveFsrVersion;
         long lastSample=-1;
         DateTime pendingSettings;
 
@@ -97,13 +108,42 @@ namespace Cadrivect
             var title=Heading("Frame rate"); title.Margin=new Thickness(0);
             var heading=new DockPanel();
             targetValue=Label("Target —",Muted,11,FontWeights.SemiBold);
-            targetValue.ToolTip="The white tick marks the requested output frame rate.";
+            targetValue.ToolTip="The triangular marker shows the requested output frame rate.";
             DockPanel.SetDock(targetValue,Dock.Right);
             heading.Children.Add(targetValue); heading.Children.Add(title); fixedMeter.Children.Add(heading);
             dial.Height=133; dial.Margin=new Thickness(0,2,0,6); fixedMeter.Children.Add(dial);
             var legend=new UniformGrid {Rows=1,Columns=2}; fixedMeter.Children.Add(legend);
             sourceValue=RateReadout(legend,Label("Source",Muted,11,FontWeights.Normal),"Theme.Source","Source frames submitted for display each second, including redraws.");
             generatedValue=RateReadout(legend,Label("Generated",Muted,11,FontWeights.Normal),Amber,"Interpolated frames submitted for display each second.");
+            var scaleRow=new DockPanel {Margin=new Thickness(0,6,0,0)};
+            var scaleTitle=Label("Dial max",Muted,11,FontWeights.SemiBold);
+            DockPanel.SetDock(scaleTitle,Dock.Left); scaleRow.Children.Add(scaleTitle);
+            dialScaleInput=new TextBox {Text=DefaultDialMaximum.ToString(CultureInfo.InvariantCulture),Width=45,MinHeight=24,
+                MaxLength=4,Padding=new Thickness(2,1,2,1),TextAlignment=TextAlignment.Center,Margin=new Thickness(4,0,0,0),
+                ToolTip="Maximum on the FPS dial (120–1,000 FPS)."};
+            AutomationProperties.SetName(dialScaleInput,"FPS dial maximum"); AutomationProperties.SetAutomationId(dialScaleInput,"DialMaximumInput");
+            DockPanel.SetDock(dialScaleInput,Dock.Right); scaleRow.Children.Add(dialScaleInput);
+            dialScale=new Slider {Minimum=MinDialMaximum,Maximum=MaxDialMaximum,Value=DefaultDialMaximum,TickFrequency=1,
+                IsSnapToTickEnabled=true,IsMoveToPointEnabled=true,SmallChange=1,LargeChange=10,Margin=new Thickness(7,0,3,0),
+                ToolTip="Adjust the FPS dial scale. Arrow keys change it by one FPS."};
+            dialScale.SetResourceReference(StyleProperty,"WipeSlider");
+            AutomationProperties.SetName(dialScale,"FPS dial maximum"); AutomationProperties.SetAutomationId(dialScale,"DialMaximumSlider");
+            dialScale.ValueChanged+=delegate {
+                string text=DialMaximum.ToString(CultureInfo.InvariantCulture);
+                if(dialScaleInput.Text!=text) dialScaleInput.Text=text;
+                dial.SetMaximum(DialMaximum);
+                if(DialMaximumChanged!=null) DialMaximumChanged();
+            };
+            dialScaleInput.TextChanged+=delegate {
+                int entered;
+                if(int.TryParse(dialScaleInput.Text,NumberStyles.None,CultureInfo.InvariantCulture,out entered)
+                    && entered>=MinDialMaximum && entered<=MaxDialMaximum) DialMaximum=entered;
+            };
+            dialScaleInput.LostKeyboardFocus+=delegate {CommitDialMaximum();};
+            dialScaleInput.PreviewKeyDown+=delegate(object sender,KeyEventArgs e) {
+                if(e.Key==Key.Enter) {CommitDialMaximum();dialScaleInput.SelectAll();e.Handled=true;}
+            };
+            scaleRow.Children.Add(dialScale); fixedMeter.Children.Add(scaleRow);
             Separator(fixedMeter);
             var picture=AddGroup(sections,"Picture","PictureGroup");
             string group=Guid.NewGuid().ToString("N");
@@ -113,12 +153,14 @@ namespace Cadrivect
             {
                 var button=new RadioButton {GroupName="Picture"+group,Content=ModeLabels[i],Template=ChipTemplate};
                 StyleChip(button); modes[i]=button; int index=i;
+                AutomationProperties.SetAutomationId(button,"Picture_"+ModeIds[i]);
                 button.Checked+=delegate {
                     if(syncing) return;
                     selectedMode=index; RefreshQualityChoice(); SendSettings();
                 };
-                modeGrid.Children.Add(button);
             }
+            // Keep saved mode IDs stable while grouping the two FSR choices together.
+            foreach(int index in new[]{0,1,6,2,4,5,3,7}) modeGrid.Children.Add(modes[index]);
             qualityGroup=new StackPanel {Margin=new Thickness(0,7,0,0)};
             picture.Children.Add(qualityGroup);
             var qualityHeader=new DockPanel {Margin=new Thickness(0,0,0,3)};
@@ -282,6 +324,12 @@ namespace Cadrivect
             cell.Children.Add(chip); cell.Children.Add(value); cell.Children.Add(caption); legend.Children.Add(cell);
             return value;
         }
+        void CommitDialMaximum()
+        {
+            int entered;
+            if(int.TryParse(dialScaleInput.Text,NumberStyles.None,CultureInfo.InvariantCulture,out entered)) DialMaximum=entered;
+            dialScaleInput.Text=DialMaximum.ToString(CultureInfo.InvariantCulture);
+        }
         internal void RefreshTheme() {dial.InvalidateVisual();}
         static TextBlock Label(string text,string role,double size,FontWeight weight)
         {
@@ -413,7 +461,7 @@ namespace Cadrivect
             syncing=true;
             try {modes[selectedMode].IsChecked=true; (FrameGenerationProvider=="amd" && selectedFactor==2 ? amdGeneration : factors[selectedFactor-1]).IsChecked=true; SelectView(selectedView);}
             finally {syncing=false;}
-            hdr=false; lastSample=-1; pendingSettings=DateTime.MinValue; dial.SetRates(double.NaN,double.NaN,double.NaN,double.NaN);
+            liveFsrVersion=null; hdr=false; lastSample=-1; pendingSettings=DateTime.MinValue; dial.SetRates(double.NaN,double.NaN,double.NaN,double.NaN);
             sourceValue.Text=generatedValue.Text="—"; targetValue.Text="Target —";
             pictureSize.Text="Waiting for video"; pictureScale.Text=""; activeQuality.Text="";
             foreach(var label in values.Values) label.Text="—";
@@ -442,6 +490,7 @@ namespace Cadrivect
                     reason="AMD temporal upscaling · "+Text(gpu,"fsrVersion");
                 modes[i].IsEnabled=available; modes[i].ToolTip=reason;
             }
+            modes[6].Content=PictureLabels.TemporalFsr(liveFsrVersion ?? Text(gpu,"fsrVersion"));
             amdGeneration.IsEnabled=Flag(gpu,"amdFrameGeneration")==true;
             amdGeneration.ToolTip=amdGeneration.IsEnabled ? "AMD FSR frame generation "+Text(gpu,"amdFrameGenerationVersion")+" · one generated frame between source frames." :
                 Text(gpu,"amdFrameGenerationReason") ?? Text(gpu,"probeFailure") ?? "Checking GPU support.";
@@ -539,6 +588,11 @@ namespace Cadrivect
             values["rtt"].Text=Metric(Number(snapshot,"handshakeRttMs")," ms","0.0");
             if(hdrFlag.HasValue && hdr!=hdrFlag.Value) {hdr=hdrFlag.Value; RefreshAvailability();}
             string requested=Text(snapshot,"mode"), effective=Text(snapshot,"effectivePictureMode");
+            string fsrVersion=effective=="fsr-temporal" ? Text(snapshot,"fsrVersion") : null;
+            if(fsrVersion!=liveFsrVersion) {
+                liveFsrVersion=fsrVersion;
+                modes[6].Content=PictureLabels.TemporalFsr(liveFsrVersion ?? Text(gpu,"fsrVersion"));
+            }
             int mode=Array.IndexOf(ModeIds,requested); double factor=Number(snapshot,"multiplier"); bool? comparing=Flag(snapshot,"compare");
             syncing=true;
             try {
@@ -553,10 +607,11 @@ namespace Cadrivect
                 }
             } finally {syncing=false;}
             int quality=Array.IndexOf(QualityIds,Text(snapshot,"activeDlssQuality"));
-            activeQuality.Text=effective=="dlss" && quality>0 ? "Active · "+QualityLabels[quality] : "";
+            activeQuality.Text=requested=="dlss" && effective=="dlaa" ? "Native · DLAA" :
+                effective=="dlss" && quality>0 ? "Active · "+QualityLabels[quality] : "";
             string message=Text(snapshot,"effectNotice");
-            if(string.IsNullOrEmpty(message) && effective=="fsr-temporal" && !string.IsNullOrEmpty(Text(snapshot,"fsrVersion")))
-                message="AMD FSR "+Text(snapshot,"fsrVersion");
+            if(string.IsNullOrEmpty(message) && comparing==true && mode>0)
+                message="Viewing Original. Select Enhanced or Draggable split to see the picture effect.";
             string fgVersion=Text(snapshot,"activeFrameGenerationVersion");
             if(!string.IsNullOrEmpty(fgVersion) && string.IsNullOrEmpty(Text(snapshot,"effectNotice")))
                 message=(string.IsNullOrEmpty(message) ? "" : message+" · ")+"AMD frame generation "+fgVersion;
@@ -571,6 +626,7 @@ namespace Cadrivect
             static readonly Typeface NumberFace=new Typeface(new FontFamily("Segoe UI"),FontStyles.Normal,FontWeights.SemiBold,FontStretches.Normal);
             static readonly Typeface LabelFace=new Typeface("Segoe UI");
             double target,source,presented,generated;
+            int maximum=DefaultDialMaximum;
             internal FrameRateDial()
             {
                 AutomationProperties.SetAutomationId(this,"FrameRateDial");
@@ -587,10 +643,15 @@ namespace Cadrivect
                 protected override AutomationControlType GetAutomationControlTypeCore() {return AutomationControlType.Custom;}
             }
             static string Describe(double rate) {return double.IsNaN(rate) ? "unavailable" : Metric(rate," FPS","0.#");}
+            internal void SetMaximum(int limit)
+            {
+                maximum=limit;
+                SetRates(target,source,presented,generated);
+            }
             public void SetRates(double aim,double originals,double submitted,double synthetic)
             {
                 target=aim; source=originals; presented=submitted; generated=synthetic;
-                string detail="Output "+Describe(presented)+". Source "+Describe(source)+". Generated "+Describe(generated)+". Target "+Describe(target)+".";
+                string detail="Output "+Describe(presented)+". Source "+Describe(source)+". Generated "+Describe(generated)+". Target "+Describe(target)+". Dial maximum "+maximum+" FPS.";
                 AutomationProperties.SetHelpText(this,detail); ToolTip=detail; InvalidateVisual();
             }
             static Point Polar(Point hub,double radius,double angle)
@@ -624,21 +685,21 @@ namespace Cadrivect
                 var muted=ThemeBrush("Muted");
                 var minorTick=new Pen(ThemeBrush("StrongBorder"),1);
                 var majorTick=new Pen(muted,1.3);
-                double peak=Math.Max(double.IsNaN(target)?0:target,double.IsNaN(presented)?0:presented);
-                double maximum=Math.Max(240,240*Math.Ceiling(peak/240));
                 for(int i=0;i<=16;i++) {
                     double angle=i*Math.PI/16;
                     bool major=i%4==0;
                     dc.DrawLine(major ? majorTick:minorTick,Polar(hub,radius-10,angle),Polar(hub,radius-(major?3:i%2==0?5:7),angle));
-                    if(major) CenterText(dc,(maximum*i/16).ToString("0",CultureInfo.InvariantCulture),
+                    if(major) CenterText(dc,(maximum*i/16.0).ToString("0.##",CultureInfo.InvariantCulture),
                         Polar(hub,radius+7,angle),10,LabelFace,muted);
                 }
-                double ring=radius-18,split=Math.PI*source/maximum,end=Math.PI*presented/maximum;
+                double ring=radius-18,end=Math.PI*Math.Min(1,Math.Max(0,presented/maximum));
+                // At saturation the two segments still show their share of submitted frames.
+                double split=presented>0 ? end*source/presented : 0;
                 Arc(dc,hub,ring,0,Math.PI,ThemeBrush("Track"),true,true);
                 Arc(dc,hub,ring,0,split,ThemeBrush("Source"),true,generated==0);
                 Arc(dc,hub,ring,split,end,ThemeBrush("Generated"),source==0,true);
                 if(!double.IsNaN(target)) {
-                    double a=Math.PI*target/maximum;
+                    double a=Math.PI*Math.Min(1,Math.Max(0,target/maximum));
                     var tip=Polar(hub,radius-16,a); var back=Polar(hub,radius-7,a);
                     double dx=3.8*Math.Sin(a),dy=-3.8*Math.Cos(a);
                     var marker=new StreamGeometry();

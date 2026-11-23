@@ -12,7 +12,7 @@ foreach ($lib in @('WindowsBase','PresentationCore','PresentationFramework')) {
     $options += '/reference:' + (Join-Path $framework "WPF\$lib.dll")
 }
 $appSources=Get-ChildItem (Join-Path $PSScriptRoot 'app') -File -Filter '*.cs' | ForEach-Object FullName
-& $compiler @options /reference:System.Drawing.dll @appSources (Join-Path $PSScriptRoot 'engine\DisplayTarget.cs') (Join-Path $PSScriptRoot 'engine\WipeLayout.cs')
+& $compiler @options /reference:System.Drawing.dll @appSources (Join-Path $PSScriptRoot 'engine\PictureLabels.cs') (Join-Path $PSScriptRoot 'engine\DisplayTarget.cs') (Join-Path $PSScriptRoot 'engine\WipeLayout.cs')
 if ($LASTEXITCODE -ne 0) { throw 'The dashboard did not compile.' }
 if (!$DashboardOnly) {
     & (Join-Path $PSScriptRoot 'engine\Build.ps1') -OutDir (Join-Path $OutDir 'engine\bin')

@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.18.0.0")]
+[assembly: AssemblyVersion("0.19.0.0")]
 
 namespace Cadrivect
 {
@@ -137,6 +137,13 @@ namespace Cadrivect
                 UpdateWipeInput();
             };
             UI<Border>("MeterHost").Child=meter;
+            int savedDialMaximum;
+            meter.DialMaximum=int.TryParse(Field(saved,"fpsDialMaximum"),NumberStyles.Integer,CultureInfo.InvariantCulture,out savedDialMaximum)
+                ? savedDialMaximum : PlaybackMeter.DefaultDialMaximum;
+            var saveDial=new DispatcherTimer {Interval=TimeSpan.FromMilliseconds(250)};
+            saveDial.Tick+=delegate {saveDial.Stop(); SaveSettings();};
+            meter.DialMaximumChanged+=delegate {if(window.IsLoaded) {saveDial.Stop();saveDial.Start();}};
+            window.Closed+=delegate {saveDial.Stop();};
             meter.NeuralDownloadRequested+=InstallNeuralRuntime;
             meter.NeuralLicenseRequested+=delegate {
                 try {Process.Start(new ProcessStartInfo("https://github.com/NVIDIA/DLSS/blob/9981c6350dc58c0ce21f024fd65e31e851c31689/LICENSE.txt"){UseShellExecute=true});}
@@ -619,7 +626,7 @@ namespace Cadrivect
                 var settings = new { dlssQuality=meter.DlssQuality,dlssModelHint=meter.DlssModelHint,wipeHorizontal=meter.WipeHorizontal,sidebarOpen=stats,sidebarWidth=sidebarWidth,settingsOpen=settingsOpen,settingsHeight=settingsHeight,
                     discordPresence=UI<CheckBox>("SharePresence").IsChecked==true,
                     discordGame=UI<CheckBox>("ShareGame").IsChecked==true,discordProject=UI<CheckBox>("ShareProject").IsChecked==true,stopChoices=stopChoices,directMbps=DirectKbps()/1000, relayMbps=networkRates[UI<ComboBox>("NetworkBitrate").SelectedIndex],audioLayout=UI<ComboBox>("NetworkAudio").SelectedIndex,pictureDefaults=1, mode=mode, multiplier=factor-1, frameGenerationProvider=meter.FrameGenerationProvider,
-                    streamVolume=volumeLevel,streamMuted=volumeMuted,setupVersion=setupVersion,consoleMac=pendingSetupConsole ?? (console==null?"":console.Mac),consoleAddresses=consoleAddresses,directStreamHeight=DirectStreamHeight(),directFps=UI<ComboBox>("DirectFps").SelectedIndex,
+                    fpsDialMaximum=meter.DialMaximum,streamVolume=volumeLevel,streamMuted=volumeMuted,setupVersion=setupVersion,consoleMac=pendingSetupConsole ?? (console==null?"":console.Mac),consoleAddresses=consoleAddresses,directStreamHeight=DirectStreamHeight(),directFps=UI<ComboBox>("DirectFps").SelectedIndex,
                     display=SelectedDisplayName(), uiScale=PreferredScalePercent,theme=themeId, resolution=UI<ComboBox>("RenderResolution").SelectedIndex,hdr=preferredHdr,renderer=SelectedRenderer,
                     maximized=(fullscreen?previousWindowState:window.WindowState)==WindowState.Maximized,
                     clientHdr=UI<CheckBox>("ClientHdr").IsChecked==true,hostDisplay=hostTarget==null ? "" : hostTarget.DeviceName,

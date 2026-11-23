@@ -20,8 +20,9 @@ internal static class NgxQualityRunner {
 }
 internal static partial class EmbeddedProbe {
     const int InputW=640,InputH=360,OutputW=960,OutputH=540;
+    const int MenuPalette=6,PanelPalette=MenuPalette+256,DiscPalette=PanelPalette+4*256;
     static readonly string[] HudLetters={"1000110001111111000110001","1000110001100011000101110","1111010001100011000111110"};
-    // Generated input is scRGB in HDR, and neutral/primary sRGB code values in SDR.
+    // Synthetic HDR frames use scRGB; one blue label extends beyond the sRGB gamut.
     // The real production renderer and native NGX produce the images being measured.
     static readonly byte[] MenuCoverage=MakeMenu();
     static byte[] MakeMenu() {
@@ -37,14 +38,38 @@ internal static partial class EmbeddedProbe {
         }
         return mask;
     }
+    // Ground truth at both resolutions distinguishes actual edge reconstruction from arbitrary pixel changes.
+    static readonly byte[] DiscCoverage=MakeDisc();
+    static double DiscSample(double x,double y,double step) {
+        int inside=0;
+        for(int j=0;j<8;j++) for(int i=0;i<8;i++) {
+            double dx=x+(i+.5)*step/8-575.28,dy=y+(j+.5)*step/8-175.47;
+            if(dx*dx+dy*dy<39.3*39.3) inside++;
+        }
+        return inside/64.0;
+    }
+    static byte[] MakeDisc() {
+        var disc=new byte[128*128];
+        for(int y=0;y<128;y++) for(int x=0;x<128;x++)
+            disc[y*128+x]=(byte)Math.Round(255*DiscSample(x+512,y+112,1));
+        return disc;
+    }
     static int Texel(int x,int y,int frame) {
         if(y<72) return Math.Min(4,x/128);
-        if(y>=250 && y<324 && x<300) return 6+MenuCoverage[(y-250)*300+x];
+        // Dark menu ink on a saturated panel, plus a scrolling cyan label on a midtone panel.
+        if((y>=72 && y<110) || y>=324) {
+            bool moving=y>=324;
+            int localX=(x+(moving ? frame*4 : 0))%180;
+            int coverage=MenuCoverage[(y-(moving?324:72))*300+localX];
+            return PanelPalette+256*((moving?1:0)+(x>=320?2:0))+coverage;
+        }
+        if(y>=250 && y<324 && x<300) return MenuPalette+MenuCoverage[(y-250)*300+x];
         if(y>=250 && y<324 && x>=320) {
             int localX=(x-320+frame*5)%300, localY=y-250;
             if(localY>56 && localX>=42 && localX<210) return 3; // moving solid highlight/bar
-            return 6+MenuCoverage[localY*300+localX]; // scrolling text changes position every frame
+            return MenuPalette+MenuCoverage[localY*300+localX]; // scrolling text changes position every frame
         }
+        if(x>=512 && y>=112 && y<240) return DiscPalette+DiscCoverage[(y-112)*128+x-512];
         bool ink=false;
         if(x<320 && y>=112 && y<240) {
             int cell=x%36, row=(y-112)%24;
@@ -62,21 +87,50 @@ internal static partial class EmbeddedProbe {
     static void UploadQualityFrame(Device device,Texture2D texture,int frame,bool hdr) {
         int width=texture.Description.Width,height=texture.Description.Height,count=width*height;
         if(hdr) {
-            // Exactly representable positive half values; scRGB 1.0 means 80 cd/m².
-            var neutral=new ushort[262];
+            // scRGB 1.0 means 80 cd/m². The negative red channel of the blue label is intentional.
+            var neutral=new ushort[PanelPalette];
             new ushort[]{0,0x3c00,0x4100,0x4a40,0x4000,0x4100}.CopyTo(neutral,0);
-            for(int i=0;i<256;i++) neutral[i+6]=PositiveHalf(2.5*Math.Pow(i/255.0,2.2)); // 0, 80, 200, 1000 nits, colored patch, text.
+            for(int i=0;i<256;i++) neutral[i+MenuPalette]=PositiveHalf(2.5*Math.Pow(i/255.0,2.2)); // 0, 80, 200, 1000 nits, colored patch, text.
+            var panel=new ushort[1024*3];
+            double[][] backgrounds={new[]{3.0,.28,.13},new[]{.39,.39,.39},new[]{.18,.22,.15},new[]{.12,.12,.12}};
+            double[][] labels={new[]{.027,.012,.018},new[]{.08,2.1,2.6},new[]{.006,.009,.018},new[]{-.10,.13,.56}};
+            for(int variant=0;variant<4;variant++) for(int i=0;i<256;i++) for(int ch=0;ch<3;ch++) {
+                double a=i/255.0;
+                double linear=backgrounds[variant][ch]*(1-a)+labels[variant][ch]*a;
+                panel[(variant*256+i)*3+ch]=(ushort)((linear<0?0x8000:0)|PositiveHalf(Math.Abs(linear)));
+            }
+            var disc=new ushort[256];
+            for(int i=0;i<256;i++) disc[i]=PositiveHalf(.15+1.85*i/255.0);
             var pixels=new ushort[count*4];
             for(int y=0;y<height;y++) for(int x=0;x<width;x++) {
                 int i=4*(width*y+x),p=Texel(x%InputW,y%InputH,frame);
+                if(p>=DiscPalette) {
+                    pixels[i]=pixels[i+1]=pixels[i+2]=disc[p-DiscPalette]; pixels[i+3]=0x3c00;
+                    continue;
+                }
+                if(p>=PanelPalette) {
+                    int index=(p-PanelPalette)*3;
+                    pixels[i]=panel[index]; pixels[i+1]=panel[index+1]; pixels[i+2]=panel[index+2]; pixels[i+3]=0x3c00;
+                    continue;
+                }
                 pixels[i]=neutral[p]; pixels[i+1]=p==4?(ushort)0x3800:neutral[p];
                 pixels[i+2]=p==4?(ushort)0x3400:neutral[p]; pixels[i+3]=0x3c00;
             }
             device.ImmediateContext.UpdateSubresource(pixels,texture,0,width*8,0);
         } else {
-            var palette=new uint[262];
+            var palette=new uint[DiscPalette+256];
             new uint[]{0xff000000,0xff808080,0xffe0e0e0,0xffffffff,0xffe08040,0xffffffff}.CopyTo(palette,0);
-            for(uint i=0;i<256;i++) palette[i+6]=0xff000000|i*0x010101;
+            for(uint i=0;i<256;i++) palette[i+MenuPalette]=0xff000000|i*0x010101;
+            int[][] backgrounds={new[]{233,111,65},new[]{124,124,124},new[]{96,114,89},new[]{73,73,73}};
+            int[][] labels={new[]{16,9,13},new[]{28,219,246},new[]{12,18,33},new[]{13,86,173}};
+            for(int v=0;v<4;v++) for(int i=0;i<256;i++) {
+                uint color=0xff000000;
+                for(int ch=0;ch<3;ch++)
+                    color|=(uint)Math.Round((backgrounds[v][ch]*(255-i)+labels[v][ch]*i)/255.0)<<((2-ch)*8);
+                palette[PanelPalette+v*256+i]=color;
+            }
+            for(int i=0;i<256;i++)
+                palette[DiscPalette+i]=0xff000000|(uint)Math.Round(38+179*i/255.0)*0x010101;
             var pixels=new uint[count];
             for(int y=0;y<height;y++) for(int x=0;x<width;x++) pixels[y*width+x]=palette[Texel(x%InputW,y%InputH,frame)];
             device.ImmediateContext.UpdateSubresource(pixels,texture,0,width*4,0);
@@ -175,13 +229,49 @@ internal static partial class EmbeddedProbe {
         valid&=menuDelta.Average()<=(hdr?.01:.03) && strokeDelta.Average()<=(hdr?.007:.03);
         valid&=Math.Abs(outputMedian/referenceMedian-1)<.065;
         valid&=MeasureMovingWhites(baseline,image,OutputW,new Rectangle(486,375,454,109),hdr,mode);
+        foreach(bool scrolling in new[]{false,true}) foreach(bool dim in new[]{false,true}) {
+            var errors=new List<double>();
+            int top=scrolling?490:112;
+            for(int y=top;y<top+42;y++) for(int x=3+(dim?OutputW/2:0);x<(dim?OutputW:OutputW/2)-3;x++) {
+                int i=y*OutputW+x;
+                double contrast=0,error=0;
+                for(int ch=0;ch<3;ch++) {
+                    double code=Code(baseline[i],ch,hdr);
+                    contrast=Math.Max(contrast,Math.Abs(code-Code(baseline[i+2],ch,hdr)));
+                    contrast=Math.Max(contrast,Math.Abs(code-Code(baseline[i+OutputW*2],ch,hdr)));
+                    error=Math.Max(error,Math.Abs(code-Code(image[i],ch,hdr)));
+                }
+                if(contrast>.03) errors.Add(error);
+            }
+            Check(errors.Count>1500,"Missing antialiased colored menu.");
+            double p95=Quantile(errors,.95);
+            Console.WriteLine("{0} {1} {2} menu edge max-channel error: mean {3:F4}, p95 {4:F4} ({5} samples)",
+                hdr?"HDR":"SDR",mode,scrolling?(dim?"scrolling blue on dark":"scrolling cyan"):(dim?"dark on dim green":"dark on orange"),errors.Average(),p95,errors.Count);
+            valid&=p95<(hdr?.012:.035);
+        }
+        if(!hdr) {
+            double originalError=0,enhancedError=0;
+            int samples=0;
+            for(int y=201;y<324;y++) for(int x=800;x<925;x++) {
+                double dx=(x+.5)/1.5-575.28,dy=(y+.5)/1.5-175.47;
+                if(Math.Abs(Math.Sqrt(dx*dx+dy*dy)-39.3)>1.4) continue;
+                double ideal=(38+179*DiscSample(x/1.5,y/1.5,1/1.5))/255;
+                originalError+=Math.Abs(ideal-Code(baseline[y*OutputW+x],0,false));
+                enhancedError+=Math.Abs(ideal-Code(image[y*OutputW+x],0,false));
+                samples++;
+            }
+            Console.WriteLine("SDR {0} antialiased scene contour error vs supersampled reference: Original {1:F4}, enhanced {2:F4} ({3} samples)",
+                mode,originalError/samples,enhancedError/samples,samples);
+            Check(samples>1000,"Missing analytic edge samples.");
+            if(mode=="dlss") valid&=enhancedError<.9*originalError;
+        }
         int changed=0,sceneSamples=0;
         for(int y=174;y<350;y+=2) for(int x=490;x<940;x+=2) {
             int i=y*OutputW+x; sceneSamples++;
             if(Math.Abs(Code(image[i],0,hdr)-Code(baseline[i],0,hdr))>.015) changed++;
         }
-        Console.WriteLine("{0} {1} moving scene samples changed {2}/{3}",hdr?"HDR":"SDR",mode,changed,sceneSamples);
-        Check(changed>sceneSamples/20,"NGX must still change moving, textured content.");
+        Console.WriteLine("{0} {1} scene samples changed {2}/{3}",hdr?"HDR":"SDR",mode,changed,sceneSamples);
+        Check(changed>sceneSamples/20,mode+" must still change textured scene content.");
         return valid;
     }
     static bool MeasureMovingWhites(int[] baseline,int[] image,int width,Rectangle region,bool hdr,string mode) {
@@ -308,9 +398,10 @@ internal static partial class EmbeddedProbe {
                     using(var input=new Texture2D(device,new Texture2DDescription{Width=InputW,Height=InputH,Format=hdr?Format.R16G16B16A16_Float:Format.B8G8R8A8_UNorm,
                         ArraySize=1,MipLevels=1,SampleDescription=new SampleDescription(1,0),BindFlags=BindFlags.ShaderResource})) {
                         int[] baseline=null;
-                        foreach(string mode in new[]{"original","dlss","dlaa"}) {
+                        foreach(string mode in new[]{"original","dlss","dlaa","fsr-temporal"}) {
                             var target=(Texture2D)backBuffer.GetValue(renderer);
-                            int evaluations=(int)type.GetProperty("VendorEvaluations").GetValue(renderer,null);
+                            var counter=type.GetProperty(mode=="fsr-temporal"?"FsrEvaluations":"VendorEvaluations");
+                            int evaluations=(int)counter.GetValue(renderer,null);
                             type.GetMethod("SetPictureMode").Invoke(renderer,new object[]{mode});
                             int[] prior=null;
                             for(int f=0;f<9;f++) {
@@ -321,15 +412,16 @@ internal static partial class EmbeddedProbe {
                                 if(f==7) prior=ReadPresentedTexture(device,target);
                             }
                             var pixels=ReadPresentedTexture(device,target);
-                            var expectedSize=mode=="dlss" ? new Size(OutputW,OutputH) : new Size(InputW,InputH);
+                            var expectedSize=(mode=="dlss" || mode=="fsr-temporal") ? new Size(OutputW,OutputH) : new Size(InputW,InputH);
                             Check((Size)type.GetProperty("RenderSize").GetValue(renderer,null)==expectedSize,
                                   mode+" processed video at the wrong resolution.");
-                            Check((string)type.GetProperty("EffectivePictureMode").GetValue(renderer,null)==mode,"NGX fell back from "+mode+": "+type.GetProperty("EffectNotice").GetValue(renderer,null));
-                            if(mode!="original") Check((int)type.GetProperty("VendorEvaluations").GetValue(renderer,null)-evaluations>=9,"Insufficient NVIDIA evaluations.");
+                            Check((string)type.GetProperty("EffectivePictureMode").GetValue(renderer,null)==mode,"Renderer fell back from "+mode+": "+type.GetProperty("EffectNotice").GetValue(renderer,null));
+                            if(mode!="original") Check((int)counter.GetValue(renderer,null)-evaluations>=9,"Missing vendor frame evaluations for "+mode);
                             if(args[3]!="-") SaveTextCrop(args[3],pixels,hdr,mode);
                             if(mode=="original") baseline=pixels;
                             else {
                                 pass&=MeasureQuality(baseline,pixels,prior,hdr,mode);
+                                if(mode=="fsr-temporal") continue;
                                 // Inspect the actual enhanced output in its swap-chain format (including 10-bit PQ).
                                 const int cx=612,cy=248;
                                 var setLoupe=type.GetMethod("SetLoupe");
@@ -386,7 +478,7 @@ internal static partial class EmbeddedProbe {
                 }
                 window.Close();
             }
-            if(!pass && args[2]!="measure") throw new Exception("NGX changed flat colors or damaged stationary text beyond the fixture tolerance.");
+            if(!pass && args[2]!="measure") throw new Exception("A temporal effect exceeded the color, text, or contour tolerance.");
             return 0;
         } catch(Exception e) {Console.Error.WriteLine(e.GetBaseException()); return 1;}
     }

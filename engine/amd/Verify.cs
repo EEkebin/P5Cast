@@ -6,7 +6,7 @@ using SharpDX.DXGI;
 using Device=SharpDX.Direct3D11.Device;
 using SharpDX.Mathematics.Interop;
 
-internal static class VerifyFsr
+internal static partial class VerifyFsr
 {
     static Texture2D Texture(Device device,int w,int h,Format format,bool output=false,bool readback=false)
     {
@@ -39,8 +39,11 @@ internal static class VerifyFsr
                 if(hdr) {
                     var px=new ushort[w*h*4];
                     for(int y=0;y<h;y++) for(int x=0;x<w;x++){
-                        int i=4*(y*w+x); ushort value=((x<w/2)^swap)?(ushort)0x3c00:(ushort)0x4a40;
-                        px[i]=px[i+1]=px[i+2]=value;px[i+3]=0x3c00;
+                        int i=4*(y*w+x); bool left=(x<w/2)^swap;
+                        px[i]=left?(ushort)0x3c00:(ushort)0x4a40;     // 1 and 12.5
+                        px[i+1]=left?(ushort)0x3400:(ushort)0x4600;   // 0.25 and 6
+                        px[i+2]=left?(ushort)0x3800:(ushort)0x4200;   // 0.5 and 3
+                        px[i+3]=0x3c00;
                     }
                     ctx.UpdateSubresource(px,color,0,w*8,0);
                 } else {
@@ -57,12 +60,18 @@ internal static class VerifyFsr
                     var result=measurements[f/4]=new float[2];
                     for(int k=0;k<2;k++) {
                         int offset=oh/2*map.RowPitch+(ow/4+k*ow/2)*(hdr?8:4);
-                        if(hdr) {
-                            int bits=(ushort)Marshal.ReadInt16(map.DataPointer,offset);
-                            result[k]=(float)(Math.Pow(2,(bits>>10)-15)*(1+(bits&1023)/1024.0));
-                        } else result[k]=Marshal.ReadByte(map.DataPointer,offset)/255f;
-                        float expected=((k==0)^swap)?(hdr?1:85/255f):(hdr?12.5f:221/255f);
-                        if(Math.Abs(result[k]-expected)>Math.Max(.02f,.05f*expected)) throw new Exception("Unexpected FSR pixel "+result[k]+" against "+expected+".");
+                        bool left=(k==0)^swap;
+                        float[] expectedHdr=left?new[]{1f,.25f,.5f}:new[]{12.5f,6f,3f};
+                        for(int ch=0;ch<3;++ch) {
+                            float expected=hdr?expectedHdr[ch]:left?85/255f:221/255f;
+                            float actual;
+                            if(hdr) {
+                                int bits=(ushort)Marshal.ReadInt16(map.DataPointer,offset+ch*2);
+                                actual=(float)(Math.Pow(2,(bits>>10)-15)*(1+(bits&1023)/1024.0));
+                            } else actual=Marshal.ReadByte(map.DataPointer,offset+ch)/255f;
+                            if(ch==0) result[k]=actual;
+                            if(Math.Abs(actual-expected)>Math.Max(.02f,.05f*expected)) throw new Exception("Unexpected FSR channel "+actual+" against "+expected+".");
+                        }
                     }
                 } finally {ctx.UnmapSubresource(staging,0);}
             }
@@ -74,6 +83,7 @@ internal static class VerifyFsr
             string backend=args.Length>0?args[0]:"d3d12"; string adapter;
             using(var device=backend=="vulkan"?VulkanEffects.Create(out adapter):SelectedEffectDevice.CreateD3D12()){
                 Check(device,false,backend);Check(device,true,backend);
+                CheckHud(device,backend);
             }
             return 0;
         }

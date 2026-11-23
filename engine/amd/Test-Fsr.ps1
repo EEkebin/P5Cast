@@ -18,7 +18,7 @@ try {
         }
     }
     $exe=Join-Path $stage 'VerifyFsr.exe'
-    & "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /optimize+ /platform:x64 @refs "/out:$exe" "$PSScriptRoot\..\D3D12Effects.cs" "$PSScriptRoot\..\VulkanEffects.cs" "$PSScriptRoot\FsrUpscaler.cs" "$PSScriptRoot\Verify.cs"
+    & "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /optimize+ /platform:x64 @refs "/out:$exe" "$PSScriptRoot\..\D3D12Effects.cs" "$PSScriptRoot\..\VulkanEffects.cs" "$PSScriptRoot\FsrUpscaler.cs" "$PSScriptRoot\Verify.cs" "$PSScriptRoot\VerifyHud.cs"
     if($LASTEXITCODE){throw 'AMD FSR GPU fixture did not compile.'}
     & $exe $Backend
     if($LASTEXITCODE){throw 'AMD FSR GPU output failed validation.'}

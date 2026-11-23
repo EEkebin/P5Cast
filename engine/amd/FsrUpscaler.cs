@@ -14,14 +14,14 @@ internal sealed class FsrUpscaler : IDisposable
     [DefaultDllImportSearchPaths(Search), DllImport(Library,ExactSpelling=true,CallingConvention=CallingConvention.Cdecl,CharSet=CharSet.Unicode)]
     static extern int P5FsrOpen(IntPtr device,string loader,int w,int h,int ow,int oh,int hdr,out IntPtr state,out IntPtr version);
     [DefaultDllImportSearchPaths(Search), DllImport(Library,ExactSpelling=true,CallingConvention=CallingConvention.Cdecl)]
-    static extern int P5FsrDispatch(IntPtr state,IntPtr context,IntPtr color,IntPtr motion,IntPtr depth,IntPtr output,float ms,int reset);
+    static extern int P5FsrDispatchHud(IntPtr state,IntPtr context,IntPtr color,IntPtr motion,IntPtr depth,IntPtr output,float ms,int reset,IntPtr composition);
     [DefaultDllImportSearchPaths(Search), DllImport(Library,ExactSpelling=true,CallingConvention=CallingConvention.Cdecl)]
     static extern void P5FsrClose(IntPtr state);
 
     [DefaultDllImportSearchPaths(Search), DllImport("P5Cast.FsrVk.dll",EntryPoint="P5FsrOpen",ExactSpelling=true,CallingConvention=CallingConvention.Cdecl,CharSet=CharSet.Unicode)]
     static extern int VkOpen(IntPtr device,string loader,int w,int h,int ow,int oh,int hdr,out IntPtr state,out IntPtr version);
-    [DefaultDllImportSearchPaths(Search), DllImport("P5Cast.FsrVk.dll",EntryPoint="P5FsrDispatch",ExactSpelling=true,CallingConvention=CallingConvention.Cdecl)]
-    static extern int VkDispatch(IntPtr state,IntPtr context,IntPtr color,IntPtr motion,IntPtr depth,IntPtr output,float ms,int reset);
+    [DefaultDllImportSearchPaths(Search), DllImport("P5Cast.FsrVk.dll",EntryPoint="P5FsrDispatchHud",ExactSpelling=true,CallingConvention=CallingConvention.Cdecl)]
+    static extern int VkDispatchHud(IntPtr state,IntPtr context,IntPtr color,IntPtr motion,IntPtr depth,IntPtr output,float ms,int reset,IntPtr composition);
     [DefaultDllImportSearchPaths(Search), DllImport("P5Cast.FsrVk.dll",EntryPoint="P5FsrClose",ExactSpelling=true,CallingConvention=CallingConvention.Cdecl)]
     static extern void VkClose(IntPtr state);
 
@@ -37,11 +37,12 @@ internal sealed class FsrUpscaler : IDisposable
         ActiveVersion=Marshal.PtrToStringAnsi(version);
     }
 
-    public void Evaluate(DeviceContext context,Texture2D color,Texture2D motion,Texture2D depth,Texture2D output,float frameMs,bool reset) {
+    public void Evaluate(DeviceContext context,Texture2D color,Texture2D motion,Texture2D depth,Texture2D output,float frameMs,bool reset,Texture2D composition=null) {
         if(state==IntPtr.Zero) throw new ObjectDisposedException("FsrUpscaler");
-        Check(vulkan ? VkDispatch(state,context.NativePointer,color.NativePointer,motion.NativePointer,depth.NativePointer,output.NativePointer,frameMs,reset?1:0)
-            : P5FsrDispatch(state,context.NativePointer,color.NativePointer,motion.NativePointer,depth.NativePointer,
-            output.NativePointer,frameMs,reset?1:0),"dispatch");
+        IntPtr hud=composition==null?IntPtr.Zero:composition.NativePointer;
+        Check(vulkan ? VkDispatchHud(state,context.NativePointer,color.NativePointer,motion.NativePointer,depth.NativePointer,output.NativePointer,frameMs,reset?1:0,hud)
+            : P5FsrDispatchHud(state,context.NativePointer,color.NativePointer,motion.NativePointer,depth.NativePointer,
+            output.NativePointer,frameMs,reset?1:0,hud),"dispatch");
     }
 
     static void Check(int result,string operation) {

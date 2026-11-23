@@ -13,7 +13,7 @@ using System.Windows.Forms;
 internal sealed class PlaybackControls : Form
 {
     internal static readonly string[] Modes={"original","sharp","fsr","rtxvideo","dlss","dlaa","fsr-temporal","dlss-nr"};
-    static readonly string[] Names={"Original","Sharpen","AMD FSR 1","RTX Video SR","DLSS","DLAA","AMD FSR Temporal","DLSS 5 NR"};
+    static readonly string[] Names=PictureLabels.Modes;
     static readonly Color Surface=Color.FromArgb(19,30,35), Idle=Color.FromArgb(31,45,51),
         Edge=Color.FromArgb(63,81,87), TextColor=Color.FromArgb(235,244,243),
         Muted=Color.FromArgb(174,193,195), Mint=Color.FromArgb(146,232,209);
@@ -159,6 +159,12 @@ internal sealed class PlaybackControls : Form
                 if(IsDisposed || !IsHandleCreated) return;
                 BeginInvoke((Action)delegate {
                     if(IsDisposed) return;
+                    object provider;
+                    if(values.TryGetValue("fsrVersion",out provider)) {
+                        modes[6].Text=PictureLabels.TemporalFsr(provider as string);
+                        modes[6].AccessibleName=modes[6].Text;
+                        tips.SetToolTip(modes[6],"AMD temporal upscaling · "+modes[6].Text);
+                    }
                     for(int i=3;i<modes.Length;i++) {
                         string mode=Modes[i]; object supported,reason;
                         if(values.TryGetValue(mode,out supported) && supported is bool && !(bool)supported) {

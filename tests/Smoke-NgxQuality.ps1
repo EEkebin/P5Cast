@@ -1,7 +1,8 @@
 [CmdletBinding()]
-param([string]$PlayerExe=(Join-Path (Split-Path $PSScriptRoot) 'engine\bin\CadrivectPlayer.exe'),
+param([string]$PlayerExe,
       [string]$Display,[switch]$MeasureOnly,[string]$OutputDirectory)
 $ErrorActionPreference='Stop'
+if(!$PlayerExe){$PlayerExe=Join-Path (Split-Path $PSScriptRoot) 'engine\bin\CadrivectPlayer.exe'}
 $PlayerExe=(Resolve-Path -LiteralPath $PlayerExe).Path
 $bin=Split-Path $PlayerExe
 $tmpRoot=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')

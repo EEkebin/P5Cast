@@ -127,17 +127,17 @@ internal static class OverlayProbe
                     var clock=Stopwatch.StartNew();
                     while(clock.ElapsedMilliseconds<8000 && !process.HasExited) {
                         playerHwnd=Find(desktop,process.Id,true); hud=Find(desktop,process.Id,false);
-                        if(playerHwnd!=IntPtr.Zero && hud!=IntPtr.Zero && Child(hud,"AMD FSR 1",false)!=IntPtr.Zero) break;
+                        if(playerHwnd!=IntPtr.Zero && hud!=IntPtr.Zero && Child(hud,"FSR 1 · Spatial",false)!=IntPtr.Zero) break;
                         Thread.Sleep(50);
                     }
                     Check(hud!=IntPtr.Zero && playerHwnd!=IntPtr.Zero,"Player or HUD failed to open.");
                     int msg=RegisterWindowMessage("Cadrivect.Player.Controls.0.3");
                     Check(SendMessage(playerHwnd,msg,new IntPtr(1),new IntPtr(3))==new IntPtr(1),"Dashboard settings were rejected.");
                     Thread.Sleep(350);
-                    Button(hud,"AMD FSR 1"); Button(hud,"2×"); Button(hud,"Pin stats");
+                    Button(hud,"FSR 1 · Spatial"); Button(hud,"2×"); Button(hud,"Pin stats");
                     Thread.Sleep(4100);
                     Check(Child(hud,"Audio queue  12.0 ms",true)!=IntPtr.Zero,"Audio-queue telemetry was not visible.");
-                    Check(Child(hud,"AMD FSR 1",true)!=IntPtr.Zero && Child(hud,"Unpin stats",false)!=IntPtr.Zero,"Pinned HUD selection failed.");
+                    Check(Child(hud,"FSR 1 · Spatial",true)!=IntPtr.Zero && Child(hud,"Unpin stats",false)!=IntPtr.Zero,"Pinned HUD selection failed.");
                     SavePanel(hud,Path.Combine(output,"playback-controls.png"));
                     var json=new JavaScriptSerializer(); string live=Path.ChangeExtension(report,".live.json");
                     var snapshot=json.Deserialize<Dictionary<string,object>>(File.ReadAllText(live));

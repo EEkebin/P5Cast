@@ -68,16 +68,23 @@ P5_EXPORT int P5FsrOpen(ID3D11Device* device,const wchar_t* loader,int w,int h,i
     *out=up.release();
     return 0;
 }
-P5_EXPORT int P5FsrDispatch(Upscaler* up,ID3D11DeviceContext* ctx,ID3D11Resource* color,ID3D11Resource* motion,
-                             ID3D11Resource* depth,ID3D11Resource* output,float milliseconds,int reset) {
-    if (!up || !ctx || !color || !motion || !depth || !output) return -1;
-    ID3D11Resource* resources[]={color,motion,depth,output};
+template<size_t N>
+static int Dispatch(Upscaler* up,ID3D11DeviceContext* ctx,ID3D11Resource* (&resources)[N],float milliseconds,int reset) {
+    if (!up || !ctx) return -1;
+    for (auto texture : resources) if (!texture) return -1;
     ffxReturnCode_t result=0;
     auto record=[&](void* list,const FfxApiResource* r) {
         ffxDispatchDescUpscale frame{};
         frame.header.type=FFX_API_DISPATCH_DESC_TYPE_UPSCALE;
         frame.commandList=list;
-        frame.color=r[0]; frame.motionVectors=r[1]; frame.depth=r[2]; frame.output=r[3];
+        frame.color=r[0]; frame.motionVectors=r[1]; frame.depth=r[2]; frame.output=r[N-1];
+        if (N==5) {
+            // The HUD is already composited into the stream. Its camera and
+            // motion can differ from the game behind it. Relax both history
+            // accumulation and locks where the video-derived mask indicates ink.
+            frame.transparencyAndComposition=r[3];
+            frame.reactive=r[3];
+        }
         frame.motionVectorScale={1,1};
         frame.renderSize=up->input;
         frame.upscaleSize=up->output;
@@ -94,12 +101,24 @@ P5_EXPORT int P5FsrDispatch(Upscaler* up,ID3D11DeviceContext* ctx,ID3D11Resource
     if (!up->gpu.WithResources(resources,record)) return -4;
 #else
     auto hr=up->gpu.WithResources(ctx,resources,[&](ID3D12GraphicsCommandList* list,ComPtr<ID3D12Resource>* tex) {
-        FfxApiResource descriptions[]={ffxApiGetResourceDX12(tex[0].Get()),ffxApiGetResourceDX12(tex[1].Get()),
-            ffxApiGetResourceDX12(tex[2].Get()),ffxApiGetResourceDX12(tex[3].Get(),FFX_API_RESOURCE_STATE_UNORDERED_ACCESS)};
+        FfxApiResource descriptions[N]{};
+        for(size_t i=0;i<N;i++) descriptions[i]=ffxApiGetResourceDX12(tex[i].Get(),
+            i==N-1 ? FFX_API_RESOURCE_STATE_UNORDERED_ACCESS : FFX_API_RESOURCE_STATE_COMPUTE_READ);
         record(list,descriptions);
     });
     if (FAILED(hr)) return static_cast<int>(hr);
 #endif
     return static_cast<int>(result);
+}
+P5_EXPORT int P5FsrDispatch(Upscaler* up,ID3D11DeviceContext* ctx,ID3D11Resource* color,ID3D11Resource* motion,
+                             ID3D11Resource* depth,ID3D11Resource* output,float milliseconds,int reset) {
+    ID3D11Resource* resources[]={color,motion,depth,output};
+    return Dispatch(up,ctx,resources,milliseconds,reset);
+}
+P5_EXPORT int P5FsrDispatchHud(Upscaler* up,ID3D11DeviceContext* ctx,ID3D11Resource* color,ID3D11Resource* motion,
+                               ID3D11Resource* depth,ID3D11Resource* output,float milliseconds,int reset,ID3D11Resource* composition) {
+    if (!composition) return P5FsrDispatch(up,ctx,color,motion,depth,output,milliseconds,reset);
+    ID3D11Resource* resources[]={color,motion,depth,composition,output};
+    return Dispatch(up,ctx,resources,milliseconds,reset);
 }
 P5_EXPORT void P5FsrClose(Upscaler* up) { delete up; }

@@ -69,7 +69,12 @@ try {
     $meter.SetCapabilities($caps)
     $null=$busyMethod.Invoke($meter,@($false))
     Require ($neuralPanel.Visibility -eq 'Collapsed') 'Completed setup removes the download action'
+    $pictureButtons=$meter.GetType().GetField('modes','Instance,NonPublic').GetValue($meter)
+    $caps['fsr-temporal']=$true; $caps['fsrVersion']='4.1.2'
+    $meter.SetCapabilities($caps)
+    Require ($pictureButtons[2].Content -like 'FSR 1*Spatial' -and $pictureButtons[6].Content -like 'FSR 4.1.2*Temporal') 'Spatial FSR is separate from the detected temporal provider'
     $meter.SetCapabilities($null)
+    Require ($pictureButtons[6].Content -eq 'FSR Temporal') 'Switching backends clears a stale temporal version'
     $dial=$meter.GetType().GetField('dial','Instance,NonPublic').GetValue($meter)
     $sample=[Collections.Generic.Dictionary[string,object]]::new()
     $sample['captured']=120; $sample['sourceFps']=90; $sample['submittedFps']=120; $sample['generatedFps']=60
@@ -94,6 +99,32 @@ try {
     }
     $image=RenderDial
     Require ((ArcPixel $image 0.125) -eq '8FE6D0' -and (ArcPixel $image 0.375) -eq 'EABC8E' -and (ArcPixel $image 0.75) -eq '2B3D43') 'Source and generated segments must share the same arc radius'
+    $scale=$meter.GetType().GetField('dialScale','Instance,NonPublic').GetValue($meter)
+    $scaleInput=$meter.GetType().GetField('dialScaleInput','Instance,NonPublic').GetValue($meter)
+    Require ($scale.Minimum -eq 120 -and $scale.Maximum -eq 1000 -and $scale.Value -eq 240 -and $scaleInput.Text -eq '240') 'An existing profile without a dial preference starts at 240 FPS'
+    $scaleInput.Text='1000'
+    $highScale=RenderDial
+    Require ($scale.Value -eq 1000 -and (ArcPixel $highScale 0.03) -eq '8FE6D0' -and (ArcPixel $highScale 0.09) -eq 'EABC8E' -and (ArcPixel $highScale 0.3) -eq '2B3D43') 'Typed maximum rescales the same measured data immediately'
+    $scale.Value=120
+    $sample['submittedFps']=400;$sample['generatedFps']=100;$sample['targetPresentedFps']=480
+    $meter.Update($sample)
+    $full=RenderDial
+    Require ($scaleInput.Text -eq '120' -and (ArcPixel $full 0.60) -eq '8FE6D0' -and (ArcPixel $full 0.90) -eq 'EABC8E' -and
+        [Windows.Automation.AutomationProperties]::GetHelpText($dial) -match 'Output 400 FPS\. Source 300 FPS\. Generated 100 FPS\. Target 480 FPS\. Dial maximum 120 FPS') 'Saturated dial preserves the measured 3:1 proportions and reports actual output/target'
+    $hubY=$dial.ActualHeight-10
+    $radius=[Math]::Min($dial.ActualWidth/2-18,$hubY-11)
+    $marker=[byte[]]::new(4)
+    $targetPixelCount=0
+    foreach($offset in 8..12){foreach($row in -1..2) {
+        $full.CopyPixels([Windows.Int32Rect]::new([int]($dial.ActualWidth/2+$radius-$offset),[int]$hubY+$row,1,1),$marker,4,0)
+        if(('{0:X2}{1:X2}{2:X2}' -f $marker[2],$marker[1],$marker[0]) -eq 'E8F0F1'){$targetPixelCount++}
+    }}
+    Require ($targetPixelCount -ge 2) 'Above-scale target stays at the rightmost marker position'
+    $scaleInput.Text='241'
+    Require ($scale.Value -eq 241) 'The dial accepts any whole-number maximum in range'
+    $scale.Value=240; $sample['submittedFps']=120; $sample['generatedFps']=60
+    $null=$sample.Remove('targetPresentedFps')
+    $meter.Update($sample)
     $null=$show.Invoke($dash,@('Theme preview',$false))
     (Widget ColorTheme).SelectedItem='Daylight'
     Require ($window.Background.Color.ToString() -eq '#FFF1F4F8' -and (Widget VideoHost).Background.Color.ToString() -eq '#FF000000') 'Daylight changes window chrome and preserves black video'
@@ -116,6 +147,7 @@ try {
     Require ((Widget ThemeStatus).Text -like '*#8FE6D0*' -and (Widget Indicator).Fill.Color.ToString() -eq '#FF02BAD1') 'An invalid color displays a repair message without partially switching'
     Set-Content -LiteralPath $themeFile -Value '{"base":"ember","Source":"#00EE88"}'
     Click ReloadTheme
+    $scale.Value=355
     $null=$type.GetMethod('SaveSettings',[Reflection.BindingFlags]'Instance,NonPublic').Invoke($dash,@())
     $preferences=Get-Content (Join-Path $tmp 'LumaRelay\dashboard.json') -Raw|ConvertFrom-Json
     Require ($preferences.theme -eq 'custom') 'Custom selection persists with dashboard preferences'
@@ -126,6 +158,9 @@ try {
         return $testWindow
     }
     $themeWindow=ReopenTheme
+    $restoredFpsMeter=$themeWindow.FindName('MeterHost').Child
+    Require ($preferences.fpsDialMaximum -eq 355 -and $restoredFpsMeter.GetType().GetField('dialScale','Instance,NonPublic').GetValue($restoredFpsMeter).Value -eq 355) 'Dial maximum survives closing and reopening the app'
+    $scale.Value=240
     Require ($themeWindow.FindName('ColorTheme').SelectedItem -eq 'Custom JSON' -and $themeWindow.Background.Color.ToString() -eq '#FF211A1B') 'Reopening loads the saved custom file independently'
     Set-Content -LiteralPath $themeFile -Value '{"Accent":'
     $themeWindow=ReopenTheme

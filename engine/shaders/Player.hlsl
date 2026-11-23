@@ -124,18 +124,22 @@ bool stationaryEdge(float2 uv,float3 now,float3 before) {
     }
     return edge>0.08 && delta<0.012;
 }
-// Opposite flanks distinguish narrow ink from a single long silhouette.
-float inkContrast(float center,float2 flank) {
-    float2 d=center-flank;
-    return max(min(d.x,d.y),min(-d.x,-d.y));
+// A thin ink stroke is a local extremum with matching background on both
+// sides. Measure each color independently: equal-luminance colored ink can
+// vanish in a luma difference, and HDR scRGB can have negative components.
+float strokeAxis(float3 center,float3 left,float3 right) {
+    float3 scale=max(1.0,max(abs(center),max(abs(left),abs(right))));
+    float3 a=(center-left)/scale, b=(center-right)/scale;
+    float3 contrast=max(min(a,b),min(-a,-b));
+    float3 similar=1.0-smoothstep(0.08,0.30,abs(a-b));
+    float3 ink=smoothstep(0.08,0.24,contrast)*similar;
+    return max(ink.r,max(ink.g,ink.b));
 }
-float strokeContrast(float2 uv,float center) {
-    float2 d=2.0/sourceSize;
-    float2 horizontal=float2(luma(image.SampleLevel(linearClamp,uv-float2(d.x,0),0).rgb),
-                             luma(image.SampleLevel(linearClamp,uv+float2(d.x,0),0).rgb));
-    float2 vertical=float2(luma(image.SampleLevel(linearClamp,uv-float2(0,d.y),0).rgb),
-                           luma(image.SampleLevel(linearClamp,uv+float2(0,d.y),0).rgb));
-    return max(inkContrast(center,horizontal),inkContrast(center,vertical));
+float strokeConfidence(Texture2D<float4> picture,float2 uv,float3 center) {
+    float2 dx=float2(2.0/sourceSize.x,0),dy=float2(0,2.0/sourceSize.y);
+    float horizontal=strokeAxis(center,picture.SampleLevel(linearClamp,uv-dx,0).rgb,picture.SampleLevel(linearClamp,uv+dx,0).rgb);
+    float vertical=strokeAxis(center,picture.SampleLevel(linearClamp,uv-dy,0).rgb,picture.SampleLevel(linearClamp,uv+dy,0).rgb);
+    return max(horizontal,vertical);
 }
 struct NgxGuidance { float2 motion : SV_Target0; float ink : SV_Target1; };
 NgxGuidance NgxVectors(Vertex v) {
@@ -145,16 +149,11 @@ NgxGuidance NgxVectors(Vertex v) {
     guide.motion=phase>0 ? -flow.SampleLevel(linearClamp,v.uv,0).xy : 0;
     if(any(abs(guide.motion)>0.5) && stationaryEdge(v.uv,now,before)) guide.motion=0;
 
-    float hi=max(now.r,max(now.g,now.b)),lo=min(now.r,min(now.g,now.b));
-    float3 delta=abs(now-before);
-    bool stable=phase==0 || max(delta.r,max(delta.g,delta.b))<0.012*max(1.0,hi);
-    // Test the ink's neutrality only; colored backgrounds and antialiased fringes
-    // retain their own source RGB. Confidence is independent of output resolution.
-    guide.ink=0;
-    if(stable && hi-lo<0.04+0.12*hi) {
-        float contrast=strokeContrast(v.uv,luma(now))/max(1.0,hi);
-        guide.ink=smoothstep(0.16,0.35,contrast);
-    }
+    guide.ink=strokeConfidence(image,v.uv,now);
+    // When text scrolls, the previous coverage can leave a colored afterimage
+    // on the newly exposed background. Include those vacated stroke centers.
+    if(phase>0 && any(abs(now-before)>0.02*max(1.0,max(abs(now),abs(before)))))
+        guide.ink=max(guide.ink,strokeConfidence(previous,v.uv,before));
     return guide;
 }
 float max4(float4 values) {return max(max(values.x,values.y),max(values.z,values.w));}

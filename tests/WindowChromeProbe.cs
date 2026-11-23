@@ -449,7 +449,7 @@ internal static partial class WindowChromeProbe
                                 await Until(()=>!Equals(dlss.ToolTip,"Checking GPU support."),labels[i]+" capability probe did not finish.",45000);
                                 var nr=(RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"DLSS 5 NR"));
                                 Require(nr!=null && !nr.IsEnabled,"Neural rendering must stay disabled on an HDR stream.");
-                                var fsr=(RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"AMD FSR Temporal"));
+                                var fsr=(RadioButton)FindVisual(picture,"RadioButton",e=>AutomationProperties.GetAutomationId(e)=="Picture_fsr-temporal");
                                 var amdFrames=(RadioButton)FindVisual(picture,"RadioButton",e=>AutomationProperties.GetAutomationId(e)=="AmdFrameGeneration");
                                 Func<Dictionary<string,object>> sample=()=>new System.Web.Script.Serialization.JavaScriptSerializer()
                                     .Deserialize<Dictionary<string,object>>((string)snapshot.Invoke(null,null));
@@ -457,6 +457,7 @@ internal static partial class WindowChromeProbe
                                     fsr.IsChecked=true;
                                     await Until(()=>Convert.ToInt32(sample()["fsrEvaluations"])>0 &&
                                         !string.IsNullOrEmpty(Convert.ToString(sample()["fsrVersion"])),"AMD temporal upscaling did not process the demo.",12000);
+                                    await Until(()=>Equals(fsr.Content,"FSR "+sample()["fsrVersion"]+" · Temporal"),"Temporal FSR chip did not identify the running provider.");
                                     Note(labels[i]+" dashboard AMD FSR upscaling: "+sample()["fsrVersion"]);
                                 }
                                 if(amdFrames.IsEnabled) {

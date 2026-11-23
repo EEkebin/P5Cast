@@ -80,6 +80,7 @@
     </Style>
   </Window.Resources>
   <Grid Name="WindowFrame">
+    <Grid Name="InterfaceRoot">
     <Grid.RowDefinitions><RowDefinition Name="HeaderRow" Height="52"/><RowDefinition Height="*"/><RowDefinition Name="StatusRow" Height="Auto"/></Grid.RowDefinitions>
     <Border Name="HeaderBar" Background="#152026" BorderBrush="#2A393E" BorderThickness="0,0,0,1">
       <Border.Style><Style TargetType="Border">
@@ -130,16 +131,16 @@
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <Grid Name="Pages" Margin="14,10">
         <StackPanel Name="PlayPage">
-          <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-            <Button Name="ConsoleGroup" Content="Console"/><Button Name="StreamGroup" Content="Stream quality"/><Button Name="DisplayGroup" Content="Display"/><Button Name="DiscordGroup" Content="Discord"/>
-          </StackPanel>
+          <WrapPanel Margin="0,0,0,12">
+            <Button Name="ConsoleGroup" Content="Console"/><Button Name="StreamGroup" Content="Stream quality"/><Button Name="DisplayGroup" Content="Display"/><Button Name="InterfaceGroup" Content="Interface"/><Button Name="DiscordGroup" Content="Discord"/>
+          </WrapPanel>
           <Grid Name="ConsoleSettings">
             <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
             <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <StackPanel Margin="0,0,12,0"><TextBlock Text="Paired console" Margin="0,0,0,5"/><ComboBox Name="ConsolePicker"/></StackPanel>
             <StackPanel Grid.Column="1" Margin="0,0,12,0"><TextBlock Text="Console address" Margin="0,0,0,5"/><TextBox Name="ConsoleAddress" ToolTip="Local IP address or DNS name of your PS5"/></StackPanel>
             <Button Grid.Column="2" Name="AddConsole" Content="Add console" VerticalAlignment="Bottom"/>
-            <WrapPanel Grid.Row="1" Grid.ColumnSpan="3" Margin="0,8,0,0"><TextBlock Text="When I press Stop" VerticalAlignment="Center" Margin="0,0,9,0"/><ComboBox Name="StopBehavior" Width="182" ToolTip="Remembered separately for each paired console."/></WrapPanel>
+            <WrapPanel Grid.Row="1" Grid.ColumnSpan="3" Margin="0,8,0,0"><TextBlock Text="When I press Stop" VerticalAlignment="Center" Margin="0,0,9,0"/><ComboBox Name="StopBehavior" Width="182" ToolTip="Remembered separately for each paired console."/><Button Name="WakeConsole" Content="Wake PS5" Margin="12,0,0,0" ToolTip="Wake the paired PS5 from rest mode without starting a stream."/></WrapPanel>
           </Grid>
           <StackPanel Name="StreamSettings" Visibility="Collapsed">
             <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
@@ -156,6 +157,11 @@
             <StackPanel Grid.Column="3"><TextBlock Text="Video renderer" Margin="0,0,0,5"/><ComboBox Name="VideoRenderer" AutomationProperties.Name="Video renderer" ToolTip="Choose the graphics API that presents video in the player."/></StackPanel>
             <TextBlock Grid.Row="1" Grid.ColumnSpan="4" Name="RendererHint" Style="{StaticResource Detail}" Margin="0,6,0,0" TextWrapping="Wrap"/>
           </Grid>
+          <StackPanel Name="InterfaceSettings" Visibility="Collapsed">
+            <Label Content="Interface scale" Target="{Binding ElementName=InterfaceScale}" Foreground="#E8F0F1" Padding="0,0,0,5"/>
+            <ComboBox Name="InterfaceScale" HorizontalAlignment="Left" Width="182" AutomationProperties.Name="Interface scale" ToolTip="Auto adapts to the monitor. A percentage adjusts the interface relative to Windows display scaling."/>
+            <TextBlock Name="ScaleStatus" Style="{StaticResource Detail}" Margin="0,6,0,0"/>
+          </StackPanel>
           <StackPanel Name="DiscordSettings" Visibility="Collapsed">
             <WrapPanel>
               <CheckBox Name="SharePresence" Content="Show P5Cast activity on Discord" Foreground="#E8F0F1" Margin="0,0,18,7"/>
@@ -228,5 +234,6 @@
     <Border Grid.Row="2" Padding="30,11" Background="#121D22" BorderBrush="#293940" BorderThickness="0,1,0,0">
       <DockPanel><Ellipse Name="Indicator" DockPanel.Dock="Left" Width="8" Height="8" Fill="#91DECA" Margin="0,0,10,0"/><TextBlock Name="Status" Text="Ready" Foreground="#CAD8D9" FontSize="13" Height="21" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/></DockPanel>
     </Border>
+    </Grid>
   </Grid>
 </Window>

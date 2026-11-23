@@ -1,6 +1,6 @@
 # After Build.ps1. The WPF test only opens on a disposable, inactive Windows desktop.
 [CmdletBinding()]
-param([string]$AppRoot,[switch]$CheckRenderers,[switch]$CheckHdr)
+param([string]$AppRoot,[switch]$CheckRenderers,[switch]$CheckHdr,[switch]$CheckScaling)
 $ErrorActionPreference='Stop'
 if(!$AppRoot){$AppRoot=Split-Path $PSScriptRoot}
 $AppRoot=(Resolve-Path -LiteralPath $AppRoot).Path
@@ -17,10 +17,12 @@ try {
     & "$fx\csc.exe" /nologo /target:exe /optimize+ /platform:x64 /r:System.Xaml.dll "/win32manifest:$manifest" @refs "/out:$probe" "$PSScriptRoot\WindowChromeProbe.cs"
     if($LASTEXITCODE){throw 'Window chrome probe compilation failed.'}
     $prior=$env:P5CAST_PROBE_RENDERERS
+    $priorScale=$env:P5CAST_PROBE_SCALING
     try {
+        $env:P5CAST_PROBE_SCALING=if($CheckScaling){'1'}else{'0'}
         $env:P5CAST_PROBE_RENDERERS=if($CheckHdr){'hdr'}elseif($CheckRenderers){'1'}else{'0'}
         & $probe $AppRoot $stage $id
-    } finally { $env:P5CAST_PROBE_RENDERERS=$prior }
+    } finally { $env:P5CAST_PROBE_RENDERERS=$prior; $env:P5CAST_PROBE_SCALING=$priorScale }
     if($LASTEXITCODE){throw 'Window chrome regression failed.'}
 } finally {
     $target=[IO.Path]::GetFullPath($stage)

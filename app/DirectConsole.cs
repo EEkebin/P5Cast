@@ -174,7 +174,7 @@ namespace Cadrivect
             }
             return result;
         }
-        byte[] Keys()
+        internal byte[] Keys()
         {
             if(RegistryPath==null) return ProtectedData.Unprotect(Convert.FromBase64String(ProtectedKeys),null,DataProtectionScope.CurrentUser);
             using(var key=Registry.CurrentUser.OpenSubKey(RegistryPath)) {

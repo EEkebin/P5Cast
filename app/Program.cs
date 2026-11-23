@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.6.2.0")]
+[assembly: AssemblyVersion("0.7.0.0")]
 
 namespace Cadrivect
 {
@@ -37,6 +37,8 @@ namespace Cadrivect
         {
             try
             {
+                AppContext.SetSwitch("Switch.System.Windows.DoNotScaleForDpiChanges",false);
+                AppContext.SetSwitch("Switch.System.Windows.DoNotUsePresentationDpiCapabilityTier2OrGreater",false);
                 var app = new Application();
                 Window window;
                 using (var xaml = File.OpenRead(Path.Combine(Root, "app", "Main.xaml")))
@@ -81,7 +83,7 @@ namespace Cadrivect
         readonly int[] networkRates={0,35,65,100,150,250,500};
         readonly string[] audioLayouts={"","stereo","5.1-surround","7.1-surround"};
         readonly string[][] settingsGroups={
-            new[]{"Console","Stream","Display","Discord"},new[]{"Sharing","Devices"},new[]{"Network","Quality"}
+            new[]{"Console","Stream","Display","Interface","Discord"},new[]{"Sharing","Devices"},new[]{"Network","Quality"}
         };
         int sessionVideoKbps;
         bool refreshingDisplays;
@@ -121,6 +123,7 @@ namespace Cadrivect
             UI<Border>("MeterHost").Child=meter;
             var saved = ReadSettings();
             InitTitleBar(!Field(saved,"sidebarOpen").Equals("False",StringComparison.OrdinalIgnoreCase));
+            InitInterfaceScale(saved);
             InitDiscord(saved);
             var output=UI<ComboBox>("PlaybackDisplay");
             RefreshDisplays(Field(saved,"display"));
@@ -185,10 +188,12 @@ namespace Cadrivect
             UI<ComboBox>("ConsolePicker").SelectionChanged+=delegate {
                 var c=UI<ComboBox>("ConsolePicker").SelectedItem as DirectConsole;
                 RefreshStopChoice();
+                RefreshWakeButton();
                 string remembered;
                 if(c!=null) UI<TextBox>("ConsoleAddress").Text=consoleAddresses.TryGetValue(c.Mac,out remembered)?remembered:c.Address??"";
             };
-            ReloadConsoles(Field(saved,"consoleMac")); RefreshStopChoice();
+            ReloadConsoles(Field(saved,"consoleMac")); RefreshStopChoice(); RefreshWakeButton();
+            UI<Button>("WakeConsole").Click+=async delegate {await WakeWithoutPlaying();};
             UI<TextBox>("HostAddress").Text = Field(saved, "address");
             var addresses = BindAddresses().ToList();
             UI<ComboBox>("BindIP").ItemsSource = addresses;
@@ -299,6 +304,7 @@ namespace Cadrivect
         string SelectedIP() { return Convert.ToString(UI<ComboBox>("BindIP").SelectedItem); }
         IntPtr DisplayChanged(IntPtr hwnd,int message,IntPtr wp,IntPtr lp,ref bool handled)
         {
+            if(message==0x02E0 || message==0x007E) QueueInterfaceScale(); // WM_DPICHANGED / WM_DISPLAYCHANGE
             if(message==0x232 || message==0x7E) {
                 RefreshDisplays(DisplayTarget.DeviceForWindow(hwnd));
                 if(engine!=null) engine.InvalidateDisplay();
@@ -519,7 +525,7 @@ namespace Cadrivect
                 var settings = new { sidebarOpen=stats, discordPresence=UI<CheckBox>("SharePresence").IsChecked==true,
                     discordGame=UI<CheckBox>("ShareGame").IsChecked==true,discordProject=UI<CheckBox>("ShareProject").IsChecked==true,stopChoices=stopChoices,directMbps=DirectKbps()/1000, relayMbps=networkRates[UI<ComboBox>("NetworkBitrate").SelectedIndex],audioLayout=UI<ComboBox>("NetworkAudio").SelectedIndex,pictureDefaults=1, mode=mode, multiplier=factor-1,
                     consoleMac=console==null?"":console.Mac,consoleAddresses=consoleAddresses,directFps=UI<ComboBox>("DirectFps").SelectedIndex,
-                    display=SelectedDisplayName(), resolution=UI<ComboBox>("RenderResolution").SelectedIndex,hdr=preferredHdr,renderer=SelectedRenderer,
+                    display=SelectedDisplayName(), uiScale=PreferredScalePercent, resolution=UI<ComboBox>("RenderResolution").SelectedIndex,hdr=preferredHdr,renderer=SelectedRenderer,
                     maximized=(fullscreen?previousWindowState:window.WindowState)==WindowState.Maximized,
                     clientHdr=UI<CheckBox>("ClientHdr").IsChecked==true,hostDisplay=hostTarget==null ? "" : hostTarget.DeviceName,
                     address=UI<TextBox>("HostAddress").Text.Trim(), bind=SelectedIP(), source=source, page=page, quality=UI<ComboBox>("Quality").SelectedIndex };

@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -26,8 +27,12 @@ internal static class WindowChromeProbe
         public short Show,ReservedSize; public IntPtr ReservedBytes,StdIn,StdOut,StdErr;
     }
     [StructLayout(LayoutKind.Sequential)] struct ProcessInfo { public IntPtr Process,Thread; public uint Id,ThreadId; }
-    [StructLayout(LayoutKind.Sequential)] struct Bounds { public int Left,Top,Right,Bottom; public int Width { get {return Right-Left;} } }
-    [StructLayout(LayoutKind.Sequential)] struct Monitor { public int Size; public Bounds Full,Work; public uint Flags; }
+    [StructLayout(LayoutKind.Sequential)] struct Bounds { public int Left,Top,Right,Bottom; public int Width { get {return Right-Left;} } public int Height { get {return Bottom-Top;} } }
+    [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)] struct Monitor {
+        public int Size; public Bounds Full,Work; public uint Flags;
+        [MarshalAs(UnmanagedType.ByValTStr,SizeConst=32)] public string Device;
+    }
+    [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr window);
     [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr hwnd,uint flags);
     [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern bool GetMonitorInfo(IntPtr monitor,ref Monitor info);
     [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr window,uint attribute,out Bounds value,int size);
@@ -112,6 +117,123 @@ internal static class WindowChromeProbe
     static double Shift(Line line) { return Transforms(line).Children.OfType<TranslateTransform>().Single().Y; }
     static bool Near(double x,double y) { return Math.Abs(x-y)<0.25; }
     static IntPtr Video() { return ((HwndHost)Find<Border>("VideoHost").Child).Handle; }
+
+    static FrameworkElement FindVisual(DependencyObject parent,string typeName) {
+        for(int i=0;i<VisualTreeHelper.GetChildrenCount(parent);i++) {
+            var child=VisualTreeHelper.GetChild(parent,i);
+            if(child.GetType().Name==typeName) return (FrameworkElement)child;
+            var match=FindVisual(child,typeName);
+            if(match!=null) return match;
+        }
+        return null;
+    }
+    struct Sizes {
+        public int Header,Play,Dial;
+        public override string ToString() {return Header+"/"+Play+"/"+Dial+" px";}
+    }
+    static Sizes Measure() {
+        var dial=FindVisual(Find<Border>("MeterHost"),"FrameRateDial");
+        Require(dial!=null,"FPS gauge is missing.");
+        return new Sizes {Header=ScreenRect(Find<Border>("HeaderBar")).Height,
+            Play=ScreenRect(Find<Button>("OpenSource")).Width,Dial=ScreenRect(dial).Height};
+    }
+    static bool Scaled(Sizes actual,Sizes reference,double ratio) {
+        return Math.Abs(actual.Header-reference.Header*ratio)<=2.5 && Math.Abs(actual.Play-reference.Play*ratio)<=2.5 &&
+               Math.Abs(actual.Dial-reference.Dial*ratio)<=2.5;
+    }
+    static bool Contains(Bounds outer,Bounds inner) {
+        return outer.Left<=inner.Left+1 && outer.Top<=inner.Top+1 && outer.Right>=inner.Right-1 && outer.Bottom>=inner.Bottom-1;
+    }
+    static void CheckDashboardEdges() {
+        var monitor=Screen();
+        var close=Find<Button>("CloseWindow");
+        RequireButtonPixel(close,monitor.Work.Right-1,monitor.Work.Top);
+        Require(Contains(monitor.Work,ScreenRect(Find<Border>("HeaderBar"))),"Scaled header escaped the monitor work area.");
+        var dial=FindVisual(Find<Border>("MeterHost"),"FrameRateDial");
+        Require(Contains(ScreenRect(Find<Border>("MeterHost")),ScreenRect(dial)),"Scaled gauge is clipped.");
+        var videoRect=Rect(video);
+        Require(video==Video() && Fits(videoRect,ScreenRect(Find<Border>("VideoHost")),2) && videoRect.Width>0 && videoRect.Height>0,
+            "Native video surface does not match its scaled WPF allocation: "+Geometry(videoRect)+" / "+Geometry(ScreenRect(Find<Border>("VideoHost"))));
+    }
+    static async Task CheckScaling() {
+        Click("InterfaceGroup");
+        var scale=Find<ComboBox>("InterfaceScale"); var displays=Find<ComboBox>("PlaybackDisplay");
+        await Until(delegate{return scale.IsVisible;},"Interface controls did not open.");
+        Require(scale.SelectedIndex==0,"An existing profile with no scale setting should open in Auto.");
+        var original=displays.SelectedItem;
+        string originalDevice=Screen().Device;
+        var autoSizes=new Dictionary<string,Sizes>();
+        var api=AppDomain.CurrentDomain.GetAssemblies().Select(a=>a.GetType("Cadrivect.Engine.EmbeddedPlayback")).First(t=>t!=null);
+        var snapshot=api.GetMethod("Snapshot");
+        foreach(var item in displays.Items.Cast<object>().ToArray()) {
+            string device=(string)item.GetType().GetProperty("DeviceName").GetValue(item,null);
+            displays.SelectedItem=item;
+            await Until(delegate{return IsZoomed(hwnd) && Screen().Device==device;},"Display selector did not move the maximized player to "+device);
+            scale.SelectedItem="100%";
+            await Until(delegate{return scale.SelectedItem!=null && scale.SelectedItem.ToString()=="100%";},"Missing 100% scale.");
+            await Task.Delay(140); window.UpdateLayout();
+            var basis=Measure(); var monitor=Screen(); double dpi=GetDpiForWindow(hwnd)/96.0;
+            double density=Math.Min(Math.Max(monitor.Full.Width,monitor.Full.Height)/1920.0,Math.Min(monitor.Full.Width,monitor.Full.Height)/1080.0);
+            double fit=Math.Min(monitor.Work.Width/(880*dpi),monitor.Work.Height/(590*dpi));
+            double baselineFit=Math.Min(1,fit);
+            double autoRatio=Math.Min(fit,Math.Max(1,density/dpi))/baselineFit;
+            double manualRatio=Math.Min(1.25,fit)/baselineFit;
+            scale.SelectedIndex=0;
+            await Until(delegate{return Scaled(Measure(),basis,autoRatio);},"Auto scale did not size the header, playback control and FPS gauge for "+device+
+                        ". 100% "+basis+", Auto "+Measure()+", expected factor "+autoRatio);
+            CheckDashboardEdges();
+            autoSizes.Add(device,Measure());
+            Note(device+" "+monitor.Full.Width+"×"+monitor.Full.Height+" at "+(dpi*96)+" DPI: header / playback button / FPS gauge at 100% "+basis+"; Auto "+Measure()+".");
+            scale.SelectedItem="125%";
+            await Until(delegate{return Scaled(Measure(),basis,manualRatio);},"125% manual scale did not resize all three UI regions on "+device);
+            CheckDashboardEdges();
+            var header=Find<Border>("HeaderBar");
+            var full=Screen().Full;
+            Click("Fullscreen");
+            await Until(delegate{return !header.IsVisible && Fits(Rect(video),full,2);},"Scaled fullscreen failed to occupy "+device+" in physical pixels.");
+            SendMessage(video,0x203,IntPtr.Zero,IntPtr.Zero);
+            await Until(delegate{return IsZoomed(hwnd) && header.IsVisible && Scaled(Measure(),basis,manualRatio);},
+                        "Leaving fullscreen lost the manual scale on "+device);
+            Require(scale.SelectedItem.ToString()=="125%" && Find<TextBlock>("Status").Text=="Offline demo","Monitor or fullscreen change reset playback or scale.");
+        }
+        displays.SelectedItem=original;
+        await Until(delegate{return Screen().Device==originalDevice;},"Could not restore the initial display.");
+        Require(scale.SelectedItem.ToString()=="125%","Moving the player reset its manual scale.");
+        scale.SelectedIndex=0;
+        foreach(var item in displays.Items.Cast<object>().ToArray()) {
+            string device=(string)item.GetType().GetProperty("DeviceName").GetValue(item,null);
+            displays.SelectedItem=item;
+            await Until(delegate{return Screen().Device==device && Scaled(Measure(),autoSizes[device],1);},"Moving in Auto did not adapt the existing layout to "+device);
+            var before=(string)snapshot.Invoke(null,null);
+            await Until(delegate {
+                string now=(string)snapshot.Invoke(null,null);
+                return now!=before && now.Contains("\"sourceKind\":\"demo\"");
+            },"Live demo did not produce a new sample after moving to "+device);
+            CheckDashboardEdges();
+        }
+        displays.SelectedItem=original;
+        await Until(delegate{return Screen().Device==originalDevice && Scaled(Measure(),autoSizes[originalDevice],1);},"Auto did not restore the original display scale.");
+        Note("The playing demo adapted automatically when moved between monitors; telemetry and the video surface remained live.");
+        Click("MaximizeWindow");
+        await Until(delegate{return !IsZoomed(hwnd);},"Could not restore window for compact layout test.");
+        scale.SelectedItem="200%"; window.Width=window.MinWidth+10; window.Height=window.MinHeight+10;
+        await Task.Delay(120); window.UpdateLayout();
+        Require(scale.SelectedItem.ToString()=="200%" && Find<TextBlock>("ScaleStatus").Text.Contains("fitted"),
+                "The compact layout should communicate its effective scale and preserve the requested 200%.");
+        var content=ScreenRect((FrameworkElement)window.Content);
+        var buttons=new[]{"OpenSource","Fullscreen","CloseWindow","InterfaceGroup"};
+        foreach(var id in buttons) {
+            var button=Find<Button>(id); var bounds=ScreenRect(button);
+            Require(button.IsVisible && bounds.Width>0 && bounds.Height>0 && Contains(content,bounds),id+" escaped the compact window: "+Geometry(bounds));
+            RequireButtonPixel(button,(bounds.Left+bounds.Right)/2,(bounds.Top+bounds.Bottom)/2);
+        }
+        var source=ScreenRect(Find<ComboBox>("SourceChoice")); var fullscreen=ScreenRect(Find<Button>("Fullscreen"));
+        Require(source.Right<=fullscreen.Left+1,"The source picker overlaps fullscreen in the compact layout.");
+        Require(Rect(video).Width>=200 && Rect(video).Height>=100 && Video()==video,"The compact layout lost the playable video area.");
+        Note("The compact "+Geometry(content)+" window kept visible controls reachable at requested 200%; video "+Geometry(Rect(video))+".");
+        scale.SelectedItem="150%";
+        Require(scale.SelectedItem.ToString()=="150%","Could not save the manual scale for relaunch.");
+    }
 
     static async void CheckWindow()
     {
@@ -212,6 +334,7 @@ internal static class WindowChromeProbe
                 "Leaving fullscreen failed to restore the maximized window and its work area inset.");
             Require(Video()==video && provider.ToggleState==ToggleState.On,"Maximized fullscreen round trip lost sidebar or video surface.");
             Note("Fullscreen entered from maximized restored the exact work area and title bar.");
+            if(Environment.GetEnvironmentVariable("P5CAST_PROBE_SCALING")=="1") await CheckScaling();
             Click("OpenSource");
             await Until(delegate{return status.Text=="Disconnected";},"Offline demo did not disconnect.");
             string renderCheck=Environment.GetEnvironmentVariable("P5CAST_PROBE_RENDERERS");
@@ -264,7 +387,15 @@ internal static class WindowChromeProbe
         }
     }
 
-    static int OnPrivateDesktop(string root,string stage,string name)
+    static void CheckSavedScale() {
+        try {
+            window=Application.Current.MainWindow;
+            Require(window!=null && Find<ComboBox>("InterfaceScale").SelectedItem.ToString()=="150%","Manual scale did not survive a clean process relaunch.");
+            Note("A new dashboard process restored the saved 150% scale.");
+            completed=true; Click("CloseWindow");
+        } catch(Exception e) {failure=e; Application.Current.Shutdown(1);}
+    }
+    static int OnPrivateDesktop(string root,string stage,string name,bool reopen)
     {
         var desktopName=new StringBuilder(256); int needed;
         Require(GetUserObjectInformation(GetThreadDesktop(GetCurrentThreadId()),2,desktopName,512,out needed) && desktopName.ToString()==name,
@@ -273,22 +404,22 @@ internal static class WindowChromeProbe
         Environment.SetEnvironmentVariable("LOCALAPPDATA",local);
         string prefs=Path.Combine(local,"LumaRelay");
         Directory.CreateDirectory(prefs);
-        File.WriteAllText(Path.Combine(prefs,"dashboard.json"),"{\"discordPresence\":false,\"source\":\"Demo\",\"maximized\":false}");
+        if(!reopen) File.WriteAllText(Path.Combine(prefs,"dashboard.json"),"{\"discordPresence\":false,\"source\":\"Demo\",\"maximized\":false}");
         var production=Assembly.LoadFrom(Path.Combine(root,"P5Cast.exe"));
         production.GetType("Cadrivect.Program",true).GetField("Root",BindingFlags.Static|BindingFlags.NonPublic).SetValue(null,root);
-        Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle,(Action)CheckWindow);
+        Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle,reopen ? (Action)CheckSavedScale : CheckWindow);
         int code=(int)production.EntryPoint.Invoke(null,new object[]{new string[0]});
         if(failure!=null) throw failure;
         Require(completed && code==0,"The production window did not close normally.");
         return 0;
     }
-    static int Launch(string root,string stage,string name)
+    static int Launch(string root,string stage,string name,bool reopen)
     {
         var desktop=CreateDesktop(name,IntPtr.Zero,IntPtr.Zero,0,0xF01FF,IntPtr.Zero);
         if(desktop==IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
         try {
             string exe=Assembly.GetExecutingAssembly().Location;
-            var cmd=new StringBuilder("\""+exe+"\" \""+root+"\" \""+stage+"\" "+name+" --worker");
+            var cmd=new StringBuilder("\""+exe+"\" \""+root+"\" \""+stage+"\" "+name+(reopen ? " --reopen" : " --worker"));
             var si=new Startup {Size=Marshal.SizeOf(typeof(Startup)),Desktop="winsta0\\"+name};
             ProcessInfo pi;
             if(!CreateProcess(exe,cmd,IntPtr.Zero,IntPtr.Zero,false,0x08000000,IntPtr.Zero,root,ref si,out pi))
@@ -307,8 +438,10 @@ internal static class WindowChromeProbe
     [STAThread] static int Main(string[] args) {
         report=Path.Combine(args[1],"chrome.log");
         try {
-            if(args.Length==4) return OnPrivateDesktop(args[0],args[1],args[2]);
-            return Launch(args[0],args[1],args[2]);
+            if(args.Length==4) return OnPrivateDesktop(args[0],args[1],args[2],args[3]=="--reopen");
+            int result=Launch(args[0],args[1],args[2],false);
+            if(result==0 && Environment.GetEnvironmentVariable("P5CAST_PROBE_SCALING")=="1") result=Launch(args[0],args[1],args[2],true);
+            return result;
         } catch(Exception e) { Note(e.ToString()); return 1; }
         finally { if(args.Length==3 && File.Exists(report)) Console.Write(File.ReadAllText(report)); }
     }

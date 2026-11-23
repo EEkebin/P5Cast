@@ -35,7 +35,8 @@ namespace Cadrivect
             }
             fullscreen=!fullscreen; UI<Button>("Fullscreen").Content=fullscreen?"Windowed":"Fullscreen";
             UpdateFrameInsets();
-            UI<RowDefinition>("HeaderRow").Height=new GridLength(fullscreen?0:titleChrome.CaptionHeight);
+            QueueInterfaceScale();
+            UI<RowDefinition>("HeaderRow").Height=new GridLength(fullscreen?0:HeaderHeight);
             UI<Border>("HeaderBar").Visibility=fullscreen?Visibility.Collapsed:Visibility.Visible;
             UI<RowDefinition>("TransportRow").Height=new GridLength(fullscreen?0:52);
             UI<RowDefinition>("SettingsRow").Height=new GridLength(fullscreen?0:181);
@@ -59,6 +60,7 @@ namespace Cadrivect
             UI<ComboBox>("ConsolePicker").IsEnabled=canSelect;
             UI<TextBox>("ConsoleAddress").IsEnabled=canSelect;
             UI<Button>("AddConsole").IsEnabled=canSelect;
+            RefreshWakeButton();
             UI<ComboBox>("SourceChoice").IsEnabled=!preparing && !Active;
         }
         void RefreshRendererOutput()
@@ -98,6 +100,7 @@ namespace Cadrivect
         void StopPlayback()
         {
             stopRequested=true;
+            if(wakeCheck!=null) wakeCheck.Cancel();
             stopping=preparing || Active;
             if(network!=null) {var owned=network; network=null; owned.Dispose(); surface.Clear(); stopping=false; Show("Disconnected");}
             if(rendering!=null) engine.Stop();
@@ -125,7 +128,10 @@ namespace Cadrivect
                     var console=UI<ComboBox>("ConsolePicker").SelectedItem as DirectConsole;
                     if(console==null) {OpenPair(); Show("Add your PS5 to play."); return;}
                     string address=DirectConsole.Host(UI<TextBox>("ConsoleAddress").Text);
-                    consoleAddresses[console.Mac]=address; SaveSettings(); Show("Preparing your PS5 connection…");
+                    consoleAddresses[console.Mac]=address; SaveSettings();
+                    address=await EnsureConsoleReady(console,address,false);
+                    if(closing || stopping) {Show("Disconnected"); return;}
+                    Show("Preparing your PS5 connection…");
                     string runtime=Field(await Script("sources/Prepare-Decoder.ps1"),"runtime");
                     if(closing || stopping) {Show("Disconnected"); return;}
                     if(string.IsNullOrEmpty(runtime)) throw new IOException("The video decoder runtime is unavailable.");
@@ -153,7 +159,8 @@ namespace Cadrivect
                 if(!stopRequested && code!=0 && failure.Length==0) failure=engine.Error();
                 if(!stopRequested && !firstFrame && failure.Length==0) failure="The stream ended before its first picture. Check that the console is awake, then reconnect.";
                 Show(failure.Length>0?failure:"Disconnected",failure.Length>0);
-            } catch(Exception e) {Show(e.GetBaseException().Message,true);}
+            } catch(OperationCanceledException) {Show("Disconnected");}
+            catch(Exception e) {Show(e.GetBaseException().Message,true);}
             finally {EndPlayback();}
         }
         async void EndPlayback()

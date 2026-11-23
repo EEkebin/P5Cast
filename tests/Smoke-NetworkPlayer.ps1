@@ -15,7 +15,7 @@ try {
     }
     $fx=Join-Path $env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319'
     $exe=Join-Path $qa 'NetworkFixture.exe'
-    & "$fx\csc.exe" /nologo /platform:x64 /target:exe "/out:$exe" "/reference:$fx\WPF\WindowsBase.dll" (Join-Path $workspace 'app\NetworkPlayer.cs') (Join-Path $PSScriptRoot 'NetworkPlayerFixture.cs')
+    & "$fx\csc.exe" /nologo /platform:x64 /target:exe "/win32manifest:$workspace\app\app.manifest" "/out:$exe" "/reference:$fx\WPF\WindowsBase.dll" (Join-Path $workspace 'app\NetworkPlayer.cs') (Join-Path $PSScriptRoot 'NetworkPlayerFixture.cs')
     if($LASTEXITCODE -ne 0){throw 'Network surface fixture did not compile.'}
     & $exe
     if($LASTEXITCODE -ne 0){throw 'Network surface fixture failed.'}

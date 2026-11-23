@@ -91,13 +91,13 @@ internal static class EmbeddedProbe
         Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background,(Action)delegate {frame.Continue=false;});
         Dispatcher.PushFrame(frame); Thread.Sleep(4);
     }
-    static void SendFixture(string name,byte[][] packets,ManualResetEvent pause,ManualResetEvent end)
+    static void SendFixture(string name,byte[][] packets,ManualResetEvent pause,ManualResetEvent end,int codec=1)
     {
         try {
             using(var pipe=new NamedPipeClientStream(".",name,PipeDirection.Out)) {
                 pipe.Connect(10000);
                 using(var writer=new BinaryWriter(pipe)) {
-                    writer.Write(0x32564443); writer.Write(1); WriteAudio(writer,192750,48000,2);
+                    writer.Write(0x32564443); writer.Write(codec); WriteAudio(writer,192750,48000,2);
                     bool unavailable=false;
                     int frame=0; while(!end.WaitOne(33)) {
                         if(pause.WaitOne(0)) {
@@ -108,7 +108,7 @@ internal static class EmbeddedProbe
                     }
                 }
             }
-        } catch(IOException) { }
+        } catch(IOException) { } catch(TimeoutException) { }
     }
     static void WriteAudio(BinaryWriter writer,int bitrate,int rate,int channels) {
         writer.Write(0); writer.Write(17000); writer.Write(0); writer.Write(4100); writer.Write(20000);
@@ -122,7 +122,8 @@ internal static class EmbeddedProbe
         string active=renderer=="auto" ? "d3d11" : renderer;
         Check((string)report["renderer"]==active && (string)report["processingRenderer"]=="d3d11",
               "The selected presentation API was not used.");
-        if(active!="d3d11") Check(!(bool)report["hdrEnabled"],"The SDR presenter reported HDR output.");
+        Check((bool)report["hdrEnabled"]==(bool)report["presenterHdr10"],"HDR processing and presenter color space disagree.");
+        if(active=="opengl") Check(!(bool)report["hdrEnabled"],"The SDR presenter reported HDR output.");
     }
     static int CheckCapture(Type api,string report,string renderer) {
         var clock=Stopwatch.StartNew(); int result=-1; var serializer=new JavaScriptSerializer();
@@ -162,10 +163,96 @@ internal static class EmbeddedProbe
         } catch(Exception ex) { Console.Error.WriteLine(ex); return 1; }
         finally { api.GetMethod("Stop").Invoke(null,null); window.Close(); host.Dispose(); }
     }
+    static void MoveToDisplay(Window window,Forms.Screen screen)
+    {
+        var hwnd=new WindowInteropHelper(window).Handle;
+        Check(SetWindowPos(hwnd,IntPtr.Zero,screen.WorkingArea.Left+80,screen.WorkingArea.Top+80,760,410,0x14),
+              "Could not move test surface to "+screen.DeviceName);
+    }
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr window,IntPtr after,int x,int y,int w,int h,uint flags);
+
+    static int CheckDirectHdr(Type api,string[] args,string displayName)
+    {
+        var serializer=new JavaScriptSerializer();
+        Forms.Screen hdrScreen=Array.Find(Forms.Screen.AllScreens,x=>x.DeviceName.Equals(displayName,StringComparison.OrdinalIgnoreCase));
+        Check(hdrScreen!=null,"HDR test display is missing: "+displayName);
+        string renderer=args[5];
+        var end=new ManualResetEvent(false); var pause=new ManualResetEvent(false);
+        string pipe="P5CastHdr"+Guid.NewGuid().ToString("N");
+        var host=new VideoHost(); var window=new Window {Title="P5Cast HDR10 test",Width=760,Height=410,Content=host,ShowActivated=false};
+        Thread worker=null; int result=-1; var clock=Stopwatch.StartNew();
+        try {
+            window.Show(); MoveToDisplay(window,hdrScreen); window.UpdateLayout(); Pump();
+            string surface=host.Handle.ToInt64().ToString(CultureInfo.InvariantCulture);
+            worker=Start(api,new[]{"--surface",surface,"--direct-pipe",pipe,"--direct-runtime",args[1],
+                "--renderer",renderer,"--hdr","hdr10","--verify-output","--report",args[4]},delegate(int value){ result=value; });
+            byte[][] frames={File.ReadAllBytes(args[2])};
+            new Thread(delegate(){SendFixture(pipe,frames,pause,end,3);}) {IsBackground=true}.Start();
+            int lastPresented=0;
+            Action<Forms.Screen,string,bool> verify=delegate(Forms.Screen screen,string mode,bool hdr) {
+                clock.Restart();
+                while(worker.IsAlive && clock.ElapsedMilliseconds<7000) {
+                    Pump();
+                    var data=serializer.Deserialize<Dictionary<string,object>>((string)api.GetMethod("Snapshot").Invoke(null,null));
+                    if(!data.ContainsKey("presented") || (string)data["display"]!=screen.DeviceName || (string)data["hdrMode"]!=mode ||
+                       (bool)data["hdrEnabled"]!=hdr || Convert.ToInt32(data["presented"])<lastPresented+10) continue;
+                    CheckRenderer(data,renderer);
+                    Check((string)data["codec"]=="HEVC HDR" && (string)data["presentationColorSpace"]==(hdr ? "BT.2020 PQ":"sRGB") &&
+                          (string)data["presenterHdrFormat"]==(hdr ? "RGB10A2_UNORM":null),"Wrong swap chain or codec: "+serializer.Serialize(data));
+                    lastPresented=Convert.ToInt32(data["presented"]);
+                    Console.WriteLine(renderer+" on "+screen.DeviceName+" presented "+data["codec"]+" via "+data["presentationColorSpace"]+" "+data["presenterHdrFormat"]);
+                    return;
+                }
+                throw new Exception("Expected "+mode+" (HDR "+hdr+") on "+screen.DeviceName+". "+api.GetProperty("Error").GetValue(null,null)+" "+api.GetMethod("Snapshot").Invoke(null,null));
+            };
+            verify(hdrScreen,"hdr10",true);
+            window.Width+=37; window.UpdateLayout();
+            api.GetMethod("ConfigureOutput").Invoke(null,new object[]{null,"off"});
+            verify(hdrScreen,"off",false);
+            api.GetMethod("ConfigureOutput").Invoke(null,new object[]{null,"hdr10"});
+            verify(hdrScreen,"hdr10",true);
+
+            // Moving an explicitly HDR session to an SDR monitor should keep it
+            // playing and restore PQ when its video surface returns to the HDR monitor.
+            var displayType=api.Assembly.GetType("DisplayTarget",true);
+            var displays=(Array)displayType.GetMethod("Enumerate").Invoke(null,null);
+            foreach(var display in displays) {
+                if((bool)displayType.GetProperty("AdvancedColorEnabled").GetValue(display,null)) continue;
+                string name=(string)displayType.GetProperty("DeviceName").GetValue(display,null);
+                var sdr=Array.Find(Forms.Screen.AllScreens,x=>x.DeviceName==name && x.DeviceName!=hdrScreen.DeviceName);
+                if(sdr==null) continue;
+                MoveToDisplay(window,sdr); verify(sdr,"hdr10",false);
+                api.GetMethod("ConfigureOutput").Invoke(null,new object[]{null,"hdr10"});
+                verify(sdr,"hdr10",false);
+                var rejected=serializer.Deserialize<Dictionary<string,object>>((string)api.GetMethod("Snapshot").Invoke(null,null));
+                Check(((string)rejected["effectNotice"]).Contains("active Windows HDR display"),"The explicit HDR10 request on SDR was not rejected.");
+                MoveToDisplay(window,hdrScreen); verify(hdrScreen,"hdr10",true);
+                break;
+            }
+            api.GetMethod("Stop").Invoke(null,null);
+            var stop=Stopwatch.StartNew(); while(worker.IsAlive && stop.ElapsedMilliseconds<3500) Pump();
+            Check(!worker.IsAlive && result==0,"Engine did not stop after HDR test.");
+            var final=serializer.Deserialize<Dictionary<string,object>>(File.ReadAllText(args[4]));
+            Check((bool)final["presenterHdr10"] && Convert.ToInt32(final["sampledFrames"])>0 &&
+                  Convert.ToInt32(final["sampleMaxLuma"])>Convert.ToInt32(final["sampleMinLuma"]),"No varying PQ fixture pixels.");
+            return 0;
+        } catch(Exception ex) { Console.Error.WriteLine(ex); return 1; }
+        finally {
+            api.GetMethod("Stop").Invoke(null,null); end.Set();
+            var stop=Stopwatch.StartNew(); while(worker!=null && worker.IsAlive && stop.ElapsedMilliseconds<3500) Pump();
+            window.Close(); host.Dispose();
+        }
+    }
+
     [STAThread] static int Main(string[] args)
     {
         string id="CadrivectEmbedded"+Guid.NewGuid().ToString("N");
-        if(args.Length==6) return RunOnDesktop(args,id);
+        bool hdrProbe=args.Length>=7 && args[6].StartsWith("--hdr-display=",StringComparison.Ordinal);
+        if(args.Length==6 || (args.Length==7 && hdrProbe)) return RunOnDesktop(args,id);
+        if(args.Length==8 && hdrProbe && args[7]=="--inactive-desktop") {
+            var hdrApi=Assembly.LoadFrom(Path.GetFullPath(args[0])).GetType("Cadrivect.Engine.EmbeddedPlayback",true);
+            return CheckDirectHdr(hdrApi,args,args[6].Substring("--hdr-display=".Length));
+        }
         if(args.Length!=7 || (args[6]!="--inactive-desktop" && args[6]!="--offscreen-capture")) return 2;
         string renderer=args[5];
         IntPtr desktop=GetThreadDesktop(GetCurrentThreadId());

@@ -68,8 +68,8 @@ namespace Cadrivect
             color.SelectedIndex=sdr?1:preferredHdr;
             color.IsEnabled=!sdr;
             UI<TextBlock>("RendererHint").Text=sdr
-                ? "SDR output. Windows processes effects in Direct3D 11. Stop playback to change renderer."
-                : "Direct3D 11 supports HDR output. Stop playback to change renderer.";
+                ? "OpenGL uses SDR on Windows. Choose Direct3D or Vulkan for HDR10."
+                : "Auto color uses HDR10 when the playback display and driver support it.";
         }
         void UpdateOutput()
         {

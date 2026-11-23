@@ -349,7 +349,7 @@ internal static class Player
                                         renderer.Captured,renderer.Presented,renderer.Generated,(renderer.Captured-snapshotInput)*perSecond,
                                         (renderer.Presented-snapshotPresented)*perSecond,(renderer.Generated-snapshotGenerated)*perSecond)
                                         +",\"mode\":"+JsonString(mode)+",\"multiplier\":"+multiplier+",\"effectivePictureMode\":"+JsonString(renderer.EffectivePictureMode)
-                                        +",\"effectNotice\":"+JsonString(settingsNotice ?? renderer.EffectNotice)+",\"compare\":"+(compare ? "true":"false")
+                                        +",\"effectNotice\":"+JsonString(settingsNotice ?? (string.IsNullOrEmpty(renderer.EffectNotice) ? renderer.OutputNotice : renderer.EffectNotice))+",\"compare\":"+(compare ? "true":"false")
                                         +",\"sampleId\":"+(++sampleId)+",\"elapsedMs\":"+Number(now)+",\"display\":"+JsonString(renderer.DisplayName)
                                         +",\"hdrEnabled\":"+(renderer.HdrEnabled ? "true":"false")+",\"outputWidth\":"+renderer.OutputSize.Width+",\"outputHeight\":"+renderer.OutputSize.Height
                                         +",\"resolution\":"+JsonString(resolution)+",\"hdrMode\":"+JsonString(hdr)
@@ -486,7 +486,12 @@ internal static class Player
     {
         Size input=renderer.InputSize;
         var audio=direct==null ? null:direct.Audio;
-        return ",\"renderer\":"+JsonString(renderer.Backend)+",\"processingRenderer\":\"d3d11\""+",\"inputWidth\":"+input.Width+",\"inputHeight\":"+input.Height+",\"targetFps\":"+Number(targetFps==0 ? -1:targetFps)
+        return ",\"presenterHdr10\":"+(renderer.PresenterHdr10 ? "true":"false")
+               +",\"displayBitsPerColor\":"+Number(renderer.DisplayBitsPerColor>0 ? renderer.DisplayBitsPerColor : -1)
+               +",\"presentationColorSpace\":"+JsonString(renderer.PresenterHdr10 ? "BT.2020 PQ":"sRGB")
+               +",\"presenterHdrFormat\":"+(renderer.PresenterHdr10 ? "\"RGB10A2_UNORM\"":"null")
+               +",\"outputNotice\":"+JsonString(renderer.OutputNotice)
+               +",\"renderer\":"+JsonString(renderer.Backend)+",\"processingRenderer\":\"d3d11\""+",\"inputWidth\":"+input.Width+",\"inputHeight\":"+input.Height+",\"targetFps\":"+Number(targetFps==0 ? -1:targetFps)
                +",\"targetPresentedFps\":"+Number(targetFps==0 ? -1:targetFps*factor)+",\"lastPcSubmitMs\":"+Number(age)
                +",\"sourceKind\":"+JsonString(demo ? "demo":direct==null ? "window":"direct")
                +",\"audioQueueMs\":"+Number(audio==null ? -1:audio.QueueMs)+",\"audioTargetMs\":"+Number(audio==null ? -1:audio.TargetMs)

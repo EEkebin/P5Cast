@@ -14,7 +14,7 @@ Direct loads the three hash-verified FFmpeg DLLs from its local decoder cache an
 
 ## Presentation
 
-Choose a renderer before starting a session with `--renderer auto`, `d3d11`, `d3d12`, `vulkan`, or `opengl`. Auto selects D3D11 on Windows. D3D12, Vulkan and OpenGL upload the finished BGRA8 image through SDL3 and present in a child of the same video surface. The extra GPU readback and upload can affect frame times at high resolutions. Windows color conversion, scaling and effects use D3D11 for all selections. If the requested API cannot initialize or present, playback reports the driver error.
+Choose a renderer before starting a session with `--renderer auto`, `d3d11`, `d3d12`, `vulkan`, or `opengl`. Auto selects D3D11 on Windows. D3D12, Vulkan and OpenGL upload the finished image through SDL3 and present in a child of the same video surface. SDR uses BGRA8. On HDR-capable D3D12 and Vulkan devices, the player outputs packed 10-bit PQ/BT.2020 values to a verified HDR10 swap chain. The extra GPU readback and upload can affect frame times at high resolutions. Windows color conversion, scaling and effects use D3D11 for all selections. If the requested API cannot initialize or present, playback reports the driver error.
 
 ## Processing
 
@@ -27,7 +27,7 @@ Choose a renderer before starting a session with `--renderer auto`, `d3d11`, `d3
 | `--mode dlss` or `dlaa` | Experimental NVIDIA NGX processing in SDR or floating-point HDR. The player estimates motion, uses a constant depth plane and supplies zero camera jitter. DLSS uses DLAA when the input already fills or exceeds the processing dimensions. |
 | `--multiplier 1`, `2`, `3`, `4` | 1 presents captured frames. Higher values request intermediate frames. Achieved rates depend on source cadence, rendering time and display refresh. |
 | `--resolution native`, `720`, `1080`, `1440`, `4k` | Caps the processing raster and preserves aspect ratio within the presentation viewport. |
-| `--hdr auto`, `off`, `hdr10` | Auto follows the Windows display HDR state on D3D11. RTX Video SR and the SDL3 presentation paths use SDR. Explicit HDR10 requires D3D11, an active HDR display and a swap chain supporting PQ/BT.2020. |
+| `--hdr auto`, `off`, `hdr10` | Auto follows the active Windows display. D3D12 and Vulkan use SDR when the driver cannot create an HDR10 swap chain. Explicit HDR10 requires D3D11, D3D12 or Vulkan with an active HDR display and supported PQ/BT.2020 output. OpenGL and RTX Video SR use SDR on Windows. |
 | `--display primary` or `--display \\.\DISPLAY2` | Selects a monitor in standalone mode. Embedded presentation follows the dashboard surface. |
 
 Interpolation uses NVIDIA Optical Flow or a GPU block matcher. Duplicate checks exclude repeated source pictures from temporal processing. A stationary-edge check protects text from nearby motion. The renderer resets history after live picture and multiplier changes. A rejected switch preserves the previous picture. A vendor evaluation failure can fall back to Original and supplies a reason to the dashboard. P5Cast’s interpolator supplies 2×–4×. Native NVIDIA DLSS Frame Generation is unavailable.
@@ -50,11 +50,15 @@ From the repository root on Windows x64, build the package inputs and exercise t
 .\engine\hdrtest\Verify.ps1
 ```
 
+To exercise a real HDR display with the HEVC Main 10 fixture, use `.\tests\Smoke-Embedded.ps1 -Renderer vulkan -HdrDisplay '\\.\DISPLAY2'`. Substitute the Windows device name of an HDR-enabled monitor. The test verifies the negotiated presentation format, live SDR/HDR switching and, when available, moving the same playing surface to an SDR monitor and back.
+
 The decoder test checks every YUV sample and the color metadata of H.264, HEVC and HEVC Main 10 fixtures. The embedded test submits packets to a normal WPF child surface. The HDR test validates PQ output, scaling, and one-pixel strokes. Add `-Nvidia` to the HDR test to check FP16 DLSS/DLAA output on compatible hardware.
 
 Use `CadrivectPlayer.exe --capabilities --report <path>` for a JSON adapter report. Its `presentationDrivers` list identifies the API drivers included in the build. Opening a session checks whether the current hardware and driver can present to the selected display. A positive DLSS, DLAA or RTX Video SR result requires an actual evaluation and a successful output check. The optical-flow check executes the hardware API. Run the probe in a separate process during live playback.
 
 For standalone diagnostics, use `CadrivectPlayer.exe --self-test --mode fsr --multiplier 3 --seconds 5 --report <path>` in an interactive Windows session. Replace `--self-test` with `--hwnd <handle>` or `--process RemotePlay` to use a restored source window. Adding `--verify-output` reads 576 interior samples periodically for a luminance range. Routine playback keeps diagnostic pixel readback off. Standalone player hotkeys should be tested with one standalone player running.
+
+On an HDR-enabled Windows monitor, run `.\engine\presentation\Build.ps1 -VerifyHdr` to check D3D12 and Vulkan. The probe compares packed 10-bit pixels after the presenter blits them into a matching readable target. It also submits the frame to the negotiated PQ swap chain.
 
 ## Dependencies
 

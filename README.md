@@ -21,7 +21,7 @@ The installer places the app in `%LOCALAPPDATA%\Programs\P5Cast` and adds **P5Ca
 
 Under **Play**, **Console** contains pairing, address and stop behavior. **Stream quality** sets the next Direct connection's target frame rate and requested video bitrate. **Display** controls the monitor, resolution, color output and video renderer. The sidebar keeps the FPS dial visible above collapsible **Picture** and **Stream diagnostics** sections.
 
-Choose **Play → Display → Video renderer** while playback is stopped, then start **Offline demo** or connect. **Auto** uses Direct3D 11 on Windows and supports HDR. **Direct3D 12**, **Vulkan**, and **OpenGL** present the finished SDR frames through the selected API. Windows still uses Direct3D 11 for capture and effects. The additional GPU readback and upload can increase latency, especially at high resolutions. Your renderer choice persists, and switching back to Direct3D 11 restores your color setting. The separate Moonlight network client manages its own graphics output.
+Choose **Play → Display → Video renderer** while playback is stopped, then start **Offline demo** or connect. **Auto** selects Direct3D 11 on Windows. **Direct3D 11**, **Direct3D 12**, and **Vulkan** support HDR10 when Windows HDR is active and the driver accepts a 10-bit PQ/BT.2020 surface on the selected display. **OpenGL** presents SDR. Windows still uses Direct3D 11 for capture and effects. The additional GPU readback and upload can increase latency, especially at high resolutions. Your renderer choice persists, and switching back from OpenGL restores your color setting. The separate Moonlight network client manages its own graphics output.
 
 Direct defaults to a **100 Mbps video request**, the top setting offered by the pinned chiaki-ng client. Choose a lower target for slower links. The PS5 varies its compressed output with the scene and connection. It also chooses the Opus audio bitrate. In **Stream diagnostics**, compare requested and received video rates and inspect received audio bitrate, sample rate, channels and queue duration. [Upstream PS5 bitrate settings](https://github.com/streetpea/chiaki-ng/blob/v1.10.1/gui/src/qml/SettingsDialog.qml#L1400-L1420)
 
@@ -47,7 +47,7 @@ The PS5 sends compressed video. Direct decodes those pixels once before enhancem
 
 NVIDIA choices appear enabled after the app runs a capability test on the actual Direct3D adapter. Optical-flow hardware supplies motion estimates where supported; other adapters use a GPU block matcher. P5Cast’s interpolation inserts frames between source pictures. Its 2×–4× multipliers are targets. Interpolation adds processing delay and can distort moving text or objects. Native NVIDIA DLSS Frame Generation is unavailable in this build. [NVIDIA DLSS SDK](https://github.com/NVIDIA/DLSS) · [NVIDIA RTX Video SDK](https://developer.nvidia.com/rtx-video-sdk)
 
-Choose a **Playback display**, a **Resolution** cap or **Native**, and **Color output**. **Auto** uses HDR10 when Windows HDR is active on the selected display, with SDR for RTX Video SR. Explicit **HDR10** requires an HDR-enabled display and a presentation surface that supports 10-bit PQ/BT.2020. Changing output settings during playback affects local presentation. Direct negotiates the console’s stream format when connecting; reconnect to request a different console format. Direct supports 10-bit HEVC HDR and maps HDR input to SDR for an SDR display. Sony capture uses floating-point scRGB for HDR. Follow Sony’s own Windows HDR setup for its client. [Sony HDR setup](https://remoteplay.dl.playstation.net/remoteplay/lang/en/1100001.html)
+Choose a **Playback display**, a **Resolution** cap or **Native**, and **Color output**. **Auto** follows the selected display and renderer. RTX Video SR uses SDR. Explicit **HDR10** requires an HDR-enabled display and a presentation surface that supports 10-bit PQ/BT.2020. Changing output settings during playback affects local presentation. Direct negotiates the console’s stream format when connecting; reconnect to request a different console format. Direct supports 10-bit HEVC HDR and maps HDR input to SDR for an SDR display. Sony capture uses floating-point scRGB for HDR. Follow Sony’s own Windows HDR setup for its client. [Sony HDR setup](https://remoteplay.dl.playstation.net/remoteplay/lang/en/1100001.html)
 
 ## Reading Stats
 
@@ -103,3 +103,5 @@ cmake -S engine/presentation -B /tmp/p5cast-presentation -DBUILD_TESTING=ON
 cmake --build /tmp/p5cast-presentation
 ctest --test-dir /tmp/p5cast-presentation --output-on-failure
 ```
+
+Add `-DP5CAST_TEST_HDR10=ON` to the configure command to exercise 10-bit PQ output on an HDR-enabled display. The HDR test uses Vulkan on Linux and Metal on macOS.

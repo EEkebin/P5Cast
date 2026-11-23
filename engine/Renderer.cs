@@ -42,7 +42,7 @@ internal sealed partial class Renderer : IDisposable
     public Device Device { get; private set; }
     readonly DeviceContext context;
     readonly SwapChain swap;
-    readonly Presentation presentation;
+    Presentation presentation;
     public string Backend { get; private set; }
     readonly Buffer constants;
     readonly ComputeShader changed;
@@ -74,7 +74,10 @@ internal sealed partial class Renderer : IDisposable
     public string EffectNotice { get; private set; }
     public Size OutputSize { get { return screenSize; } }
     public string OutputStatus { get { return outputInfo.Summary+" · "+(HdrEnabled ? "HDR10 output" : "SDR output"); } }
+    public bool PresenterHdr10 { get { return presentation!=null ? presentation.Hdr10 : outputInfo.Enabled; } }
+    public string OutputNotice { get; private set; }
     public string DisplayName { get { return outputInfo.DeviceName; } }
+    public int DisplayBitsPerColor { get { return outputInfo.BitsPerColor; } }
     public void InvalidateDisplay() { monitor=IntPtr.Zero; }
     bool motionReady,suppressNextPair;
     public int Captured { get; private set; }
@@ -105,7 +108,6 @@ internal sealed partial class Renderer : IDisposable
                 using(var factory=swap.GetParent<Factory>()) factory.MakeWindowAssociation(hwnd,WindowAssociationFlags.IgnoreAltEnter);
             } else {
                 Device=new Device(DriverType.Hardware,DeviceCreationFlags.BgraSupport);
-                presentation=new Presentation(hwnd,Backend,window);
             }
             context=Device.ImmediateContext;
             SampleMinLuma=255;
@@ -141,29 +143,71 @@ internal sealed partial class Renderer : IDisposable
         if(window==screenSize && target==monitor) return;
         // Moving an active session onto an SDR-only display keeps the stream running. Switch back
         // to PQ on return to an HDR display when HDR10 was explicitly selected.
-        bool next=target!=monitor && display!=null ? ChooseHdr(hdrMode=="hdr10" ? "auto" : hdrMode) : HdrEnabled;
-        ConfigureDisplay(window,next,display!=null);
+        bool displayChanged=target!=monitor;
+        string request=displayChanged && display!=null && hdrMode=="hdr10" ? "auto" : hdrMode;
+        bool next=displayChanged && display!=null ? ChooseHdr(request) : HdrEnabled;
+        ConfigureDisplay(window,next,display!=null,request=="auto",displayChanged);
         monitor=target;
         screenSize=window; SetViewport();
     }
-    void ConfigureDisplay(Size window,bool hdr,bool resize)
+    void ConfigureDisplay(Size window,bool hdr,bool resize,bool allowSdr,bool displayChanged)
     {
-        if(display!=null) { context.OutputMerger.ResetTargets(); display.Dispose(); display=null; }
-        if(backBuffer!=null) { backBuffer.Dispose(); backBuffer=null; }
-        if(presentation==null) {
+        if(swap!=null) {
+            if(display!=null) { context.OutputMerger.ResetTargets(); display.Dispose(); display=null; }
+            if(backBuffer!=null) { backBuffer.Dispose(); backBuffer=null; }
             if(resize) swap.ResizeBuffers(2,window.Width,window.Height,DisplayHdr.OutputFormat(hdr),SwapChainFlags.None);
             outputInfo=DisplayHdr.Configure(swap,hdr);
             backBuffer=Texture2D.FromSwapChain<Texture2D>(swap,0);
-        } else {
-            outputInfo=DisplayHdr.Probe(hwnd);
-            backBuffer=presentation.CreateTarget(Device,window);
-        }
-        display=new RenderTargetView(Device,backBuffer);
+            display=new RenderTargetView(Device,backBuffer);
+        } else hdr=ConfigurePortableDisplay(window,hdr,allowSdr,displayChanged);
         if(HdrEnabled!=hdr)
         {
             // WGC and DirectVideo will deliver the corresponding input format on the next frame.
             ReleaseSource(); srcSize=Size.Empty; ResetFrameHistory(); HdrEnabled=hdr;
         }
+    }
+    bool ConfigurePortableDisplay(Size window,bool hdr,bool allowSdr,bool displayChanged)
+    {
+        // Keep the currently displayed image and working swap chain until the new
+        // API surface, color space, processing texture and render view all exist.
+        var info=DisplayHdr.Probe(hwnd);
+        Presentation candidate=null;
+        Texture2D target=null;
+        RenderTargetView view=null;
+        string notice=OutputNotice;
+        try {
+            if(presentation==null || presentation.Hdr10!=hdr || displayChanged) {
+                notice=null;
+                try { candidate=new Presentation(hwnd,Backend,window,hdr); }
+                catch(InvalidOperationException error) {
+                    if(!allowSdr || !hdr) throw;
+                    hdr=false;
+                    notice="Using SDR on this display. "+error.Message;
+                    if(presentation==null || presentation.Hdr10 || displayChanged)
+                        candidate=new Presentation(hwnd,Backend,window,false);
+                }
+            }
+            var desc=new Texture2DDescription {
+                Width=window.Width,Height=window.Height,Format=DisplayHdr.OutputFormat(hdr),
+                MipLevels=1,ArraySize=1,SampleDescription=new SampleDescription(1,0),BindFlags=BindFlags.RenderTarget
+            };
+            target=new Texture2D(Device,desc);
+            view=new RenderTargetView(Device,target);
+        } catch {
+            if(view!=null) view.Dispose();
+            if(target!=null) target.Dispose();
+            if(candidate!=null) candidate.Dispose();
+            throw;
+        }
+        context.OutputMerger.ResetTargets();
+        if(display!=null) display.Dispose();
+        if(backBuffer!=null) backBuffer.Dispose();
+        if(candidate!=null) {
+            if(presentation!=null) presentation.Dispose();
+            presentation=candidate;
+        }
+        backBuffer=target; display=view; outputInfo=info; OutputNotice=notice;
+        return hdr;
     }
     public void SetOutput(Size limit,string hdr)
     {
@@ -173,13 +217,14 @@ internal sealed partial class Renderer : IDisposable
         if(next!=HdrEnabled)
         {
             bool old=HdrEnabled;
-            try { ConfigureDisplay(screenSize,next,true); }
+            try { ConfigureDisplay(screenSize,next,true,hdr=="auto",false); }
             catch(Exception error)
             {
-                ConfigureDisplay(screenSize,old,true);
+                if(swap!=null) ConfigureDisplay(screenSize,old,true,false,false);
                 throw new InvalidOperationException("Could not switch the display color mode. "+error.Message,error);
             }
         }
+        if(hdr=="off") OutputNotice=null;
         renderLimit=limit; hdrMode=hdr;
         Size before=outSize; SetViewport();
         if(outSize!=before) ResetFrameHistory();
@@ -187,8 +232,8 @@ internal sealed partial class Renderer : IDisposable
     bool ChooseHdr(string hdr)
     {
         if(hdr=="off") return false;
-        if(Backend!="d3d11") {
-            if(hdr=="hdr10") throw new InvalidOperationException("HDR10 output requires Direct3D 11. Choose Auto or SDR color output for "+Backend+".");
+        if(Backend!="d3d11" && Backend!="d3d12" && Backend!="vulkan") {
+            if(hdr=="hdr10") throw new InvalidOperationException(Backend+" presents SDR on Windows. Choose Direct3D 11, Direct3D 12 or Vulkan for HDR10.");
             return false;
         }
         if(pictureMode=="rtxvideo")
@@ -386,7 +431,7 @@ internal sealed partial class Renderer : IDisposable
         }
         int pixel=samplePixel ? ReadCenterPixel() : 0;
         if(presentation==null) swap.Present(0,PresentFlags.None);
-        else presentation.Present(context,backBuffer,screenSize);
+        else presentation.Present(Device,context,backBuffer,screenSize);
         Presented++;
         return pixel;
     }

@@ -8,7 +8,7 @@ using SharpDX.DXGI;
 using Device = SharpDX.Direct3D11.Device;
 
 // Windows processes frames on D3D11. The portable presenter owns the selected
-// API's graphics context and copies the final SDR image before this mapping ends.
+// API's graphics context and copies the final SDR or packed PQ image before this mapping ends.
 internal sealed class Presentation : IDisposable
 {
     const string Library="P5Cast.Presentation.dll";
@@ -19,7 +19,10 @@ internal sealed class Presentation : IDisposable
     static extern int p5_present_available(string driver);
     [DefaultDllImportSearchPaths(Search)]
     [DllImport(Library,CallingConvention=CallingConvention.Cdecl,ExactSpelling=true)]
-    static extern IntPtr p5_present_create(IntPtr parent,string driver,int width,int height,[Out] byte[] error,int errorLength);
+    static extern IntPtr p5_present_create_color(IntPtr parent,string driver,int width,int height,int hdr10,[Out] byte[] error,int errorLength);
+    [DefaultDllImportSearchPaths(Search)]
+    [DllImport(Library,CallingConvention=CallingConvention.Cdecl,ExactSpelling=true)]
+    static extern int p5_present_output_hdr10(IntPtr instance);
     [DefaultDllImportSearchPaths(Search)]
     [DllImport(Library,CallingConvention=CallingConvention.Cdecl,ExactSpelling=true)]
     static extern int p5_present_frame(IntPtr instance,IntPtr bgra,int pitch,int width,int height,
@@ -32,6 +35,8 @@ internal sealed class Presentation : IDisposable
     readonly string backend;
     IntPtr instance;
     Texture2D readback;
+    Size readbackSize;
+    public bool Hdr10 { get; private set; }
 
     public static string Resolve(string requested)
     {
@@ -55,13 +60,17 @@ internal sealed class Presentation : IDisposable
         return drivers;
     }
 
-    public Presentation(IntPtr hwnd,string key,Size size)
+    public Presentation(IntPtr hwnd,string key,Size size,bool hdr10)
     {
         backend=key;
         string driver=Driver(key);
         if(p5_present_available(driver)==0) throw new InvalidOperationException(key+" presentation is unavailable on this platform.");
-        instance=p5_present_create(hwnd,driver,size.Width,size.Height,error,error.Length);
+        instance=p5_present_create_color(hwnd,driver,size.Width,size.Height,hdr10 ? 1:0,error,error.Length);
         if(instance==IntPtr.Zero) throw Failure("initialization");
+        try {
+            Hdr10=p5_present_output_hdr10(instance)==1;
+            if(Hdr10!=hdr10) throw new InvalidOperationException(key+" did not create the requested presentation color space.");
+        } catch { Dispose(); throw; }
     }
 
     InvalidOperationException Failure(string action)
@@ -71,23 +80,15 @@ internal sealed class Presentation : IDisposable
         return new InvalidOperationException(backend+" presentation "+action+" failed. "+details);
     }
 
-    public Texture2D CreateTarget(Device device,Size size)
+    public void Present(Device device,DeviceContext context,Texture2D target,Size size)
     {
-        var desc=new Texture2DDescription {
-            Width=size.Width,Height=size.Height,Format=Format.B8G8R8A8_UNorm,ArraySize=1,MipLevels=1,
-            SampleDescription=new SampleDescription(1,0),BindFlags=BindFlags.RenderTarget
-        };
-        if(readback!=null) { readback.Dispose(); readback=null; }
-        var target=new Texture2D(device,desc);
-        try {
+        if(readback==null || readbackSize!=size) {
+            var desc=target.Description;
             desc.BindFlags=BindFlags.None; desc.Usage=ResourceUsage.Staging; desc.CpuAccessFlags=CpuAccessFlags.Read;
-            readback=new Texture2D(device,desc);
-            return target;
-        } catch { target.Dispose(); throw; }
-    }
-
-    public void Present(DeviceContext context,Texture2D target,Size size)
-    {
+            var next=new Texture2D(device,desc);
+            if(readback!=null) readback.Dispose();
+            readback=next; readbackSize=size;
+        }
         context.CopyResource(target,readback);
         var data=context.MapSubresource(readback,0,MapMode.Read,SharpDX.Direct3D11.MapFlags.None);
         try {

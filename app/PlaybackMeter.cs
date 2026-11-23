@@ -268,6 +268,7 @@ namespace Cadrivect
             hdr=false; lastSample=-1; pendingSettings=pendingCompare=DateTime.MinValue; dial.SetRates(double.NaN,double.NaN,double.NaN,double.NaN);
             sourceValue.Text=addedValue.Text="—"; targetValue.Text="Target —";
             foreach(var label in values.Values) label.Text="—";
+            values["format"].ToolTip=null;
             ShowRequested(directSelected);
             notice.Visibility=Visibility.Collapsed; RefreshAvailability();
         }
@@ -331,9 +332,13 @@ namespace Cadrivect
             string input=Dimensions(snapshot,"input"),output=Dimensions(snapshot,"output");
             values["size"].Text=input=="—" && output=="—" ? "—" : input+" → "+output;
             values["renderer"].Text=Dashboard.RendererName(Text(snapshot,"renderer"));
-            string codec=Text(snapshot,"codec"); bool? hdrFlag=Flag(snapshot,"hdrEnabled");
+            string codec=Text(snapshot,"codec"); bool? hdrFlag=Flag(snapshot,"presenterHdr10") ?? Flag(snapshot,"hdrEnabled");
             string color=hdrFlag.HasValue ? (hdrFlag.Value ? "HDR10":"SDR") : "";
             values["format"].Text=string.IsNullOrEmpty(codec) ? (color.Length==0 ? "—":color) : codec+(color.Length==0 ? "" : " · "+color);
+            string space=Text(snapshot,"presentationColorSpace");
+            double displayBits=Number(snapshot,"displayBitsPerColor");
+            values["format"].ToolTip=space==null ? null : "Player surface · "+(hdrFlag==true ? "10-bit " : "")+space+
+                (displayBits>0 ? "\nWindows display output · "+displayBits.ToString("0")+" bits per color" : "");
             values["bitrate"].Text=Metric(Number(snapshot,"bitrateMbps")," Mb/s","0.0");
             values["decode"].Text=Metric(Number(snapshot,"decodeMs")," ms","0.0");
             string kind=Text(snapshot,"sourceKind");

@@ -1,6 +1,6 @@
 # After Build.ps1. The WPF test only opens on a disposable, inactive Windows desktop.
 [CmdletBinding()]
-param([string]$AppRoot,[switch]$CheckRenderers)
+param([string]$AppRoot,[switch]$CheckRenderers,[switch]$CheckHdr)
 $ErrorActionPreference='Stop'
 if(!$AppRoot){$AppRoot=Split-Path $PSScriptRoot}
 $AppRoot=(Resolve-Path -LiteralPath $AppRoot).Path
@@ -18,7 +18,7 @@ try {
     if($LASTEXITCODE){throw 'Window chrome probe compilation failed.'}
     $prior=$env:P5CAST_PROBE_RENDERERS
     try {
-        $env:P5CAST_PROBE_RENDERERS=if($CheckRenderers){'1'}else{'0'}
+        $env:P5CAST_PROBE_RENDERERS=if($CheckHdr){'hdr'}elseif($CheckRenderers){'1'}else{'0'}
         & $probe $AppRoot $stage $id
     } finally { $env:P5CAST_PROBE_RENDERERS=$prior }
     if($LASTEXITCODE){throw 'Window chrome regression failed.'}

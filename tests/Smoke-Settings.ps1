@@ -37,15 +37,19 @@ try {
     (Widget SharePresence).IsChecked=$false; (Widget ShareProject).IsChecked=$false
     Require ((Widget VideoRenderer).SelectedItem -eq 'Auto') 'Existing preferences use Auto'
     (Widget HdrOutput).SelectedIndex=2
-    (Widget VideoRenderer).SelectedItem='Vulkan'
-    Require ((Widget HdrOutput).SelectedItem -eq 'SDR' -and !(Widget HdrOutput).IsEnabled) 'Vulkan requests SDR'
+    foreach($api in 'Direct3D 12','Vulkan'){
+        (Widget VideoRenderer).SelectedItem=$api
+        Require ((Widget HdrOutput).SelectedItem -eq 'HDR10' -and (Widget HdrOutput).IsEnabled) "$api allows explicit HDR10"
+    }
+    (Widget VideoRenderer).SelectedItem='OpenGL'
+    Require ((Widget HdrOutput).SelectedItem -eq 'SDR' -and !(Widget HdrOutput).IsEnabled) 'OpenGL requests SDR'
     Call SaveSettings
     $secondFile=[IO.File]::OpenRead((Join-Path $AppRoot 'app\Main.xaml'))
     try {$second=[Windows.Markup.XamlReader]::Load($secondFile)} finally {$secondFile.Dispose()}
     $null=[Activator]::CreateInstance($type,[Reflection.BindingFlags]'Instance,NonPublic',$null,@($second,$false),$null)
     Require (!$second.FindName('SharePresence').IsChecked -and !$second.FindName('ShareProject').IsChecked) 'Discord opt-outs survive reopening'
-    Require ($second.FindName('VideoRenderer').SelectedItem -eq 'Vulkan' -and !$second.FindName('HdrOutput').IsEnabled) 'Renderer choice survives reopening'
-    $second.FindName('VideoRenderer').SelectedItem='Direct3D 11'
+    Require ($second.FindName('VideoRenderer').SelectedItem -eq 'OpenGL' -and !$second.FindName('HdrOutput').IsEnabled) 'Renderer choice survives reopening'
+    $second.FindName('VideoRenderer').SelectedItem='Vulkan'
     Require ($second.FindName('HdrOutput').SelectedItem -eq 'HDR10' -and $second.FindName('HdrOutput').IsEnabled) 'Switching back restores HDR preference'
     State preparing $true; Call UpdateTransport
     Require (!(Widget VideoRenderer).IsEnabled) 'Connecting locks the renderer'

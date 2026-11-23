@@ -214,9 +214,18 @@ internal static class WindowChromeProbe
             Note("Fullscreen entered from maximized restored the exact work area and title bar.");
             Click("OpenSource");
             await Until(delegate{return status.Text=="Disconnected";},"Offline demo did not disconnect.");
-            if(Environment.GetEnvironmentVariable("P5CAST_PROBE_RENDERERS")=="1") {
+            string renderCheck=Environment.GetEnvironmentVariable("P5CAST_PROBE_RENDERERS");
+            if(renderCheck=="1" || renderCheck=="hdr") {
                 Click("DisplayGroup");
                 var choice=Find<ComboBox>("VideoRenderer");
+                var color=Find<ComboBox>("HdrOutput");
+                if(renderCheck=="hdr") {
+                    var displays=Find<ComboBox>("PlaybackDisplay");
+                    var hdrDisplay=displays.Items.Cast<object>().FirstOrDefault(d=>(bool)d.GetType().GetProperty("AdvancedColorEnabled").GetValue(d,null));
+                    Require(hdrDisplay!=null,"An HDR-enabled monitor is required for the explicit HDR10 check.");
+                    displays.SelectedItem=hdrDisplay;
+                    Note("HDR test display: "+hdrDisplay);
+                }
                 var api=AppDomain.CurrentDomain.GetAssemblies().Select(a=>a.GetType("Cadrivect.Engine.EmbeddedPlayback")).First(t=>t!=null);
                 var snapshot=api.GetMethod("Snapshot");
                 string[] keys={"d3d12","vulkan","opengl","d3d11"};
@@ -224,11 +233,25 @@ internal static class WindowChromeProbe
                 for(int i=0;i<keys.Length;++i) {
                     choice.SelectedItem=labels[i];
                     Require(choice.IsEnabled && choice.SelectedItem.ToString()==labels[i],"Renderer selection failed.");
+                    bool expectHdr=renderCheck=="hdr" && keys[i]!="opengl";
+                    if(expectHdr) color.SelectedItem="HDR10";
                     Click("OpenSource");
                     await Until(delegate{return status.Text=="Offline demo";},"Offline demo failed to present with "+labels[i]+".");
                     string frame=(string)snapshot.Invoke(null,null);
                     Require(frame.Contains("\"renderer\":\""+keys[i]+"\"") && !choice.IsEnabled && Video()==video,
                             "Selected renderer was not presenting on the embedded surface: "+frame);
+                    if(renderCheck=="hdr") {
+                        Require(frame.Contains("\"hdrEnabled\":"+(expectHdr?"true":"false")),"Unexpected output color mode: "+frame);
+                        if(expectHdr) {
+                            Require(frame.Contains("\"presenterHdr10\":true") && frame.Contains("\"presentationColorSpace\":\"BT.2020 PQ\"") &&
+                                frame.Contains("\"presenterHdrFormat\":\"RGB10A2_UNORM\""),"Missing negotiated HDR10 surface: "+frame);
+                            color.SelectedItem="SDR";
+                            await Until(delegate{return ((string)snapshot.Invoke(null,null)).Contains("\"hdrEnabled\":false");},"Live SDR switch failed.");
+                            color.SelectedItem="HDR10";
+                            await Until(delegate{return ((string)snapshot.Invoke(null,null)).Contains("\"hdrEnabled\":true");},"HDR10 did not resume.");
+                            Note(labels[i]+" presented HDR10 and switched to SDR and back during playback.");
+                        }
+                    }
                     Click("OpenSource");
                     await Until(delegate{return status.Text=="Disconnected" && choice.IsEnabled;},"Renderer did not release the surface.");
                     Note(labels[i]+" presented through the dashboard and released the same playback surface.");

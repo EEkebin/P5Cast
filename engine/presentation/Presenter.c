@@ -1,5 +1,6 @@
 #define P5CAST_PRESENTER_BUILD 1
 #include "Presenter.h"
+#include "HdrGpu.h"
 #include <SDL3/SDL.h>
 #include <limits.h>
 
@@ -9,6 +10,7 @@
 #endif
 
 typedef struct Presenter {
+    HdrGpu *hdr;
     SDL_Renderer *renderer;
     SDL_Texture *texture;
     int frame_width, frame_height;
@@ -49,12 +51,17 @@ static int fail(char *error, int length, const char *message)
 
 void *p5_present_create_sdl(SDL_Window *window, const char *driver, char *error, int error_length)
 {
+    return p5_present_create_sdl_color(window, driver, 0, error, error_length);
+}
+
+void *p5_present_create_sdl_color(SDL_Window *window, const char *driver, int hdr10, char *error, int error_length)
+{
     const char *name = driver_name(driver);
     if (!window || !name) {
         fail(error, error_length, "Expected a playback window and an explicit presentation backend.");
         return NULL;
     }
-    if (!p5_present_available(name)) {
+    if (!hdr10 && !p5_present_available(name)) {
         fail(error, error_length, "This SDL build does not include the requested presentation backend.");
         return NULL;
     }
@@ -62,6 +69,15 @@ void *p5_present_create_sdl(SDL_Window *window, const char *driver, char *error,
     if (!p) {
         fail(error, error_length, "Out of memory creating the presenter.");
         return NULL;
+    }
+    if (hdr10) {
+        p->hdr = hdr_gpu_create(window, name);
+        if (!p->hdr) {
+            fail(error, error_length, SDL_GetError());
+            SDL_free(p);
+            return NULL;
+        }
+        return p;
     }
     p->renderer = SDL_CreateRenderer(window, name);
     if (!p->renderer) {
@@ -120,6 +136,12 @@ static SDL_Window *wrap_child(HWND child, const char *name)
 void *p5_present_create(void *native_parent, const char *driver, int width, int height,
                         char *error, int error_length)
 {
+    return p5_present_create_color(native_parent, driver, width, height, 0, error, error_length);
+}
+
+void *p5_present_create_color(void *native_parent, const char *driver, int width, int height,
+                              int hdr10, char *error, int error_length)
+{
 #ifdef _WIN32
     const char *name = driver_name(driver);
     if (!IsWindow((HWND)native_parent) || width <= 0 || height <= 0 || !name) {
@@ -135,7 +157,7 @@ void *p5_present_create(void *native_parent, const char *driver, int width, int 
     Presenter *p = NULL;
     if (child) {
         wrapper = wrap_child(child, name);
-        if (wrapper) p = p5_present_create_sdl(wrapper, name, error, error_length);
+        if (wrapper) p = p5_present_create_sdl_color(wrapper, name, hdr10, error, error_length);
         else fail(error, error_length, SDL_GetError());
     } else {
         if (error && error_length > 0) SDL_snprintf(error, error_length, "Cannot create playback child (Win32 %lu).", GetLastError());
@@ -153,19 +175,25 @@ void *p5_present_create(void *native_parent, const char *driver, int width, int 
     ShowWindow(child, SW_SHOWNA);
     return p;
 #else
-    (void)native_parent; (void)driver; (void)width; (void)height;
-    fail(error, error_length, "Use p5_present_create_sdl with the platform playback window.");
+    (void)native_parent; (void)driver; (void)width; (void)height; (void)hdr10;
+    fail(error, error_length, "Use p5_present_create_sdl_color with the platform playback window.");
     return NULL;
 #endif
 }
 
-int p5_present_frame(void *instance, const void *bgra, int pitch, int width, int height,
+int p5_present_output_hdr10(void *instance)
+{
+    Presenter *p = instance;
+    return p && hdr_gpu_output_valid(p->hdr);
+}
+
+int p5_present_frame(void *instance, const void *pixels, int pitch, int width, int height,
                      int output_width, int output_height, char *error, int error_length)
 {
     Presenter *p = instance;
-    if (!p || !bgra || width <= 0 || height <= 0 || width > INT_MAX / 4 || pitch < width * 4 ||
+    if (!p || !pixels || width <= 0 || height <= 0 || width > INT_MAX / 4 || pitch < width * 4 ||
         output_width <= 0 || output_height <= 0) {
-        return fail(error, error_length, "Invalid BGRA frame, stride or output size.");
+        return fail(error, error_length, "Invalid video frame, stride or output size.");
     }
 #ifdef _WIN32
     if (p->child && (output_width != p->child_width || output_height != p->child_height)) {
@@ -177,6 +205,10 @@ int p5_present_frame(void *instance, const void *bgra, int pitch, int width, int
         p->child_height = output_height;
     }
 #endif
+    if (p->hdr) {
+        if (!hdr_gpu_frame(p->hdr, pixels, pitch, width, height)) return fail(error, error_length, SDL_GetError());
+        return 1;
+    }
     if (!p->texture || width != p->frame_width || height != p->frame_height) {
         SDL_Texture *texture = SDL_CreateTexture(p->renderer, SDL_PIXELFORMAT_BGRA32,
                                                  SDL_TEXTUREACCESS_STREAMING, width, height);
@@ -192,7 +224,7 @@ int p5_present_frame(void *instance, const void *bgra, int pitch, int width, int
         p->frame_width = width;
         p->frame_height = height;
     }
-    if (!SDL_UpdateTexture(p->texture, NULL, bgra, pitch) ||
+    if (!SDL_UpdateTexture(p->texture, NULL, pixels, pitch) ||
         !SDL_RenderClear(p->renderer) || !SDL_RenderTexture(p->renderer, p->texture, NULL, NULL) ||
         !SDL_RenderPresent(p->renderer)) {
         return fail(error, error_length, SDL_GetError());
@@ -204,8 +236,9 @@ void p5_present_destroy(void *instance)
 {
     Presenter *p = instance;
     if (!p) return;
-    SDL_DestroyTexture(p->texture);
-    SDL_DestroyRenderer(p->renderer);
+    hdr_gpu_destroy(p->hdr);
+    if (p->texture) SDL_DestroyTexture(p->texture);
+    if (p->renderer) SDL_DestroyRenderer(p->renderer);
 #ifdef _WIN32
     if (p->wrapper) {
         SDL_DestroyWindow(p->wrapper);

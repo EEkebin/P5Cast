@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.6.0.0")]
+[assembly: AssemblyVersion("0.6.1.0")]
 
 namespace Cadrivect
 {
@@ -75,7 +75,7 @@ namespace Cadrivect
         }
         int preferredHdr;
         string SelectedRenderer { get { return rendererIds[UI<ComboBox>("VideoRenderer").SelectedIndex]; } }
-        bool UsesSdrPresenter { get { return SelectedRenderer!="auto" && SelectedRenderer!="d3d11"; } }
+        bool UsesSdrPresenter { get { return SelectedRenderer=="opengl"; } }
         readonly string[] resolutionIds = { "native","720","1080","1440","4k" };
         readonly int[] directRates={2,5,15,30,50,75,100};
         readonly int[] networkRates={0,35,65,100,150,250,500};

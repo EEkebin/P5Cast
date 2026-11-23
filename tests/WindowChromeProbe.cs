@@ -284,7 +284,7 @@ internal static partial class WindowChromeProbe
                 "The compact layout should communicate its effective scale and preserve the requested 200%.");
         var content=ScreenRect((FrameworkElement)window.Content);
         string sectionNavigation=Find<ComboBox>("PlaySectionPicker").IsVisible?"PlaySectionPicker":"InterfaceGroup";
-        var controls=new[]{"OpenSource","OpenSetup","Fullscreen","CloseWindow",sectionNavigation};
+        var controls=new[]{"OpenSource","OpenVolume","OpenSetup","Fullscreen","CloseWindow",sectionNavigation};
         foreach(string id in controls) {
             var button=Find<Control>(id); var bounds=ScreenRect(button);
             Require(button.IsVisible && bounds.Width>0 && bounds.Height>0 && Contains(content,bounds),id+" escaped the compact window: "+Geometry(bounds));
@@ -352,7 +352,7 @@ internal static partial class WindowChromeProbe
             await Until(delegate{return !IsIconic(hwnd) && window.WindowState==WindowState.Normal;},"Native restore after minimize failed.");
             Note("Native maximize, restore and minimize passed.");
             Require(Find<ComboBox>("SourceChoice").SelectedItem.ToString()=="Offline demo","Refusing to start a network source.");
-            if(CheckTransportOption) await CheckCanceledStartup();
+            if(CheckTransportOption) {await CheckVolumeControls(); await CheckCanceledStartup();}
             if(CheckTransportOption) BeginDemoWithSpinner(); else Click("OpenSource");
             await Until(delegate{return status.Text=="Offline demo";},"The offline demo did not present its first frame.");
             if(CheckTransportOption) await CheckLiveTransport();
@@ -525,6 +525,7 @@ internal static partial class WindowChromeProbe
                 Require(Find<ComboBox>("InterfaceScale").SelectedItem.ToString()=="150%","Manual scale did not survive a clean process relaunch.");
                 Note("A new dashboard process restored the saved 150% scale.");
             }
+            if(CheckTransportOption) CheckSavedVolume();
             if(CheckDrawerOption) await CheckSavedDrawers();
             completed=true; Click("CloseWindow");
         } catch(Exception e) {failure=e; Application.Current.Shutdown(1);}
@@ -546,6 +547,7 @@ internal static partial class WindowChromeProbe
         else if(!reopen) File.WriteAllText(Path.Combine(prefs,"dashboard.json"),"{\"discordPresence\":false,\"source\":\"Demo\",\"maximized\":false}");
         var production=Assembly.LoadFrom(Path.Combine(root,"P5Cast.exe"));
         production.GetType("Cadrivect.Program",true).GetField("Root",BindingFlags.Static|BindingFlags.NonPublic).SetValue(null,root);
+        if(Environment.GetEnvironmentVariable("P5CAST_PROBE_STOP")=="1") return RunStopProbe(production,root);
         Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle,setup ? (Action)CheckSetupWindow : reopen ? (Action)CheckSavedScale : CheckWindow);
         int code=(int)production.EntryPoint.Invoke(null,new object[]{new string[0]});
         if(failure!=null) throw failure;
@@ -577,13 +579,14 @@ internal static partial class WindowChromeProbe
         } finally {CloseDesktop(desktop);}
     }
     [STAThread] static int Main(string[] args) {
+        if(args.Length==1 && args[0]=="--stop-holder") {System.Threading.Thread.Sleep(45000);return 0;}
         if(args.Length==2 && args[0]=="--register") return RegisterSetupFixture(args[1]);
         report=Path.Combine(args[1],"chrome.log");
         try {
             if(args.Length==4) return OnPrivateDesktop(args[0],args[1],args[2],args[3]=="--reopen");
             if(Environment.GetEnvironmentVariable("P5CAST_PROBE_SETUP")=="1") return LaunchSetupCases(args);
             int result=Launch(args[0],args[1],args[2],false);
-            if(result==0 && (CheckDrawerOption || Environment.GetEnvironmentVariable("P5CAST_PROBE_SCALING")=="1")) result=Launch(args[0],args[1],args[2],true);
+            if(result==0 && (CheckTransportOption || CheckDrawerOption || Environment.GetEnvironmentVariable("P5CAST_PROBE_SCALING")=="1")) result=Launch(args[0],args[1],args[2],true);
             return result;
         } catch(Exception e) { Note(e.ToString()); return 1; }
         finally { if(args.Length==3 && File.Exists(report)) Console.Write(File.ReadAllText(report)); }

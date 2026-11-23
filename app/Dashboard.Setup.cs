@@ -47,7 +47,7 @@ namespace Cadrivect
 
         void OpenSetup()
         {
-            if(SetupOpen || closing) return;
+            if(SetupOpen || StopPromptOpen || closing) return;
             if(busy || requestingRest) {Show("Finish the current action, then reopen Setup."); return;}
             if(fullscreen) ToggleFullscreen();
             var display=UI<ComboBox>("SetupDisplay");
@@ -67,16 +67,18 @@ namespace Cadrivect
             RefreshSetupConsoles(pendingSetupConsole ?? (console==null ? null : console.Mac));
             SetSetupPairForm(false);
             SetupDisplayInfo();
-            surface.EndPointerGesture();
-            UI<Border>("VideoHost").Visibility=Visibility.Hidden;
-            SetSetupBackgroundEnabled(false);
+            SetModalBackgroundEnabled(false);
             UI<Grid>("SetupOverlay").Visibility=Visibility.Visible;
             UI<Button>("SetupSkip").Content=setupVersion==0 ? "Skip setup" : "Cancel";
             SetSetupStep(0);
         }
 
-        void SetSetupBackgroundEnabled(bool enabled)
+        void SetModalBackgroundEnabled(bool enabled)
         {
+            if(!enabled) surface.EndPointerGesture();
+            // WPF cannot layer a visual over the embedded native playback child.
+            // Hide its HWND while the session and its layout remain active.
+            UI<Border>("VideoHost").Visibility=enabled?Visibility.Visible:Visibility.Hidden;
             foreach(string name in new[]{"Workspace","StatusFooter","PlayNav","HostNav","ClientNav","ShowStats"})
                 UI<FrameworkElement>(name).IsEnabled=enabled;
         }
@@ -246,8 +248,7 @@ namespace Cadrivect
             if(!SetupOpen || setupPairing) return;
             UI<Grid>("SetupOverlay").Visibility=Visibility.Collapsed;
             SetSetupPairForm(false);
-            SetSetupBackgroundEnabled(true);
-            UI<Border>("VideoHost").Visibility=Visibility.Visible;
+            SetModalBackgroundEnabled(true);
             if(remember) {setupVersion=1; SaveSettings();}
             UI<Button>("OpenSetup").Focus();
         }

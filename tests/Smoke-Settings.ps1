@@ -1,4 +1,4 @@
-﻿# Inspect the actual WPF panels without showing a window or starting a session.
+# Inspect the actual WPF panels without showing a window or starting a session.
 [CmdletBinding()]
 param([string]$AppRoot)
 $ErrorActionPreference='Stop'
@@ -94,6 +94,44 @@ try {
     }
     $image=RenderDial
     Require ((ArcPixel $image 0.125) -eq '8FE6D0' -and (ArcPixel $image 0.375) -eq 'EABC8E' -and (ArcPixel $image 0.75) -eq '2B3D43') 'Source and generated segments must share the same arc radius'
+    $null=$show.Invoke($dash,@('Theme preview',$false))
+    (Widget ColorTheme).SelectedItem='Daylight'
+    Require ($window.Background.Color.ToString() -eq '#FFF1F4F8' -and (Widget VideoHost).Background.Color.ToString() -eq '#FF000000') 'Daylight changes window chrome and preserves black video'
+    Require ((ArcPixel (RenderDial) 0.125) -eq '145E87' -and (ArcPixel (RenderDial) 0.375) -eq '864588') 'Changing themes repaints both FPS segments live'
+    (Widget ColorTheme).SelectedItem='Custom JSON'
+    $themeFile=Join-Path $tmp 'P5Cast\themes\custom.json'
+    Require ((Get-Content -LiteralPath $themeFile -Raw|ConvertFrom-Json).base -eq 'daylight') 'First edit starts from the displayed palette'
+    '{"base":"ember","Accent":"#02BAD1","Generated":"#CC2277","Source":"#00EE88","Scrim":"#ffffff"}' | Set-Content -LiteralPath $themeFile
+    Click ReloadTheme
+    Require ((Widget ThemeStatus).Text -like '*Unknown theme color*' -and (ArcPixel (RenderDial) 0.125) -eq '145E87') 'An unknown color keeps the complete last working theme'
+    '{"base":"ember","Accent":"#02BAD1","Generated":"#CC2277","Source":"#00EE88"}' | Set-Content -LiteralPath $themeFile
+    Click ReloadTheme
+    Require ((Widget Indicator).Fill.Color.ToString() -eq '#FF02BAD1' -and (Widget OpenSource).Background.Color.ToString() -eq '#FF02BAD1') 'Custom accent reaches status and play controls'
+    Require ((ArcPixel (RenderDial) 0.125) -eq '00EE88' -and (ArcPixel (RenderDial) 0.375) -eq 'CC2277') 'Custom dial colors reload in place'
+    Require ((Widget SetupOverlay).Background.Color.ToString() -eq '#EB211A1B' -and (Widget StopPanel).Background.Color.ToString() -eq '#EB211A1B') 'Wizard and stop modal use the current scrim'
+    Require ((Widget VolumeReadout).Foreground.Color.ToString() -eq '#FF02BAD1') 'Volume popover resolves window theme brushes'
+    $badTheme='{"Accent":"ultraviolet"}'
+    Set-Content -LiteralPath $themeFile -Value $badTheme
+    Click ReloadTheme
+    Require ((Widget ThemeStatus).Text -like '*#8FE6D0*' -and (Widget Indicator).Fill.Color.ToString() -eq '#FF02BAD1') 'An invalid color displays a repair message without partially switching'
+    Set-Content -LiteralPath $themeFile -Value '{"base":"ember","Source":"#00EE88"}'
+    Click ReloadTheme
+    $null=$type.GetMethod('SaveSettings',[Reflection.BindingFlags]'Instance,NonPublic').Invoke($dash,@())
+    $preferences=Get-Content (Join-Path $tmp 'LumaRelay\dashboard.json') -Raw|ConvertFrom-Json
+    Require ($preferences.theme -eq 'custom') 'Custom selection persists with dashboard preferences'
+    function ReopenTheme {
+        $inputXaml=[IO.File]::OpenRead((Join-Path $AppRoot 'app\Main.xaml'))
+        try {$testWindow=[Windows.Markup.XamlReader]::Load($inputXaml)}finally{$inputXaml.Dispose()}
+        $null=[Activator]::CreateInstance($type,[Reflection.BindingFlags]'Instance,NonPublic',$null,@($testWindow,$false),$null)
+        return $testWindow
+    }
+    $themeWindow=ReopenTheme
+    Require ($themeWindow.FindName('ColorTheme').SelectedItem -eq 'Custom JSON' -and $themeWindow.Background.Color.ToString() -eq '#FF211A1B') 'Reopening loads the saved custom file independently'
+    Set-Content -LiteralPath $themeFile -Value '{"Accent":'
+    $themeWindow=ReopenTheme
+    Require ($themeWindow.FindName('ColorTheme').SelectedItem -eq 'Custom JSON' -and $themeWindow.Background.Color.ToString() -eq '#FF10171C' -and
+        $themeWindow.FindName('ThemeStatus').Text -like '*custom.json*' -and (Get-Content -LiteralPath $themeFile) -ceq '{"Accent":') 'An invalid saved custom file remains editable and the app opens with a readable palette'
+    (Widget ColorTheme).SelectedItem='Mint'
     $sample['generatedFps']=0
     $meter.Update($sample)
     Require ((ArcPixel (RenderDial) 0.375) -eq '8FE6D0') 'Disabling generation must produce one source-colored segment'
@@ -179,7 +217,7 @@ try {
     Require (!(IsShown SettingsDrawer)) 'The settings drawer can be closed before stop'
 
     $null=(Call UserStop).GetAwaiter().GetResult()
-    Require ((IsShown StopPanel) -and (IsShown SettingsDrawer) -and (Widget ShowSettings).IsChecked -and (Widget RestOnStop).IsChecked -and !(Widget RememberStop).IsChecked) 'Stop reopens the drawer with rest selected and remember unchecked'
+    Require ((IsShown StopPanel) -and !(IsShown SettingsDrawer) -and !(Widget ShowSettings).IsChecked -and (Widget RestOnStop).IsChecked -and !(Widget RememberStop).IsChecked) 'Stop opens in its own overlay and preserves the closed drawer, with rest selected and remember unchecked'
     (Widget RestOnStop).IsChecked=$false
     Require ((TryClose) -and !(Widget RestOnStop).IsChecked -and (Widget ConfirmStop).Content -eq 'Disconnect and close') 'Close keeps an unconfirmed leave-awake choice'
     Click CancelStop
@@ -189,11 +227,11 @@ try {
     $null=(Call UserStop).GetAwaiter().GetResult()
     Require ((Widget ConfirmStop).Content -eq 'Stop session') 'Canceling close leaves subsequent Stop actions in the dashboard'
     (Widget RememberStop).IsChecked=$true; Click ConfirmStop
-    Require ((IsShown StopPanel) -and (Widget Status).Text -like 'Rest mode could not be confirmed*' -and (Widget StopBehavior).SelectedIndex -eq 0) 'Unacknowledged fixture rest stays cancellable'
+    Require ((IsShown StopPanel) -and (Widget StopMessage).Text -like 'Could not send the rest request*' -and (Widget Status).Text -eq (Widget StopMessage).Text -and (Widget RememberStop).IsChecked -and (Widget StopBehavior).SelectedIndex -eq 0) 'Unacknowledged rest keeps its choices and exposes the error inside the modal'
     (Widget RestOnStop).IsChecked=$false; (Widget RememberStop).IsChecked=$true; Click ConfirmStop
     Require ((Widget StopBehavior).SelectedIndex -eq 1 -and !(IsShown StopPanel)) 'Remember leave-on choice'
     (Widget StopBehavior).SelectedIndex=2
-    Require ((TryClose) -and (IsShown StopPanel) -and (Widget Status).Text -like 'Rest mode could not be confirmed*' -and (Widget ConfirmStop).Content -eq 'Disconnect and close') 'Closing with saved rest sends the request and allows recovery on failure'
+    Require ((TryClose) -and (IsShown StopPanel) -and (Widget Status).Text -like 'Could not send the rest request*' -and (Widget ConfirmStop).Content -eq 'Disconnect and close') 'Closing with saved rest sends the request and allows recovery on failure'
     Click CancelStop
     $saved=Get-Content (Join-Path $tmp 'LumaRelay\dashboard.json') -Raw | ConvertFrom-Json
     Require ($saved.stopChoices.($row.Mac) -eq 'rest' -and $saved.directMbps -eq 100) 'Saved console preference and quality'

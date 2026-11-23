@@ -20,6 +20,7 @@ typedef struct {
 typedef struct {
     SRWLOCK lock;
     SDL_AudioDeviceID device;
+    const volatile LONG *volume_percent;
     uint32_t rate, channels, underruns;
     uint64_t compressed_bytes, window_start_ms;
     ChiakiAudioSink decoder_sink;
@@ -40,7 +41,7 @@ typedef struct {
 
 typedef struct {
     HANDLE request, accepted, rejected;
-    bool attempted;
+    bool queued;
 } RestControl;
 
 void rest_open(RestControl *control, const char *pipe_name);
@@ -51,6 +52,8 @@ bool video_profile(ChiakiConnectVideoProfile *profile, int codec, const char *fp
 bool video_header(Video *video);
 bool video_sample(uint8_t *data, size_t size, int32_t lost, bool recovered, void *user);
 void video_stats(Video *video, const DirectMetrics *stats);
+bool audio_open_volume(Audio *audio, const char *pipe_name);
+void audio_close_volume(Audio *audio);
 void audio_decoder_sink(Audio *audio, ChiakiOpusDecoder *decoder, ChiakiAudioSink *sink);
 void audio_settings(uint32_t channels, uint32_t rate, void *user);
 void audio_frame(int16_t *pcm, size_t samples, void *user);

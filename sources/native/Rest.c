@@ -13,7 +13,7 @@ static HANDLE open_control(const char *pipe_name, const char *suffix, DWORD righ
 void rest_open(RestControl *control, const char *pipe_name)
 {
     // The dashboard creates all three private events before releasing the credentials on stdin.
-    control->request = open_control(pipe_name, "request", SYNCHRONIZE);
+    control->request = open_control(pipe_name, "request", SYNCHRONIZE | EVENT_MODIFY_STATE);
     control->accepted = open_control(pipe_name, "accepted", EVENT_MODIFY_STATE);
     control->rejected = open_control(pipe_name, "rejected", EVENT_MODIFY_STATE);
     if (!control->request || !control->accepted || !control->rejected) rest_close(control);
@@ -29,8 +29,9 @@ void rest_close(RestControl *control)
 
 void rest_tick(RestControl *control, bool connected, ChiakiSession *session, ChiakiErrorCode (*send)(ChiakiSession *))
 {
-    if (!control->request || control->attempted || WaitForSingleObject(control->request, 0) != WAIT_OBJECT_0) return;
-    control->attempted = true;
-    bool accepted = connected && send(session) == CHIAKI_ERR_SUCCESS;
-    SetEvent(accepted ? control->accepted : control->rejected);
+    if (!control->request || control->queued || WaitForSingleObject(control->request, 0) != WAIT_OBJECT_0) return;
+    // Consume each click once. A failed queue operation leaves the session available for another request.
+    ResetEvent(control->request);
+    control->queued = connected && send(session) == CHIAKI_ERR_SUCCESS;
+    SetEvent(control->queued ? control->accepted : control->rejected);
 }

@@ -224,7 +224,7 @@ internal static partial class WindowChromeProbe
         Require(compactPicker.Items.Count==3,"Offline demo must expose only its three applicable settings sections.");
         compactPicker.SelectedIndex=1;
         await Until(()=>Find<ComboBox>("InterfaceScale").IsVisible,"Compact section selector did not open Interface.");
-        foreach(string id in new[]{"OpenSource","OpenSetup","ShowSettings","Fullscreen"}) {
+        foreach(string id in new[]{"OpenSource","OpenVolume","OpenSetup","ShowSettings","Fullscreen"}) {
             var control=Find<Control>(id); var b=ScreenRect(control);
             RequireButtonPixel(control,(b.Left+b.Right)/2,(b.Top+b.Bottom)/2);
         }

@@ -1,6 +1,39 @@
 // SPDX-License-Identifier: LicenseRef-AGPL-3.0-only-OpenSSL
 #include "Direct.h"
 
+#include <stdio.h>
+#include <string.h>
+
+bool audio_open_volume(Audio *audio, const char *pipe_name)
+{
+    char name[200];
+    int size = snprintf(name, sizeof(name), "Local\\P5Cast.Rest.%lu.%s.volume", GetCurrentProcessId(), pipe_name);
+    if (size < 0 || (size_t)size >= sizeof(name)) return false;
+    HANDLE mapping = OpenFileMappingA(FILE_MAP_READ, FALSE, name);
+    if (!mapping) return false;
+    audio->volume_percent = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, sizeof(LONG));
+    CloseHandle(mapping); // The mapped view holds its own reference.
+    return audio->volume_percent != NULL;
+}
+
+void audio_close_volume(Audio *audio)
+{
+    if (audio->volume_percent) UnmapViewOfFile((const void *)audio->volume_percent);
+    audio->volume_percent = NULL;
+}
+
+static void apply_volume(const Audio *audio, int16_t *pcm, size_t count)
+{
+    if (!audio->volume_percent) return; // Legacy CLI calls use unmodified PCM.
+    LONG volume = __atomic_load_n(audio->volume_percent, __ATOMIC_ACQUIRE);
+    if (volume >= 100) return;
+    if (volume <= 0) {
+        memset(pcm, 0, count * sizeof(*pcm));
+        return;
+    }
+    for (size_t i = 0; i < count; ++i) pcm[i] = (int16_t)((int32_t)pcm[i] * volume / 100);
+}
+
 static void opus_header(ChiakiAudioHeader *header, void *user)
 {
     Audio *audio = user;
@@ -89,7 +122,9 @@ void audio_frame(int16_t *pcm, size_t samples, void *user)
             SDL_ClearQueuedAudio(audio->device);
             audio->playing = false;
         }
-        if (SDL_QueueAudio(audio->device, pcm, (Uint32)(samples * audio->channels * sizeof(int16_t))) != 0) {
+        size_t sample_count = samples * audio->channels;
+        apply_volume(audio, pcm, sample_count);
+        if (SDL_QueueAudio(audio->device, pcm, (Uint32)(sample_count * sizeof(int16_t))) != 0) {
             InterlockedExchange(&audio->failed, 1);
         } else if (!audio->playing && queue_us(audio) >= DIRECT_AUDIO_TARGET_US) {
             SDL_PauseAudioDevice(audio->device, 0);

@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.17.0.0")]
+[assembly: AssemblyVersion("0.18.0.0")]
 
 namespace Cadrivect
 {
@@ -87,9 +87,6 @@ namespace Cadrivect
         };
         int sessionVideoKbps;
         bool refreshingDisplays;
-        readonly Brush mint = new SolidColorBrush(Color.FromRgb(143,230,208));
-        readonly Brush dark = new SolidColorBrush(Color.FromRgb(16,39,37));
-        readonly Brush light = new SolidColorBrush(Color.FromRgb(230,240,239));
         string source = "Sony";
         string page = "Play";
         bool busy;
@@ -112,6 +109,8 @@ namespace Cadrivect
         internal Dashboard(Window w, bool client)
         {
             window = w;
+            var saved=ReadSettings();
+            InitTheme(saved);
             InitStatusHistory();
             window.Icon = new BitmapImage(new Uri(Path.Combine(Program.Root,"app","assets","mark.ico")));
             UI<Border>("VideoHost").Child=surface;
@@ -143,8 +142,8 @@ namespace Cadrivect
                 try {Process.Start(new ProcessStartInfo("https://github.com/NVIDIA/DLSS/blob/9981c6350dc58c0ce21f024fd65e31e851c31689/LICENSE.txt"){UseShellExecute=true});}
                 catch(System.ComponentModel.Win32Exception ex) {Show(ex.Message,true);}
             };
-            var saved = ReadSettings();
             InitSetup(saved,client);
+            InitVolume(saved);
             meter.DlssModelHint=Field(saved,"dlssModelHint");
             meter.DlssModelChanged+=delegate(string model) {
                 if(rendering!=null) engine.SetDlssModel(model);
@@ -267,6 +266,11 @@ namespace Cadrivect
             window.PreviewKeyDown+=async delegate(object sender,KeyEventArgs e) {
                 bool chord=(Keyboard.Modifiers & (ModifierKeys.Control|ModifierKeys.Alt))==(ModifierKeys.Control|ModifierKeys.Alt);
                 var key=e.Key==Key.System?e.SystemKey:e.Key;
+                if(StopPromptOpen) {
+                    if(key==Key.Escape) {CancelStopPrompt(); e.Handled=true;}
+                    else if(key==Key.F11 || chord) e.Handled=true;
+                    return;
+                }
                 if(SetupOpen) {
                     if(key==Key.Escape && !SetupDropDownOpen()) {
                         if(!setupPairing) CloseSetup(true);
@@ -280,7 +284,6 @@ namespace Cadrivect
                 else if(chord && key==Key.Q) {e.Handled=true; await UserStop(); return;}
                 else if(chord && key==Key.B && rendering!=null) meter.ToggleOriginal();
                 else if(key==Key.Escape && surface.EndPointerGesture(true)) {e.Handled=true; return;}
-                else if(key==Key.Escape && UI<StackPanel>("StopPanel").IsVisible && !requestingRest) SetPage("Play");
                 else if(key==Key.Escape && UI<StackPanel>("PairPanel").IsVisible) SetPage("Play");
                 else if(key==Key.Escape && fullscreen) ToggleFullscreen();
                 else return;
@@ -483,17 +486,16 @@ namespace Cadrivect
 
         void Highlight(Button b, bool on)
         {
-            b.Background = on ? dark : Brushes.Transparent;
-            b.Foreground = on ? mint : light;
+            if(on) b.SetResourceReference(Control.BackgroundProperty,"Theme.Selected");
+            else b.Background=Brushes.Transparent;
+            b.SetResourceReference(Control.ForegroundProperty,on?"Theme.Accent":"Theme.Text");
             b.FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal;
         }
 
         void SetPage(string value,bool reveal=true)
         {
-            if(!requestingRest) closeAfterStop=false;
             if(reveal) SetSettingsDrawer(true);
             page = value;
-            UI<StackPanel>("StopPanel").Visibility=Visibility.Collapsed;
             pendingRevocation=null;
             UI<StackPanel>("PairPanel").Visibility=Visibility.Collapsed;
             UI<TextBox>("PairCode").Clear(); UI<TextBox>("PsnAccount").Clear();
@@ -617,8 +619,8 @@ namespace Cadrivect
                 var settings = new { dlssQuality=meter.DlssQuality,dlssModelHint=meter.DlssModelHint,wipeHorizontal=meter.WipeHorizontal,sidebarOpen=stats,sidebarWidth=sidebarWidth,settingsOpen=settingsOpen,settingsHeight=settingsHeight,
                     discordPresence=UI<CheckBox>("SharePresence").IsChecked==true,
                     discordGame=UI<CheckBox>("ShareGame").IsChecked==true,discordProject=UI<CheckBox>("ShareProject").IsChecked==true,stopChoices=stopChoices,directMbps=DirectKbps()/1000, relayMbps=networkRates[UI<ComboBox>("NetworkBitrate").SelectedIndex],audioLayout=UI<ComboBox>("NetworkAudio").SelectedIndex,pictureDefaults=1, mode=mode, multiplier=factor-1, frameGenerationProvider=meter.FrameGenerationProvider,
-                    setupVersion=setupVersion,consoleMac=pendingSetupConsole ?? (console==null?"":console.Mac),consoleAddresses=consoleAddresses,directStreamHeight=DirectStreamHeight(),directFps=UI<ComboBox>("DirectFps").SelectedIndex,
-                    display=SelectedDisplayName(), uiScale=PreferredScalePercent, resolution=UI<ComboBox>("RenderResolution").SelectedIndex,hdr=preferredHdr,renderer=SelectedRenderer,
+                    streamVolume=volumeLevel,streamMuted=volumeMuted,setupVersion=setupVersion,consoleMac=pendingSetupConsole ?? (console==null?"":console.Mac),consoleAddresses=consoleAddresses,directStreamHeight=DirectStreamHeight(),directFps=UI<ComboBox>("DirectFps").SelectedIndex,
+                    display=SelectedDisplayName(), uiScale=PreferredScalePercent,theme=themeId, resolution=UI<ComboBox>("RenderResolution").SelectedIndex,hdr=preferredHdr,renderer=SelectedRenderer,
                     maximized=(fullscreen?previousWindowState:window.WindowState)==WindowState.Maximized,
                     clientHdr=UI<CheckBox>("ClientHdr").IsChecked==true,hostDisplay=hostTarget==null ? "" : hostTarget.DeviceName,
                     address=UI<TextBox>("HostAddress").Text.Trim(), bind=SelectedIP(), source=source, page=page, quality=UI<ComboBox>("Quality").SelectedIndex };

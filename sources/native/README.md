@@ -22,6 +22,8 @@ A zero count introduces a telemetry record. CDV1 sends four little-endian unsign
 
 `CadrivectDirect.exe --register host` takes an eight-byte PSN account ID followed by the eight ASCII digits from the console's Link Device screen via inherited stdin. On success its inherited stdout yields 74 bytes: `CDR1`, six hardware-address bytes, a 32-byte zero-padded UTF-8 nickname, a 16-byte registration key and a 16-byte session key. The dashboard protects the result with Windows DPAPI. Stdout and stdin must both be redirected pipes. The core never writes keys or PINs to a file.
 
+The dashboard launches the helper with `--session-control`. A current-user mapping alongside its other session controls holds a single aligned 32-bit volume percentage. The dashboard writes the saved level before passing the credentials. The helper opens the mapping read-only before starting a session and scales decoded signed 16-bit PCM before SDL queues it. A missing required mapping exits with 28. Standalone CLI calls and the earlier `--rest-control` switch retain their original full-volume behavior.
+
 Exit codes 20 through 27 indicate invalid input, unavailable player pipe, initialization failure, PS5 session failure, required console login PIN, incorrect console login PIN, audio-device failure, and registration failure respectively.
 
 ## Source and licenses

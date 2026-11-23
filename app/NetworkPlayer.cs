@@ -29,6 +29,7 @@ namespace Cadrivect
         SafeFileHandle job;
         bool disposed;
         long nextScan;
+        internal int ProcessId {get {return process.Id;}}
         internal bool HasVideo { get {return stream!=IntPtr.Zero;} }
 
         internal string Error {get; private set;}

@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Threading;
 
 namespace Cadrivect
 {
@@ -11,6 +13,8 @@ namespace Cadrivect
         readonly Dictionary<string,string> stopChoices=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
         string playingMac,playingPipe;
         bool updatingStopChoice,requestingRest,closeAfterStop;
+        UIElement stopReturnFocus;
+        bool StopPromptOpen {get {return UI<Grid>("StopPanel").Visibility==Visibility.Visible;}}
 
         void InitStopChoices(Dictionary<string,object> saved)
         {
@@ -30,7 +34,7 @@ namespace Cadrivect
                 else stopChoices[c.Mac]=picker.SelectedIndex==2?"rest":"keep";
                 SaveSettings();
             };
-            UI<Button>("CancelStop").Click+=delegate {SetPage("Play");};
+            UI<Button>("CancelStop").Click+=delegate {CancelStopPrompt();};
             UI<Button>("ConfirmStop").Click+=async delegate {
                 await StopDirect(UI<CheckBox>("RestOnStop").IsChecked==true,UI<CheckBox>("RememberStop").IsChecked==true);
             };
@@ -55,13 +59,47 @@ namespace Cadrivect
         }
         void OpenStopPrompt(bool exit)
         {
-            if(fullscreen) ToggleFullscreen();
-            SetPage("Play"); UI<StackPanel>("PlayPage").Visibility=Visibility.Collapsed;
+            if(StopPromptOpen) {if(exit) SetStopAction(true);return;}
+            if(SetupOpen) CloseSetup(false);
+            stopReturnFocus=Keyboard.FocusedElement as UIElement;
             SetStopAction(exit);
+            SetStopMessage("",false);
             UI<CheckBox>("RestOnStop").IsChecked=true;
             UI<CheckBox>("RememberStop").IsChecked=false;
-            UI<StackPanel>("StopPanel").Visibility=Visibility.Visible;
-            UI<Button>("CancelStop").Focus();
+            SetModalBackgroundEnabled(false);
+            UI<Grid>("StopPanel").Visibility=Visibility.Visible;
+            FocusStopPrompt();
+        }
+        void FocusStopPrompt()
+        {
+            window.Dispatcher.BeginInvoke(DispatcherPriority.Input,new Action(delegate {
+                if(StopPromptOpen && !requestingRest) UI<Button>("CancelStop").Focus();
+            }));
+        }
+        void SetStopMessage(string text,bool error)
+        {
+            var message=UI<TextBlock>("StopMessage");
+            message.Text=text;
+            message.SetResourceReference(TextBlock.ForegroundProperty,error?"Theme.Error":"Theme.Muted");
+            message.Visibility=text.Length==0?Visibility.Collapsed:Visibility.Visible;
+        }
+        void EnableStopActions(bool enabled)
+        {
+            foreach(string name in new[]{"RestOnStop","RememberStop","ConfirmStop","CancelStop"}) UI<Control>(name).IsEnabled=enabled;
+        }
+        void CancelStopPrompt()
+        {
+            if(requestingRest || !StopPromptOpen) return;
+            closeAfterStop=false; DismissStopPrompt();
+        }
+        void DismissStopPrompt()
+        {
+            if(!StopPromptOpen) return;
+            UI<Grid>("StopPanel").Visibility=Visibility.Collapsed;
+            SetModalBackgroundEnabled(true);
+            var previous=stopReturnFocus; stopReturnFocus=null;
+            if(previous!=null && previous.IsEnabled && previous.IsVisible && previous.Focus()) return;
+            if(!UI<Button>("OpenSource").Focus()) window.Focus();
         }
         Task UserStop()
         {
@@ -69,12 +107,11 @@ namespace Cadrivect
         }
         async Task RequestDisconnect(bool exit)
         {
-            if(requestingRest) {if(exit) closeAfterStop=true; return;}
+            if(requestingRest) {if(exit) SetStopAction(true); return;}
             if(stopping) return;
+            if(setupPairing) return;
             if(directCore==null || !firstFrame || playingMac==null) {StopPlayback(); return;}
-            if(UI<StackPanel>("StopPanel").Visibility==Visibility.Visible) {
-                if(fullscreen) ToggleFullscreen();
-                SetSettingsDrawer(true);
+            if(StopPromptOpen) {
                 if(exit) SetStopAction(true);
                 return;
             }
@@ -107,25 +144,28 @@ namespace Cadrivect
             if(requestingRest || stopping || core==null || mac==null) return;
             try {
                 if(rest) {
-                    requestingRest=true; UI<StackPanel>("StopPanel").IsEnabled=false; UpdateTransport();
+                    requestingRest=true; EnableStopActions(false); UpdateTransport();
+                    if(StopPromptOpen) {SetStopMessage("Sending the rest request…",false);UI<TextBlock>("StopTitle").Focus();}
                     Show("Requesting rest mode…");
                     await DirectConsole.RequestRestAsync(playingPipe,core);
                 }
                 if(remember) {stopChoices[mac]=rest?"rest":"keep"; RefreshStopChoice(); SaveSettings();}
                 if(closeAfterStop && (directCore==core || directCore==null)) {
-                    SaveSettings(); closing=true; closeAfterStop=false; StopPlayback();
+                    SaveSettings(); closing=true; closeAfterStop=false; DismissStopPrompt(); StopPlayback();
                     if(rendering==null && !preparing) QueueWindowClose();
-                } else if(!closing && directCore==core) {SetPage("Play"); StopPlayback();}
+                } else if(!closing && directCore==core) {DismissStopPrompt(); StopPlayback();}
             } catch(Exception ex) {
                 if(!closing && core==directCore) {
                     OpenStopPrompt(closeAfterStop);
-                    Show("Rest mode could not be confirmed. "+ex.GetBaseException().Message+" Clear the rest mode option to disconnect.",true);
+                    string message="Could not send the rest request. "+ex.GetBaseException().Message+" Try again or clear the rest mode option to disconnect.";
+                    SetStopMessage(message,true);Show(message,true);
+                    FocusStopPrompt();
                 } else if(closeAfterStop && directCore==null) {
                     closeAfterStop=false;
                     QueueWindowClose();
                 }
             } finally {
-                requestingRest=false; UI<StackPanel>("StopPanel").IsEnabled=true; UpdateTransport();
+                requestingRest=false; EnableStopActions(true); UpdateTransport();
             }
         }
     }

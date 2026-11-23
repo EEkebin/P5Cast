@@ -14,6 +14,35 @@ The installer places the app in `%LOCALAPPDATA%\Programs\P5Cast` and adds one **
 
 The play button becomes a spinner while P5Cast connects. Click the spinner to cancel. Once video is playing, the button becomes a stop square. Click the status message at the bottom of the window to see timestamped updates from this run. Press Escape to return to the player.
 
+Click the speaker beside the source picker to adjust stream volume from 0–100% or mute it. P5Cast remembers the level and mute state across sessions. Direct to PS5 applies the saved level to decoded audio before playback. For Sony Remote Play and the embedded network player, P5Cast adjusts the source’s Windows audio session and restores its level on disconnect. At 100%, you hear the original level. The offline demo is silent.
+
+## Change the interface colors
+
+Open **Settings → Interface → Color theme**. Mint, Ember and Daylight apply immediately, including to the frame-rate dial, side panel, menus and dialogs. P5Cast saves the selection for the next launch.
+
+Choose **Edit JSON** to open `%LOCALAPPDATA%\P5Cast\themes\custom.json` in Notepad. P5Cast creates the first template from the current built-in theme. Save your changes, then choose **Reload**. You can also select **Custom JSON** to load an existing file. This example starts with Daylight and changes the accent and the two FPS dial colors.
+
+```json
+{
+  "base": "daylight",
+  "Accent": "#234CC8",
+  "Source": "#146694",
+  "Generated": "#854679"
+}
+```
+
+| Color keys | What they control |
+| --- | --- |
+| `Background`, `Surface`, `Panel` | Window, cards and inset surfaces. The dialog backdrop takes its tint from Background. |
+| `Control`, `Hover`, `Selected` | Buttons, fields, hover and selection. |
+| `Border`, `StrongBorder` | Outlines, slider tracks, scroll thumbs and minor gauge ticks. |
+| `Text`, `Muted` | Main text and secondary labels. |
+| `Accent`, `AccentText` | Focus, primary actions and text on accent-colored controls. |
+| `Source`, `Generated`, `Track` | The source and generated segments of the FPS dial and its empty track. Generated also colors informational notices. |
+| `Error`, `Danger` | Error text and the Close button’s hover state. |
+
+Use `mint`, `ember` or `daylight` for `base`. Omitted keys inherit the base colors. If a reload fails, the Interface panel points out the problem and keeps the last applied palette.
+
 ## Compare the picture
 
 In the performance drawer, open **Picture → Comparison view**. Choose **Side by side** for the full original on the left and the full enhanced picture on the right. The left follows the source frame rate. The right uses your selected effects and interpolation. Both views share the same stream, audio and controls.
@@ -41,7 +70,7 @@ Choose **Play → Graphics & display → Graphics API** while playback is stoppe
 
 Direct defaults to a **100 Mbps video request**, the top setting offered by the pinned chiaki-ng client. Choose a lower target for slower links. The PS5 varies its compressed output with the scene and connection. It also chooses the Opus audio bitrate. In **Stream diagnostics**, compare requested and received video rates and inspect received audio bitrate, sample rate, channels and queue duration. [Upstream PS5 bitrate settings](https://github.com/streetpea/chiaki-ng/blob/v1.10.1/gui/src/qml/SettingsDialog.qml#L1400-L1420)
 
-Press **Stop** or close P5Cast during Direct playback to open the disconnect prompt. **Put PS5 into rest mode** starts checked. Clear it to leave the console awake for this disconnect. Select **Remember my choice for this console** to skip the prompt in future sessions. You can change a saved choice under **Play → Console → When I disconnect**. Losing the network connection or cancelling before the first picture leaves the console's power state alone.
+Press **Stop** or close P5Cast during Direct playback to open the disconnect dialog. Choose **Keep playing** or press Escape to return to the stream. Your settings drawer stays where you left it. **Put PS5 into rest mode** starts checked. Clear it to leave the console awake for this disconnect. Select **Remember my choice for this console** to skip the prompt in future sessions. You can change a saved choice under **Play → Console → When I disconnect**. Losing the network connection or cancelling before the first picture leaves the console's power state alone.
 
 **First-time setup.** On a new installation, the setup guide walks through the playback monitor, HDR or SDR output, graphics API, requested PS5 stream resolution, and console pairing. Select an existing PS5, add one with its Link Device code, or continue and pair later. **Finish** saves your choices. **Skip setup** discards the draft. Pairing a console registers it immediately.
 

@@ -2,7 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="P5Cast" Width="1320" Height="860" MinWidth="880" MinHeight="590"
-        Background="#10171C" Foreground="#E8F0F1" FontFamily="Segoe UI"
+        Background="{DynamicResource Theme.Background}" Foreground="{DynamicResource Theme.Text}" FontFamily="Segoe UI"
         FontSize="14" WindowStartupLocation="CenterScreen" UseLayoutRounding="True">
   <shell:WindowChrome.WindowChrome>
     <shell:WindowChrome CaptionHeight="52" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False"/>
@@ -12,11 +12,11 @@
       <Setter Property="Height" Value="22"/><Setter Property="Margin" Value="2,2"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Slider">
         <Grid Background="Transparent">
-          <Border Height="3" Margin="5,0" CornerRadius="1.5" Background="#4B6266"/>
+          <Border Height="3" Margin="5,0" CornerRadius="1.5" Background="{DynamicResource Theme.StrongBorder}"/>
           <Track x:Name="PART_Track" Orientation="Horizontal">
             <Track.DecreaseRepeatButton><RepeatButton Command="{x:Static Slider.DecreaseLarge}" Focusable="False" Opacity="0"/></Track.DecreaseRepeatButton>
             <Track.Thumb><Thumb Width="12" Height="16" Cursor="SizeWE"><Thumb.Template><ControlTemplate TargetType="Thumb">
-              <Border CornerRadius="5" Background="#8FE6D0" BorderThickness="1" BorderBrush="#B9EEDF"/>
+              <Border CornerRadius="5" Background="{DynamicResource Theme.Accent}" BorderThickness="1" BorderBrush="{DynamicResource Theme.Accent}"/>
             </ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
             <Track.IncreaseRepeatButton><RepeatButton Command="{x:Static Slider.IncreaseLarge}" Focusable="False" Opacity="0"/></Track.IncreaseRepeatButton>
           </Track>
@@ -24,7 +24,7 @@
       </ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style x:Key="TitleAction" TargetType="ButtonBase">
-      <Setter Property="Foreground" Value="#D6E2E2"/><Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{DynamicResource Theme.Text}"/><Setter Property="Background" Value="Transparent"/>
       <Setter Property="MinWidth" Value="38"/><Setter Property="Padding" Value="9,0"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ButtonBase">
@@ -34,45 +34,45 @@
           </Border>
         </Grid>
         <ControlTemplate.Triggers>
-          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ButtonFace" Property="Background" Value="#304147"/></Trigger>
-          <MultiTrigger><MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="Tag" Value="Close"/></MultiTrigger.Conditions><Setter TargetName="ButtonFace" Property="Background" Value="#A63E47"/></MultiTrigger>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ButtonFace" Property="Background" Value="{DynamicResource Theme.Border}"/></Trigger>
+          <MultiTrigger><MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="Tag" Value="Close"/></MultiTrigger.Conditions><Setter TargetName="ButtonFace" Property="Background" Value="{DynamicResource Theme.Danger}"/></MultiTrigger>
           <Trigger Property="IsPressed" Value="True"><Setter TargetName="ButtonFace" Property="Opacity" Value="0.7"/></Trigger>
-          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="ButtonFace" Property="BorderBrush" Value="#8FE6D0"/></Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="ButtonFace" Property="BorderBrush" Value="{DynamicResource Theme.Accent}"/></Trigger>
         </ControlTemplate.Triggers>
       </ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/></Style>
-    <Style x:Key="Detail" TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="Foreground" Value="#B3C1C4"/><Setter Property="FontSize" Value="14"/><Setter Property="LineHeight" Value="21"/></Style>
+    <Style x:Key="Detail" TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="Foreground" Value="{DynamicResource Theme.Muted}"/><Setter Property="FontSize" Value="14"/><Setter Property="LineHeight" Value="21"/></Style>
     <Style x:Key="Heading" TargetType="TextBlock"><Setter Property="FontSize" Value="21"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Margin" Value="0,0,0,10"/></Style>
     <Style TargetType="Button">
       <Setter Property="Padding" Value="12,6"/><Setter Property="MinHeight" Value="32"/><Setter Property="Margin" Value="0,0,8,0"/><Setter Property="Cursor" Value="Hand"/>
       <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
-      <Setter Property="Foreground" Value="#E6F0EF"/><Setter Property="Background" Value="#26353C"/><Setter Property="BorderBrush" Value="#36474D"/><Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Foreground" Value="{DynamicResource Theme.Text}"/><Setter Property="Background" Value="{DynamicResource Theme.Control}"/><Setter Property="BorderBrush" Value="{DynamicResource Theme.Border}"/><Setter Property="BorderThickness" Value="1"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
         <Grid>
           <Border x:Name="Surface" CornerRadius="7" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"/>
-          <Border Name="Wash" CornerRadius="7" Margin="1" Background="White" Opacity="0"/>
+          <Border Name="Wash" CornerRadius="7" Margin="1" Background="{DynamicResource Theme.Text}" Opacity="0"/>
           <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
         </Grid>
         <ControlTemplate.Triggers>
           <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Wash" Property="Opacity" Value="0.08"/></Trigger>
           <Trigger Property="IsPressed" Value="True"><Setter TargetName="Wash" Property="Background" Value="Black"/><Setter TargetName="Wash" Property="Opacity" Value="0.14"/></Trigger>
-          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Surface" Property="BorderBrush" Value="#ADFAE6"/></Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Surface" Property="BorderBrush" Value="{DynamicResource Theme.Accent}"/></Trigger>
           <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.48"/></Trigger>
         </ControlTemplate.Triggers>
       </ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-      <Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="#102725"/><Setter Property="Background" Value="#8FE6D0"/><Setter Property="BorderBrush" Value="#A2F1DE"/>
+      <Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{DynamicResource Theme.AccentText}"/><Setter Property="Background" Value="{DynamicResource Theme.Accent}"/><Setter Property="BorderBrush" Value="{DynamicResource Theme.Accent}"/>
     </Style>
-    <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="#172127"/><Setter Property="BorderBrush" Value="#2C3A41"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="20"/><Setter Property="Margin" Value="0,0,0,12"/></Style>
+    <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="{DynamicResource Theme.Surface}"/><Setter Property="BorderBrush" Value="{DynamicResource Theme.Border}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="20"/><Setter Property="Margin" Value="0,0,0,12"/></Style>
     <Style x:Key="GroupRail" TargetType="Border">
-      <Setter Property="Width" Value="158"/><Setter Property="Background" Value="#111B20"/>
-      <Setter Property="BorderBrush" Value="#2A393F"/><Setter Property="BorderThickness" Value="0,0,1,0"/>
+      <Setter Property="Width" Value="158"/><Setter Property="Background" Value="{DynamicResource Theme.Panel}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource Theme.Border}"/><Setter Property="BorderThickness" Value="0,0,1,0"/>
       <Setter Property="Padding" Value="8,9"/>
     </Style>
     <Style x:Key="GroupTab" TargetType="Button">
-      <Setter Property="Foreground" Value="#BECCCE"/><Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Foreground" Value="{DynamicResource Theme.Muted}"/><Setter Property="Cursor" Value="Hand"/>
       <Setter Property="MinHeight" Value="28"/><Setter Property="Margin" Value="0,1"/>
       <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
@@ -83,17 +83,17 @@
           </Grid>
         </Border>
         <ControlTemplate.Triggers>
-          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Face" Property="Background" Value="#26343A"/></Trigger>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Face" Property="Background" Value="{DynamicResource Theme.Hover}"/></Trigger>
           <Trigger Property="AutomationProperties.ItemStatus" Value="Selected">
-            <Setter TargetName="Face" Property="Background" Value="#20362F"/><Setter TargetName="Marker" Property="Background" Value="#8FE6D0"/>
-            <Setter Property="Foreground" Value="#BBF1DE"/><Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter TargetName="Face" Property="Background" Value="{DynamicResource Theme.Selected}"/><Setter TargetName="Marker" Property="Background" Value="{DynamicResource Theme.Accent}"/>
+            <Setter Property="Foreground" Value="{DynamicResource Theme.Accent}"/><Setter Property="FontWeight" Value="SemiBold"/>
           </Trigger>
-          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Face" Property="BorderBrush" Value="#8FE6D0"/></Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Face" Property="BorderBrush" Value="{DynamicResource Theme.Accent}"/></Trigger>
         </ControlTemplate.Triggers>
       </ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style x:Key="SettingsCaption" TargetType="TextBlock">
-      <Setter Property="Foreground" Value="#9FB2B5"/><Setter Property="FontSize" Value="12"/>
+      <Setter Property="Foreground" Value="{DynamicResource Theme.Muted}"/><Setter Property="FontSize" Value="12"/>
       <Setter Property="FontWeight" Value="SemiBold"/><Setter Property="VerticalAlignment" Value="Center"/>
     </Style>
     <Style x:Key="SettingsHeading" TargetType="TextBlock">
@@ -110,13 +110,13 @@
           <Track Name="PART_Track" IsDirectionReversed="True" Orientation="{TemplateBinding Orientation}">
             <Track.DecreaseRepeatButton><RepeatButton Name="Before" Style="{StaticResource ScrollPage}" Command="{x:Static ScrollBar.PageUpCommand}"/></Track.DecreaseRepeatButton>
             <Track.Thumb>
-              <Thumb Name="Grip" Background="#50646A" Focusable="False">
+              <Thumb Name="Grip" Background="{DynamicResource Theme.StrongBorder}" Focusable="False">
                 <Thumb.Template><ControlTemplate TargetType="Thumb">
                   <Grid Background="Transparent"><Border Name="Pill" CornerRadius="4" Margin="4,2" Background="{TemplateBinding Background}"/></Grid>
                   <ControlTemplate.Triggers>
                     <DataTrigger Binding="{Binding Orientation, RelativeSource={RelativeSource AncestorType=ScrollBar}}" Value="Horizontal"><Setter TargetName="Pill" Property="Margin" Value="2,4"/></DataTrigger>
-                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Pill" Property="Background" Value="#87A4A6"/></Trigger>
-                    <Trigger Property="IsDragging" Value="True"><Setter TargetName="Pill" Property="Background" Value="#8FE6D0"/></Trigger>
+                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Pill" Property="Background" Value="{DynamicResource Theme.StrongBorder}"/></Trigger>
+                    <Trigger Property="IsDragging" Value="True"><Setter TargetName="Pill" Property="Background" Value="{DynamicResource Theme.Accent}"/></Trigger>
                   </ControlTemplate.Triggers>
                 </ControlTemplate></Thumb.Template>
               </Thumb>
@@ -147,74 +147,74 @@
       </ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style TargetType="TextBox">
-      <Setter Property="Foreground" Value="#EBF3F3"/><Setter Property="Background" Value="#121D23"/><Setter Property="BorderBrush" Value="#3B4F56"/>
+      <Setter Property="Foreground" Value="{DynamicResource Theme.Text}"/><Setter Property="Background" Value="{DynamicResource Theme.Panel}"/><Setter Property="BorderBrush" Value="{DynamicResource Theme.Border}"/>
       <Setter Property="BorderThickness" Value="1"/><Setter Property="Padding" Value="10,5"/><Setter Property="MinHeight" Value="32"/>
-      <Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="CaretBrush" Value="#C2F5E9"/><Setter Property="SelectionBrush" Value="#4A786D"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="CaretBrush" Value="{DynamicResource Theme.Accent}"/><Setter Property="SelectionBrush" Value="{DynamicResource Theme.StrongBorder}"/>
       <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TextBox">
         <Border Name="Field" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="7">
           <ScrollViewer Name="PART_ContentHost" Focusable="False" Margin="{TemplateBinding Padding}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Hidden"/>
         </Border>
         <ControlTemplate.Triggers>
-          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Field" Property="BorderBrush" Value="#688287"/></Trigger>
-          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Field" Property="BorderBrush" Value="#8FE6D0"/></Trigger>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Field" Property="BorderBrush" Value="{DynamicResource Theme.StrongBorder}"/></Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Field" Property="BorderBrush" Value="{DynamicResource Theme.Accent}"/></Trigger>
           <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.48"/></Trigger>
         </ControlTemplate.Triggers>
       </ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style TargetType="CheckBox">
-      <Setter Property="Foreground" Value="#D5E1E1"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+      <Setter Property="Foreground" Value="{DynamicResource Theme.Text}"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{x:Null}"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="CheckBox">
         <StackPanel Orientation="Horizontal" Background="Transparent">
-          <Border Name="Box" Width="17" Height="17" CornerRadius="5" Background="#152229" BorderBrush="#5A7075" BorderThickness="1" VerticalAlignment="Center">
-            <Path Name="Tick" Visibility="Hidden" Width="10" Height="8" Stretch="Uniform" Stroke="#152923" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Data="M1,4 L4,7 L10,1"/>
+          <Border Name="Box" Width="17" Height="17" CornerRadius="5" Background="{DynamicResource Theme.Panel}" BorderBrush="{DynamicResource Theme.StrongBorder}" BorderThickness="1" VerticalAlignment="Center">
+            <Path Name="Tick" Visibility="Hidden" Width="10" Height="8" Stretch="Uniform" Stroke="{DynamicResource Theme.AccentText}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Data="M1,4 L4,7 L10,1"/>
           </Border>
           <ContentPresenter Margin="7,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="True"/>
         </StackPanel>
         <ControlTemplate.Triggers>
-          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Box" Property="BorderBrush" Value="#96ADA9"/></Trigger>
-          <Trigger Property="IsChecked" Value="True"><Setter TargetName="Tick" Property="Visibility" Value="Visible"/><Setter TargetName="Box" Property="Background" Value="#8FE6D0"/><Setter TargetName="Box" Property="BorderBrush" Value="#8FE6D0"/></Trigger>
-          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Box" Property="BorderBrush" Value="White"/><Setter TargetName="Box" Property="BorderThickness" Value="2"/></Trigger>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Theme.StrongBorder}"/></Trigger>
+          <Trigger Property="IsChecked" Value="True"><Setter TargetName="Tick" Property="Visibility" Value="Visible"/><Setter TargetName="Box" Property="Background" Value="{DynamicResource Theme.Accent}"/><Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Theme.Accent}"/></Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Theme.Text}"/><Setter TargetName="Box" Property="BorderThickness" Value="2"/></Trigger>
           <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.48"/></Trigger>
         </ControlTemplate.Triggers>
       </ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style TargetType="ComboBoxItem">
-      <Setter Property="Foreground" Value="#E6F0EF"/><Setter Property="Padding" Value="9,6"/><Setter Property="Margin" Value="0,1"/>
+      <Setter Property="Foreground" Value="{DynamicResource Theme.Text}"/><Setter Property="Padding" Value="9,6"/><Setter Property="Margin" Value="0,1"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBoxItem">
         <Border Name="Item" Background="Transparent" Padding="{TemplateBinding Padding}" CornerRadius="5"><ContentPresenter/></Border>
         <ControlTemplate.Triggers>
-          <Trigger Property="IsSelected" Value="True"><Setter TargetName="Item" Property="Background" Value="#28443F"/></Trigger>
-          <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Item" Property="Background" Value="#324950"/></Trigger>
+          <Trigger Property="IsSelected" Value="True"><Setter TargetName="Item" Property="Background" Value="{DynamicResource Theme.Selected}"/></Trigger>
+          <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Item" Property="Background" Value="{DynamicResource Theme.Hover}"/></Trigger>
           <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.46"/></Trigger>
         </ControlTemplate.Triggers>
       </ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style TargetType="ComboBox">
-      <Setter Property="Foreground" Value="#E6F0EF"/><Setter Property="MinHeight" Value="32"/><Setter Property="MaxDropDownHeight" Value="320"/>
+      <Setter Property="Foreground" Value="{DynamicResource Theme.Text}"/><Setter Property="MinHeight" Value="32"/><Setter Property="MaxDropDownHeight" Value="320"/>
       <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBox">
         <Grid>
-          <Border Name="Field" Background="#1B292F" BorderBrush="#3B4F56" BorderThickness="1" CornerRadius="7"/>
+          <Border Name="Field" Background="{DynamicResource Theme.Control}" BorderBrush="{DynamicResource Theme.Border}" BorderThickness="1" CornerRadius="7"/>
           <ToggleButton Focusable="False" ClickMode="Press" Cursor="Hand" IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
             <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border Background="Transparent" CornerRadius="7"/></ControlTemplate></ToggleButton.Template>
           </ToggleButton>
           <Grid IsHitTestVisible="False" Margin="10,3">
             <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="12"/></Grid.ColumnDefinitions>
             <ContentPresenter VerticalAlignment="Center" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"/>
-            <Path Grid.Column="1" Data="M 1,2 L 5,6 L 9,2" Stroke="#B7C9CB" StrokeThickness="1.5" VerticalAlignment="Center"/>
+            <Path Grid.Column="1" Data="M 1,2 L 5,6 L 9,2" Stroke="{DynamicResource Theme.Muted}" StrokeThickness="1.5" VerticalAlignment="Center"/>
           </Grid>
           <Popup Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True" Focusable="False" VerticalOffset="3">
-            <Border MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" MaxHeight="{TemplateBinding MaxDropDownHeight}" CornerRadius="8" BorderBrush="#476069" BorderThickness="1" Background="#1A272E" Padding="4">
+            <Border MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" MaxHeight="{TemplateBinding MaxDropDownHeight}" CornerRadius="8" BorderBrush="{DynamicResource Theme.StrongBorder}" BorderThickness="1" Background="{DynamicResource Theme.Control}" Padding="4">
               <ScrollViewer Style="{StaticResource {x:Type ScrollViewer}}" CanContentScroll="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/></ScrollViewer>
             </Border>
           </Popup>
         </Grid>
         <ControlTemplate.Triggers>
-          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Field" Property="BorderBrush" Value="#688287"/></Trigger>
-          <Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="Field" Property="BorderBrush" Value="#8FE6D0"/></Trigger>
-          <Trigger Property="IsDropDownOpen" Value="True"><Setter TargetName="Field" Property="BorderBrush" Value="#8FE6D0"/></Trigger>
-          <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Field" Property="Background" Value="#152127"/><Setter Property="Opacity" Value="0.55"/></Trigger>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Field" Property="BorderBrush" Value="{DynamicResource Theme.StrongBorder}"/></Trigger>
+          <Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="Field" Property="BorderBrush" Value="{DynamicResource Theme.Accent}"/></Trigger>
+          <Trigger Property="IsDropDownOpen" Value="True"><Setter TargetName="Field" Property="BorderBrush" Value="{DynamicResource Theme.Accent}"/></Trigger>
+          <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Field" Property="Background" Value="{DynamicResource Theme.Surface}"/><Setter Property="Opacity" Value="0.55"/></Trigger>
         </ControlTemplate.Triggers>
       </ControlTemplate></Setter.Value></Setter>
     </Style>
@@ -222,7 +222,7 @@
   <Grid Name="WindowFrame">
     <Grid Name="InterfaceRoot">
     <Grid.RowDefinitions><RowDefinition Name="HeaderRow" Height="52"/><RowDefinition Height="*"/><RowDefinition Name="StatusRow" Height="Auto"/></Grid.RowDefinitions>
-    <Border Name="HeaderBar" Background="#152026" BorderBrush="#2A393E" BorderThickness="0,0,0,1">
+    <Border Name="HeaderBar" Background="{DynamicResource Theme.Surface}" BorderBrush="{DynamicResource Theme.Border}" BorderThickness="0,0,0,1">
       <Border.Style><Style TargetType="Border">
         <Setter Property="Padding" Value="16,6,6,6"/>
         <Style.Triggers><DataTrigger Binding="{Binding WindowState, RelativeSource={RelativeSource AncestorType=Window}}" Value="Maximized">
@@ -242,18 +242,18 @@
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" shell:WindowChrome.IsHitTestVisibleInChrome="True">
           <ToggleButton Name="ShowStats" Style="{StaticResource TitleAction}" AutomationProperties.Name="Performance sidebar">
             <Canvas Width="22" Height="22" IsHitTestVisible="False">
-              <Line Name="MenuTop" X1="2" X2="20" Y1="11" Y2="11" Stroke="#8FE6D0" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round">
+              <Line Name="MenuTop" X1="2" X2="20" Y1="11" Y2="11" Stroke="{DynamicResource Theme.Accent}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round">
                 <Line.RenderTransform><TransformGroup><RotateTransform CenterX="11" CenterY="11"/><TranslateTransform Y="-3"/></TransformGroup></Line.RenderTransform>
               </Line>
-              <Line Name="MenuBottom" X1="2" X2="20" Y1="11" Y2="11" Stroke="#8FE6D0" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round">
+              <Line Name="MenuBottom" X1="2" X2="20" Y1="11" Y2="11" Stroke="{DynamicResource Theme.Accent}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round">
                 <Line.RenderTransform><TransformGroup><RotateTransform CenterX="11" CenterY="11"/><TranslateTransform Y="3"/></TransformGroup></Line.RenderTransform>
               </Line>
             </Canvas>
           </ToggleButton>
-          <Border Background="#354449" Width="1" Height="18" Margin="6,0"/>
-          <Button Name="MinimizeWindow" Style="{StaticResource TitleAction}" ToolTip="Minimize" AutomationProperties.Name="Minimize"><Path Stroke="#C5D3D4" StrokeThickness="1.2" Data="M0,5 H10"/></Button>
-          <Button Name="MaximizeWindow" Style="{StaticResource TitleAction}" ToolTip="Maximize" AutomationProperties.Name="Maximize"><Path Name="MaximizeGlyph" Stroke="#C5D3D4" StrokeThickness="1.2" Data="M0,0 H10 V10 H0 Z"/></Button>
-          <Button Name="CloseWindow" Tag="Close" Style="{StaticResource TitleAction}" ToolTip="Close" AutomationProperties.Name="Close P5Cast"><Path Stroke="#E4EEEE" StrokeThickness="1.25" Data="M0,0 L10,10 M10,0 L0,10"/></Button>
+          <Border Background="{DynamicResource Theme.Border}" Width="1" Height="18" Margin="6,0"/>
+          <Button Name="MinimizeWindow" Style="{StaticResource TitleAction}" ToolTip="Minimize" AutomationProperties.Name="Minimize"><Path Stroke="{DynamicResource Theme.Muted}" StrokeThickness="1.2" Data="M0,5 H10"/></Button>
+          <Button Name="MaximizeWindow" Style="{StaticResource TitleAction}" ToolTip="Maximize" AutomationProperties.Name="Maximize"><Path Name="MaximizeGlyph" Stroke="{DynamicResource Theme.Muted}" StrokeThickness="1.2" Data="M0,0 H10 V10 H0 Z"/></Button>
+          <Button Name="CloseWindow" Tag="Close" Style="{StaticResource TitleAction}" ToolTip="Close" AutomationProperties.Name="Close P5Cast"><Path Stroke="{DynamicResource Theme.Text}" StrokeThickness="1.25" Data="M0,0 L10,10 M10,0 L0,10"/></Button>
         </StackPanel>
       </DockPanel>
     </Border>
@@ -263,13 +263,13 @@
           <Setter Property="Focusable" Value="True"/><Setter Property="IsTabStop" Value="True"/>
           <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Thumb">
             <Grid Background="Transparent">
-              <Border Name="Grip" Width="36" Height="3" CornerRadius="2" Background="#516168" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              <Border Name="Grip" Width="36" Height="3" CornerRadius="2" Background="{DynamicResource Theme.StrongBorder}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Grid>
             <ControlTemplate.Triggers>
               <Trigger Property="Tag" Value="Vertical"><Setter TargetName="Grip" Property="Width" Value="3"/><Setter TargetName="Grip" Property="Height" Value="36"/></Trigger>
-              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Grip" Property="Background" Value="#93BCB3"/></Trigger>
-              <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Grip" Property="Background" Value="#8FE6D0"/></Trigger>
-              <Trigger Property="IsDragging" Value="True"><Setter TargetName="Grip" Property="Background" Value="#8FE6D0"/></Trigger>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Grip" Property="Background" Value="{DynamicResource Theme.Accent}"/></Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Grip" Property="Background" Value="{DynamicResource Theme.Accent}"/></Trigger>
+              <Trigger Property="IsDragging" Value="True"><Setter TargetName="Grip" Property="Background" Value="{DynamicResource Theme.Accent}"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate></Setter.Value></Setter>
         </Style>
@@ -281,12 +281,42 @@
         <DockPanel Name="TransportBar" Grid.Row="1" LastChildFill="False" VerticalAlignment="Center">
           <Button DockPanel.Dock="Left" Name="OpenSource" Width="46" Height="34" Padding="0" ToolTipService.ShowOnDisabled="True" Style="{StaticResource Primary}"/>
           <ComboBox DockPanel.Dock="Left" Name="SourceChoice" Padding="6,4" VerticalContentAlignment="Center" Width="142" Margin="0,0,10,0"/>
+          <Grid DockPanel.Dock="Left" Margin="0,0,6,0">
+            <Button Name="OpenVolume" Style="{StaticResource TitleAction}" Padding="6,0" MinWidth="32"
+                    AutomationProperties.Name="Stream volume" ToolTip="Stream volume">
+              <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Grid Width="19" Height="18">
+                  <Path Data="M1,6 L5,6 L10,2 L10,16 L5,12 L1,12 Z" StrokeThickness="1.4"
+                        Stroke="{Binding Foreground, ElementName=OpenVolume}" StrokeLineJoin="Round"/>
+                  <Path Name="VolumeWaves" Data="M13,6 Q16,9 13,12 M15,3 Q21,9 15,15" StrokeThickness="1.4"
+                        Stroke="{Binding Foreground, ElementName=OpenVolume}" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                  <Path Name="VolumeCross" Data="M13,6 L18,12 M18,6 L13,12" StrokeThickness="1.4" Visibility="Collapsed"
+                        Stroke="{Binding Foreground, ElementName=OpenVolume}" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                </Grid>
+                <TextBlock Name="VolumeBadge" VerticalAlignment="Center" Margin="5,0,0,0" TextWrapping="NoWrap"/>
+              </StackPanel>
+            </Button>
+            <Popup Name="VolumePopup" PlacementTarget="{Binding ElementName=OpenVolume}" Placement="Top" VerticalOffset="-4"
+                   AllowsTransparency="True" StaysOpen="False" PopupAnimation="Fade">
+              <Border CornerRadius="8" Padding="14,10" Width="228" Background="{DynamicResource Theme.Surface}" BorderThickness="1" BorderBrush="{DynamicResource Theme.Border}">
+                <StackPanel KeyboardNavigation.TabNavigation="Cycle">
+                  <DockPanel Margin="0,0,0,4">
+                    <TextBlock DockPanel.Dock="Right" Name="VolumeReadout" Foreground="{DynamicResource Theme.Accent}" VerticalAlignment="Center"/>
+                    <Label Content="Stream volume" Target="{Binding ElementName=StreamVolumeSlider}" Padding="0" FontWeight="SemiBold" Foreground="{DynamicResource Theme.Text}"/>
+                  </DockPanel>
+                  <Slider Name="StreamVolumeSlider" Style="{StaticResource WipeSlider}" Minimum="0" Maximum="100" TickFrequency="1"
+                          IsSnapToTickEnabled="True" IsMoveToPointEnabled="True" SmallChange="1" LargeChange="10" AutomationProperties.Name="Stream volume percent"/>
+                  <CheckBox Name="MuteStream" Content="Mute stream" Margin="0,5,0,0" Foreground="{DynamicResource Theme.Text}"/>
+                </StackPanel>
+              </Border>
+            </Popup>
+          </Grid>
           <Button DockPanel.Dock="Right" Name="Fullscreen" Content="Fullscreen" ToolTip="Fullscreen video (F11). Press Escape or double-click the video to return." Margin="0"/>
           <ToggleButton DockPanel.Dock="Right" Name="ShowSettings" Style="{StaticResource TitleAction}" AutomationProperties.Name="Settings drawer" Margin="0,0,6,0">
             <StackPanel Orientation="Horizontal"><TextBlock Name="SettingsActionLabel" Text="Settings" VerticalAlignment="Center"/>
-              <Path Name="SettingsActionGlyph" Width="15" Height="15" Stretch="Uniform" Visibility="Collapsed" Stroke="#C6DDD7" StrokeThickness="1.5"
+              <Path Name="SettingsActionGlyph" Width="15" Height="15" Stretch="Uniform" Visibility="Collapsed" Stroke="{DynamicResource Theme.Muted}" StrokeThickness="1.5"
                     Data="M1,3 H5 M9,3 H15 M1,9 H8 M12,9 H15 M5,1 V5 H9 V1 Z M8,7 V11 H12 V7 Z"/>
-              <Path Stroke="#9CBAB6" StrokeThickness="1.5" Data="M0,0 L4,4 L8,0" VerticalAlignment="Center" Margin="7,0,0,0" RenderTransformOrigin=".5,.5">
+              <Path Stroke="{DynamicResource Theme.Muted}" StrokeThickness="1.5" Data="M0,0 L4,4 L8,0" VerticalAlignment="Center" Margin="7,0,0,0" RenderTransformOrigin=".5,.5">
                 <Path.Style><Style TargetType="Path"><Style.Triggers>
                   <DataTrigger Binding="{Binding IsChecked, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Value="False"><Setter Property="RenderTransform"><Setter.Value><RotateTransform Angle="180"/></Setter.Value></Setter></DataTrigger>
                 </Style.Triggers></Style></Path.Style>
@@ -294,9 +324,9 @@
             </StackPanel>
           </ToggleButton>
           <Button DockPanel.Dock="Right" Name="OpenSetup" AutomationProperties.Name="Guided setup" ToolTip="Open guided setup"
-                  Foreground="#B9F2E2" Background="#1B342F" BorderBrush="#365B50" Margin="0,0,5,0" Padding="10,4">
+                  Foreground="{DynamicResource Theme.Accent}" Background="{DynamicResource Theme.Selected}" BorderBrush="{DynamicResource Theme.StrongBorder}" Margin="0,0,5,0" Padding="10,4">
             <StackPanel Orientation="Horizontal">
-              <Path Width="15" Height="15" Stretch="Uniform" Stroke="#A2ECD5" StrokeThickness="1.45" StrokeLineJoin="Round"
+              <Path Width="15" Height="15" Stretch="Uniform" Stroke="{DynamicResource Theme.Accent}" StrokeThickness="1.45" StrokeLineJoin="Round"
                     Data="M8,1 A7,7 0 1 1 7.99,1 M10.8,5.2 L9,9 L5.2,10.8 L7,7 Z"/>
               <TextBlock Text="Setup" VerticalAlignment="Center" Margin="6,0,0,0"/>
             </StackPanel>
@@ -306,9 +336,9 @@
         <DockPanel Name="SettingsBody" VerticalAlignment="Top">
         <Thumb Name="SettingsResize" Style="{StaticResource DrawerGrip}" DockPanel.Dock="Top" Height="12" Cursor="SizeNS"
                AutomationProperties.Name="Resize settings drawer" ToolTip="Drag or use Up and Down to resize. Enter collapses the drawer."/>
-        <Border Background="#172127" CornerRadius="8" BorderBrush="#2C3A41" BorderThickness="1">
+        <Border Background="{DynamicResource Theme.Surface}" CornerRadius="8" BorderBrush="{DynamicResource Theme.Border}" BorderThickness="1">
           <DockPanel Name="SettingsWorkbench">
-            <Grid Name="CompactSettingsSections" DockPanel.Dock="Top" Background="#131E23" Visibility="Collapsed" IsEnabled="{Binding IsEnabled, ElementName=Pages}">
+            <Grid Name="CompactSettingsSections" DockPanel.Dock="Top" Background="{DynamicResource Theme.Panel}" Visibility="Collapsed" IsEnabled="{Binding IsEnabled, ElementName=Pages}">
               <DockPanel Visibility="{Binding Visibility, ElementName=PlayPage}" Margin="12,8">
                 <TextBlock DockPanel.Dock="Left" Style="{StaticResource SettingsCaption}" Text="Play settings" Margin="0,0,12,0"/>
                 <ComboBox Name="PlaySectionPicker" MaxWidth="290" HorizontalAlignment="Left" MinWidth="172" AutomationProperties.Name="Play settings section"/>
@@ -370,7 +400,7 @@
                 </Grid>
                 <StackPanel Name="StreamSettings" Visibility="Collapsed">
                   <UniformGrid Name="StreamFields" Columns="3">
-                    <StackPanel Margin="0,0,10,6"><Label Content="PS5 stream resolution" Target="{Binding ElementName=DirectStreamSize}" Foreground="#DFEBEA" Padding="0,0,0,5"/><ComboBox Name="DirectStreamSize" AutomationProperties.Name="PS5 stream resolution" ToolTip="Resolution requested from the console on your next Direct connection."/></StackPanel>
+                    <StackPanel Margin="0,0,10,6"><Label Content="PS5 stream resolution" Target="{Binding ElementName=DirectStreamSize}" Foreground="{DynamicResource Theme.Text}" Padding="0,0,0,5"/><ComboBox Name="DirectStreamSize" AutomationProperties.Name="PS5 stream resolution" ToolTip="Resolution requested from the console on your next Direct connection."/></StackPanel>
                     <StackPanel Margin="0,0,10,6"><TextBlock Text="Requested video bitrate" Margin="0,0,0,5"/><ComboBox Name="DirectBitrate" ToolTip="Requested at connection time. The console adjusts the actual bitrate."/></StackPanel>
                     <StackPanel Margin="0,0,10,6"><TextBlock Text="Frame rate" Margin="0,0,0,5"/><ComboBox Name="DirectFps"/></StackPanel>
                   </UniformGrid>
@@ -378,7 +408,7 @@
                 </StackPanel>
                 <StackPanel Name="DisplaySettings" Visibility="Collapsed">
                   <UniformGrid Name="DisplayFields" Columns="2">
-                    <StackPanel Margin="0,0,10,6"><Label Content="Graphics API" Target="{Binding ElementName=VideoRenderer}" Foreground="#DFEBEA" Padding="0,0,0,5"/><ComboBox Name="VideoRenderer" AutomationProperties.Name="Graphics API" ToolTipService.ShowOnDisabled="True" ToolTip="Choose the graphics API between playback sessions."/></StackPanel>
+                    <StackPanel Margin="0,0,10,6"><Label Content="Graphics API" Target="{Binding ElementName=VideoRenderer}" Foreground="{DynamicResource Theme.Text}" Padding="0,0,0,5"/><ComboBox Name="VideoRenderer" AutomationProperties.Name="Graphics API" ToolTipService.ShowOnDisabled="True" ToolTip="Choose the graphics API between playback sessions."/></StackPanel>
                     <StackPanel Margin="0,0,10,6"><TextBlock Text="Playback display" Margin="0,0,0,5"/>
                       <ComboBox Name="PlaybackDisplay" ToolTip="{Binding SelectedItem, RelativeSource={RelativeSource Self}}">
                         <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/></DataTemplate></ComboBox.ItemTemplate>
@@ -390,33 +420,34 @@
                   <TextBlock Name="RendererHint" Style="{StaticResource Detail}" TextWrapping="Wrap"/>
                 </StackPanel>
                 <StackPanel Name="InterfaceSettings" Visibility="Collapsed">
-                  <Label Content="Interface scale" Target="{Binding ElementName=InterfaceScale}" Foreground="#E8F0F1" Padding="0,0,0,5"/>
+                  <Label Content="Color theme" Target="{Binding ElementName=ColorTheme}" Foreground="{DynamicResource Theme.Text}" Padding="0,0,0,5"/>
+                  <WrapPanel>
+                    <ComboBox Name="ColorTheme" Width="182" Margin="0,0,8,4" AutomationProperties.Name="Color theme"/>
+                    <Button Name="EditThemeJson" Content="Edit JSON" Margin="0,0,8,4" ToolTip="Open your custom theme in Notepad."/>
+                    <Button Name="ReloadTheme" Content="Reload" Margin="0,0,0,4" ToolTip="Apply your saved custom colors."/>
+                  </WrapPanel>
+                  <TextBlock Name="ThemeStatus" Margin="0,0,0,10" Foreground="{DynamicResource Theme.Muted}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+                  <Label Content="Interface scale" Target="{Binding ElementName=InterfaceScale}" Foreground="{DynamicResource Theme.Text}" Padding="0,0,0,5"/>
                   <ComboBox Name="InterfaceScale" HorizontalAlignment="Left" Width="182" AutomationProperties.Name="Interface scale" ToolTip="Auto adapts to the monitor. A percentage adjusts the interface relative to Windows display scaling."/>
                   <TextBlock Name="ScaleStatus" Style="{StaticResource Detail}" Margin="0,6,0,0"/>
                 </StackPanel>
                 <StackPanel Name="DiscordSettings" Visibility="Collapsed">
                   <WrapPanel>
-                    <CheckBox Name="SharePresence" Content="Show P5Cast activity on Discord" Foreground="#E8F0F1" Margin="0,0,18,7"/>
-                    <CheckBox Name="ShareProject" Content="Include private GitHub link" Foreground="#E8F0F1" Margin="0,0,0,7"/>
+                    <CheckBox Name="SharePresence" Content="Show P5Cast activity on Discord" Foreground="{DynamicResource Theme.Text}" Margin="0,0,18,7"/>
+                    <CheckBox Name="ShareProject" Content="Include private GitHub link" Foreground="{DynamicResource Theme.Text}" Margin="0,0,0,7"/>
                   </WrapPanel>
                   <WrapPanel>
-                    <CheckBox Name="ShareGame" Content="Show game title" Foreground="#E8F0F1" VerticalAlignment="Center" Margin="0,0,15,0"/>
+                    <CheckBox Name="ShareGame" Content="Show game title" Foreground="{DynamicResource Theme.Text}" VerticalAlignment="Center" Margin="0,0,15,0"/>
                     <TextBlock Text="Title override" VerticalAlignment="Center" Margin="0,0,6,0"/>
                     <TextBox Name="GameTitle" Width="166" MaxLength="100" ToolTip="Optional title for this session. Direct can read the title if the PS5 supplies it."/>
                   </WrapPanel>
-                  <TextBlock Name="DiscordState" Foreground="#B3C1C4" Margin="0,5,0,2"/>
-                  <TextBlock Foreground="#B3C1C4" Text="To broadcast, join a Discord voice channel, choose Share Your Screen → Applications → P5Cast, and enable sound."/>
+                  <TextBlock Name="DiscordState" Foreground="{DynamicResource Theme.Muted}" Margin="0,5,0,2"/>
+                  <TextBlock Foreground="{DynamicResource Theme.Muted}" Text="To broadcast, join a Discord voice channel, choose Share Your Screen → Applications → P5Cast, and enable sound."/>
                 </StackPanel>
-              </StackPanel>
-              <StackPanel Name="StopPanel" Visibility="Collapsed">
-                <TextBlock Name="StopTitle" Text="Stop playing?" Style="{StaticResource Heading}" Margin="0,0,0,7"/>
-                <CheckBox Name="RestOnStop" Content="Put PS5 into rest mode" Foreground="#E8F0F1" Margin="0,0,0,6"/>
-                <CheckBox Name="RememberStop" Content="Remember my choice for this console" Foreground="#E8F0F1" Margin="0,0,0,9"/>
-                <StackPanel Orientation="Horizontal"><Button Name="ConfirmStop" Content="Stop session" Style="{StaticResource Primary}"/><Button Name="CancelStop" Content="Keep playing"/></StackPanel>
               </StackPanel>
               <StackPanel Name="PairPanel" Visibility="Collapsed">
                 <TextBlock Text="Add console" Style="{StaticResource Heading}" Margin="0,0,0,2"/>
-                <TextBlock Text="On your PS5, open Settings → System → Remote Play → Link Device." Foreground="#B3C1C4" Margin="0,0,0,7"/>
+                <TextBlock Text="On your PS5, open Settings → System → Remote Play → Link Device." Foreground="{DynamicResource Theme.Muted}" Margin="0,0,0,7"/>
                 <UniformGrid Name="PairFields" Columns="3">
                   <StackPanel Margin="0,0,10,6"><TextBlock Text="Console address"/><TextBox Name="PairAddress"/></StackPanel>
                   <StackPanel Margin="0,0,10,6"><TextBlock Text="PSN Account ID (Base64)"/><TextBox Name="PsnAccount"/></StackPanel>
@@ -453,7 +484,7 @@
                     <StackPanel Margin="0,0,10,6"><TextBlock Text="Video bitrate" Margin="0,0,0,4"/><ComboBox Name="NetworkBitrate"/></StackPanel>
                     <StackPanel Margin="0,0,10,6"><TextBlock Text="Audio output" Margin="0,0,0,4"/><ComboBox Name="NetworkAudio"/></StackPanel>
                   </UniformGrid>
-                  <CheckBox Name="ClientHdr" Foreground="#E8F0F1" Content="Request HDR" Margin="0,8,0,0"/>
+                  <CheckBox Name="ClientHdr" Foreground="{DynamicResource Theme.Text}" Content="Request HDR" Margin="0,8,0,0"/>
                 </StackPanel>
               </StackPanel>
               </Grid>
@@ -464,26 +495,26 @@
       </Grid>
       <Border Name="SidebarDrawer" Grid.Column="1" Width="0" ClipToBounds="True">
         <Grid Name="SidebarBody" HorizontalAlignment="Left">
-        <Border Name="MeterHost" Background="#172127" CornerRadius="8" BorderBrush="#2C3A41" BorderThickness="1" Margin="12,0,0,0"/>
+        <Border Name="MeterHost" Background="{DynamicResource Theme.Surface}" CornerRadius="8" BorderBrush="{DynamicResource Theme.Border}" BorderThickness="1" Margin="12,0,0,0"/>
         <Thumb Name="SidebarResize" Style="{StaticResource DrawerGrip}" Tag="Vertical" Width="12" HorizontalAlignment="Left" Cursor="SizeWE"
                AutomationProperties.Name="Resize performance sidebar" ToolTip="Drag or use Left and Right to resize. Enter collapses the sidebar."/>
         </Grid>
       </Border>
     </Grid>
-    <Border Name="StatusFooter" Grid.Row="2" Background="#121D22" BorderBrush="#293940" BorderThickness="0,1,0,0"
+    <Border Name="StatusFooter" Grid.Row="2" Background="{DynamicResource Theme.Panel}" BorderBrush="{DynamicResource Theme.Border}" BorderThickness="0,1,0,0"
             ClipToBounds="True" Visibility="{Binding Visibility, ElementName=HeaderBar}">
       <StackPanel>
-        <Border Name="StatusHistorySheet" Visibility="Collapsed" Padding="22,8,16,8" BorderBrush="#304247" BorderThickness="0,0,0,1">
+        <Border Name="StatusHistorySheet" Visibility="Collapsed" Padding="22,8,16,8" BorderBrush="{DynamicResource Theme.Border}" BorderThickness="0,0,0,1">
           <Grid Height="174"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
             <DockPanel Margin="2,0,0,4">
               <Button Name="CloseStatusHistory" DockPanel.Dock="Right" Width="34" MinWidth="34" Height="30" Style="{StaticResource TitleAction}"
                       AutomationProperties.Name="Close status history" ToolTip="Close status history (Esc)">
-                <Path Data="M2,2 L12,12 M12,2 L2,12" Stroke="#B7CACC" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                <Path Data="M2,2 L12,12 M12,2 L2,12" Stroke="{DynamicResource Theme.Muted}" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
               </Button>
-              <TextBlock Text="Status history" FontSize="15" FontWeight="SemiBold" Foreground="#ECF5F3" VerticalAlignment="Center"/>
+              <TextBlock Text="Status history" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource Theme.Text}" VerticalAlignment="Center"/>
             </DockPanel>
             <ListBox Grid.Row="1" Name="StatusHistoryList" AutomationProperties.Name="Status history" Background="Transparent"
-                     Foreground="#CFDCDE" BorderThickness="0" Padding="0" HorizontalContentAlignment="Stretch"
+                     Foreground="{DynamicResource Theme.Text}" BorderThickness="0" Padding="0" HorizontalContentAlignment="Stretch"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto">
               <ListBox.Template><ControlTemplate TargetType="ListBox">
                 <ScrollViewer Name="HistoryScroll" Style="{StaticResource {x:Type ScrollViewer}}"
@@ -496,14 +527,14 @@
                 <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem">
                   <Border Name="Row" Padding="{TemplateBinding Padding}" CornerRadius="4"><ContentPresenter/></Border>
                   <ControlTemplate.Triggers><Trigger Property="IsSelected" Value="True">
-                    <Setter TargetName="Row" Property="Background" Value="#25373D"/>
+                    <Setter TargetName="Row" Property="Background" Value="{DynamicResource Theme.Hover}"/>
                   </Trigger></ControlTemplate.Triggers>
                 </ControlTemplate></Setter.Value></Setter>
               </Style></ListBox.ItemContainerStyle>
               <ListBox.ItemTemplate><DataTemplate>
                 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                  <TextBlock Text="{Binding ClockTime}" FontSize="12" Foreground="#9FB1B6" MinWidth="76" Margin="0,1,12,0" ToolTip="{Binding Timestamp}"/>
-                  <TextBlock Grid.Column="1" Text="Error" Margin="0,0,8,0" Foreground="#FFBAA8" FontWeight="SemiBold" FontSize="13">
+                  <TextBlock Text="{Binding ClockTime}" FontSize="12" Foreground="{DynamicResource Theme.Muted}" MinWidth="76" Margin="0,1,12,0" ToolTip="{Binding Timestamp}"/>
+                  <TextBlock Grid.Column="1" Text="Error" Margin="0,0,8,0" Foreground="{DynamicResource Theme.Error}" FontWeight="SemiBold" FontSize="13">
                     <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/>
                       <Style.Triggers><DataTrigger Binding="{Binding IsError}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers>
                     </Style></TextBlock.Style>
@@ -520,31 +551,51 @@
             <Border Name="StatusFace" Background="Transparent" BorderThickness="1" BorderBrush="Transparent"
                     Padding="{TemplateBinding Padding}"><ContentPresenter/></Border>
             <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="StatusFace" Property="Background" Value="#1A292F"/></Trigger>
-              <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="StatusFace" Property="BorderBrush" Value="#83B5AD"/></Trigger>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="StatusFace" Property="Background" Value="{DynamicResource Theme.Hover}"/></Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="StatusFace" Property="BorderBrush" Value="{DynamicResource Theme.Accent}"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate></Button.Template>
           <DockPanel LastChildFill="True">
-            <Ellipse Name="Indicator" DockPanel.Dock="Left" Width="7" Height="7" Fill="#91DECA" Margin="0,0,10,0"/>
+            <Ellipse Name="Indicator" DockPanel.Dock="Left" Width="7" Height="7" Fill="{DynamicResource Theme.Accent}" Margin="0,0,10,0"/>
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
-              <TextBlock Text="History" FontSize="12" Foreground="#AAC3C1" VerticalAlignment="Center"/>
-              <Path Name="HistoryChevron" Data="M0,4 L4,0 L8,4" Stroke="#AAC3C1" StrokeThickness="1.5"
+              <TextBlock Text="History" FontSize="12" Foreground="{DynamicResource Theme.Muted}" VerticalAlignment="Center"/>
+              <Path Name="HistoryChevron" Data="M0,4 L4,0 L8,4" Stroke="{DynamicResource Theme.Muted}" StrokeThickness="1.5"
                     Margin="7,0,0,0" VerticalAlignment="Center" RenderTransformOrigin=".5,.5"><Path.RenderTransform><RotateTransform/></Path.RenderTransform></Path>
             </StackPanel>
             <Grid Height="23" ClipToBounds="True">
-              <TextBlock Name="PreviousStatus" Opacity="0" VerticalAlignment="Center" Foreground="#CAD8D9" FontSize="13" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"><TextBlock.RenderTransform><TranslateTransform/></TextBlock.RenderTransform></TextBlock>
-              <TextBlock Name="Status" Text="Ready" VerticalAlignment="Center" Foreground="#CAD8D9" FontSize="13" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"><TextBlock.RenderTransform><TranslateTransform/></TextBlock.RenderTransform></TextBlock>
+              <TextBlock Name="PreviousStatus" Opacity="0" VerticalAlignment="Center" Foreground="{DynamicResource Theme.Text}" FontSize="13" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"><TextBlock.RenderTransform><TranslateTransform/></TextBlock.RenderTransform></TextBlock>
+              <TextBlock Name="Status" Text="Ready" VerticalAlignment="Center" Foreground="{DynamicResource Theme.Text}" FontSize="13" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"><TextBlock.RenderTransform><TranslateTransform/></TextBlock.RenderTransform></TextBlock>
             </Grid>
           </DockPanel>
         </Button>
       </StackPanel>
     </Border>
+    <Grid Name="StopPanel" Grid.Row="1" Grid.RowSpan="2" Panel.ZIndex="11" Visibility="Collapsed"
+          Background="{DynamicResource Theme.Scrim}" AutomationProperties.Name="Disconnect confirmation" FocusManager.IsFocusScope="True"
+          KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle" KeyboardNavigation.DirectionalNavigation="Contained">
+      <Border MaxWidth="432" Margin="18" Padding="22" HorizontalAlignment="Stretch" VerticalAlignment="Center"
+              CornerRadius="14" Background="{DynamicResource Theme.Surface}" BorderBrush="{DynamicResource Theme.Border}" BorderThickness="1">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+          <StackPanel>
+            <TextBlock Name="StopTitle" Text="Stop playing?" TextWrapping="Wrap" Foreground="{DynamicResource Theme.Text}"
+                       FontWeight="SemiBold" FontSize="23" Margin="0,0,0,16" Focusable="True" KeyboardNavigation.IsTabStop="False"/>
+            <CheckBox Name="RestOnStop" Content="Put PS5 into rest mode" Margin="0,0,0,10"/>
+            <CheckBox Name="RememberStop" Content="Remember my choice for this console" Margin="0,0,0,4"/>
+            <TextBlock Name="StopMessage" Visibility="Collapsed" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"
+                       Foreground="{DynamicResource Theme.Muted}" Margin="0,10,0,0"/>
+            <WrapPanel HorizontalAlignment="Right" Margin="0,16,0,0">
+              <Button Name="CancelStop" Content="Keep playing"/><Button Name="ConfirmStop" Content="Stop session" Margin="0" Style="{StaticResource Primary}"/>
+            </WrapPanel>
+          </StackPanel>
+        </ScrollViewer>
+      </Border>
+    </Grid>
     <Grid Name="SetupOverlay" Grid.Row="1" Grid.RowSpan="2" Panel.ZIndex="10" Visibility="Collapsed"
-          Background="#EB10171C" FocusManager.IsFocusScope="True" AutomationProperties.Name="P5Cast setup"
+          Background="{DynamicResource Theme.Scrim}" FocusManager.IsFocusScope="True" AutomationProperties.Name="P5Cast setup"
           KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle" KeyboardNavigation.DirectionalNavigation="Contained">
       <Grid.Resources>
         <Style x:Key="SetupLabel" TargetType="Label">
-          <Setter Property="Foreground" Value="#E8F0F1"/><Setter Property="FontWeight" Value="SemiBold"/>
+          <Setter Property="Foreground" Value="{DynamicResource Theme.Text}"/><Setter Property="FontWeight" Value="SemiBold"/>
           <Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,12,0,5"/>
         </Style>
         <Style x:Key="SetupHint" TargetType="TextBlock" BasedOn="{StaticResource Detail}">
@@ -552,11 +603,11 @@
         </Style>
       </Grid.Resources>
       <Border MaxWidth="568" MaxHeight="630" Margin="16,12" HorizontalAlignment="Stretch" VerticalAlignment="Center"
-              CornerRadius="14" BorderThickness="1" BorderBrush="#3D5157" Background="#172329">
+              CornerRadius="14" BorderThickness="1" BorderBrush="{DynamicResource Theme.Border}" Background="{DynamicResource Theme.Surface}">
         <Grid>
           <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
           <StackPanel Margin="22,16,22,12">
-            <TextBlock Name="SetupStep" Text="Step 1 of 3" FontSize="12" FontWeight="SemiBold" Foreground="#8FE6D0"/>
+            <TextBlock Name="SetupStep" Text="Step 1 of 3" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Theme.Accent}"/>
             <TextBlock Name="SetupTitle" Text="Choose your display" FontSize="25" FontWeight="SemiBold" Margin="0,3,0,0"
                        Focusable="True" KeyboardNavigation.IsTabStop="False"/>
           </StackPanel>
@@ -591,7 +642,7 @@
                   <TextBox Name="SetupAccount" AutomationProperties.Name="Base64 PSN account ID"/>
                   <TextBlock Style="{StaticResource SetupHint}" Text="Use the eight-byte account ID for the PS5 user, encoded in Base64."/>
                   <Button Name="SetupAccountHelp" Content="Find my account ID ↗" AutomationProperties.Name="Open the PSN account ID guide"
-                          HorizontalAlignment="Left" Padding="5,2" MinHeight="26" Margin="0,3,0,0" Foreground="#8FE6D0" Background="Transparent" BorderBrush="Transparent"/>
+                          HorizontalAlignment="Left" Padding="5,2" MinHeight="26" Margin="0,3,0,0" Foreground="{DynamicResource Theme.Accent}" Background="Transparent" BorderBrush="Transparent"/>
                   <Label Style="{StaticResource SetupLabel}" Target="{Binding ElementName=SetupCode}" Content="Eight-digit link code"/>
                   <WrapPanel>
                     <TextBox Name="SetupCode" MaxLength="9" Width="148" Margin="0,0,8,0" AutomationProperties.Name="Eight-digit Link Device code"/>
@@ -600,22 +651,22 @@
                 </StackPanel>
               </StackPanel>
               <StackPanel Name="SetupFinishPage" Visibility="Collapsed">
-                <Border Background="#111B20" BorderThickness="1" BorderBrush="#304147" CornerRadius="8" Padding="14,11">
-                  <TextBlock Name="SetupSummary" Foreground="#E8F0F1" LineHeight="22" TextWrapping="Wrap"/>
+                <Border Background="{DynamicResource Theme.Panel}" BorderThickness="1" BorderBrush="{DynamicResource Theme.Border}" CornerRadius="8" Padding="14,11">
+                  <TextBlock Name="SetupSummary" Foreground="{DynamicResource Theme.Text}" LineHeight="22" TextWrapping="Wrap"/>
                 </Border>
                 <TextBlock Name="SetupFinishHint" Style="{StaticResource Detail}" Margin="0,12,0,0" Text="Press Play in the main window to connect. You can change these choices in Play settings."/>
               </StackPanel>
             </Grid>
           </ScrollViewer>
-          <TextBlock Grid.Row="2" Name="SetupMessage" AutomationProperties.LiveSetting="Polite" Foreground="#EABC8E" TextWrapping="Wrap" Margin="22,0,22,10">
+          <TextBlock Grid.Row="2" Name="SetupMessage" AutomationProperties.LiveSetting="Polite" Foreground="{DynamicResource Theme.Generated}" TextWrapping="Wrap" Margin="22,0,22,10">
             <TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers>
               <Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger>
             </Style.Triggers></Style></TextBlock.Style>
           </TextBlock>
-          <Border Grid.Row="3" BorderBrush="#304147" BorderThickness="0,1,0,0" Padding="16,10">
+          <Border Grid.Row="3" BorderBrush="{DynamicResource Theme.Border}" BorderThickness="0,1,0,0" Padding="16,10">
             <Grid>
               <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-              <Button Name="SetupSkip" Content="Skip setup" HorizontalAlignment="Left" Margin="0" Background="Transparent" BorderBrush="Transparent" Foreground="#B7C9CA"/>
+              <Button Name="SetupSkip" Content="Skip setup" HorizontalAlignment="Left" Margin="0" Background="Transparent" BorderBrush="Transparent" Foreground="{DynamicResource Theme.Muted}"/>
               <Button Name="SetupBack" Grid.Column="1" Content="Back" Margin="0,0,6,0"/>
               <Button Name="SetupNext" Grid.Column="2" Content="Next" Style="{StaticResource Primary}" Margin="0" MinWidth="74"/>
             </Grid>

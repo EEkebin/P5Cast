@@ -79,7 +79,8 @@ namespace Cadrivect
             AutomationProperties.SetName(fullscreenButton,"Fullscreen");
             transport.SizeChanged+=delegate {
                 // The playback controls remain reachable when the sidebar leaves a narrow viewport.
-                bool compact=transport.ActualWidth<525;
+                bool compact=transport.ActualWidth<580;
+                UI<TextBlock>("VolumeBadge").Visibility=transport.ActualWidth<650 ? Visibility.Collapsed : Visibility.Visible;
                 UI<ComboBox>("SourceChoice").Width=compact?122:142;
                 UI<TextBlock>("SettingsActionLabel").Visibility=compact?Visibility.Collapsed:Visibility.Visible;
                 UI<System.Windows.Shapes.Path>("SettingsActionGlyph").Visibility=compact?Visibility.Visible:Visibility.Collapsed;

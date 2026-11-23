@@ -76,7 +76,7 @@ namespace Cadrivect
             current.Text=message;
             current.ToolTip=message;
             AutomationProperties.SetItemStatus(button,message);
-            UI<Ellipse>("Indicator").Fill=error?Brushes.LightSalmon:mint;
+            UI<Ellipse>("Indicator").SetResourceReference(Shape.FillProperty,error?"Theme.Error":"Theme.Accent");
             ShiftStatus(current,enter,0,1,10,0);
         }
 

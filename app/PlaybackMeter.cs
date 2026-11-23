@@ -19,8 +19,8 @@ namespace Cadrivect
         static readonly string[] ModeLabels={"Original","Sharpen","AMD FSR 1","RTX Video SR","DLSS","DLAA","AMD FSR Temporal","DLSS 5 NR"};
         static readonly string[] Descriptions={"Display the source picture.","Sharpen edges at the source resolution.","AMD FidelityFX Super Resolution 1.",
             "NVIDIA RTX Video Super Resolution for SDR video.","Experimental DLSS with motion estimated from the stream.","Experimental DLAA at the source resolution.","AMD temporal upscaling. The SDK selects a provider supported by the GPU.","Experimental DLSS 5 neural rendering at source resolution. Uses motion estimated from the PS5 video. Requires Vulkan, SDR and a compatible RTX GPU."};
-        static readonly Brush Ink=ColorBrush("#E9F3F1"), Muted=ColorBrush("#A5B9BB"), Line=ColorBrush("#304147"), Dark=ColorBrush("#141F24");
-        static readonly Brush Mint=ColorBrush("#8FE6D0"), Amber=ColorBrush("#EABC8E");
+        const string Ink="Theme.Text", Muted="Theme.Muted", Line="Theme.Border";
+        const string Mint="Theme.Accent", Amber="Theme.Generated";
         static readonly ControlTemplate ChipTemplate=MakeChipTemplate();
         static readonly ControlTemplate GroupTemplate=MakeGroupTemplate();
         readonly Action<int,int> change;
@@ -89,7 +89,7 @@ namespace Cadrivect
         {
             this.change=change; this.compare=compare;
             UseLayoutRounding=true; SnapsToDevicePixels=true; Background=Brushes.Transparent;
-            Foreground=Ink; FontFamily=new FontFamily("Segoe UI"); FontSize=12;
+            SetResourceReference(ForegroundProperty,Ink); FontFamily=new FontFamily("Segoe UI"); FontSize=12;
             var layout=new DockPanel();
             var fixedMeter=new StackPanel {Margin=new Thickness(16,14,16,0)};
             DockPanel.SetDock(fixedMeter,Dock.Top); layout.Children.Add(fixedMeter);
@@ -102,7 +102,7 @@ namespace Cadrivect
             heading.Children.Add(targetValue); heading.Children.Add(title); fixedMeter.Children.Add(heading);
             dial.Height=133; dial.Margin=new Thickness(0,2,0,6); fixedMeter.Children.Add(dial);
             var legend=new UniformGrid {Rows=1,Columns=2}; fixedMeter.Children.Add(legend);
-            sourceValue=RateReadout(legend,Label("Source",Muted,11,FontWeights.Normal),Mint,"Source frames submitted for display each second, including redraws.");
+            sourceValue=RateReadout(legend,Label("Source",Muted,11,FontWeights.Normal),"Theme.Source","Source frames submitted for display each second, including redraws.");
             generatedValue=RateReadout(legend,Label("Generated",Muted,11,FontWeights.Normal),Amber,"Interpolated frames submitted for display each second.");
             Separator(fixedMeter);
             var picture=AddGroup(sections,"Picture","PictureGroup");
@@ -146,7 +146,8 @@ namespace Cadrivect
             modelGroup.Children.Add(modelChoice); picture.Children.Add(modelGroup);
             neuralSetup=new StackPanel {Margin=new Thickness(0,7,0,0),Visibility=Visibility.Collapsed};
             neuralSetup.Children.Add(Label("DLSS Neural Rendering",Ink,12,FontWeights.SemiBold));
-            var licenseLink=new Hyperlink(new Run("NVIDIA SDK license")) {Foreground=Mint};
+            var licenseLink=new Hyperlink(new Run("NVIDIA SDK license"));
+            licenseLink.SetResourceReference(TextElement.ForegroundProperty,Mint);
             licenseLink.Click+=delegate {if(NeuralLicenseRequested!=null) NeuralLicenseRequested();};
             var licenseText=Label("",Muted,11,FontWeights.Normal);licenseText.TextWrapping=TextWrapping.Wrap;
             licenseText.Inlines.Add(new Run("Optional runtime · "));licenseText.Inlines.Add(licenseLink);
@@ -269,32 +270,36 @@ namespace Cadrivect
         }
         public void SetRequestedVideoKbps(int kbps) {requestedVideoKbps=Math.Max(0,kbps); ShowRequested(directSelected);}
         void ShowRequested(bool direct) {values["requested"].Text=direct && requestedVideoKbps>0 ? Metric(requestedVideoKbps/1000.0," Mb/s","0.##") : "—";}
-        static TextBlock RateReadout(Panel legend,TextBlock caption,Brush color,string detail)
+        static TextBlock RateReadout(Panel legend,TextBlock caption,string color,string detail)
         {
             var cell=new DockPanel {Margin=new Thickness(0,1,9,2),ToolTip=detail};
-            var chip=new Line {X1=0,X2=8,Y1=0,Y2=0,Stroke=color,StrokeThickness=3,
+            var chip=new Line {X1=0,X2=8,Y1=0,Y2=0,StrokeThickness=3,
                 StrokeStartLineCap=PenLineCap.Round,StrokeEndLineCap=PenLineCap.Round,
                 Margin=new Thickness(0,0,5,0),VerticalAlignment=VerticalAlignment.Center};
+            chip.SetResourceReference(Shape.StrokeProperty,color);
             var value=Label("—",Ink,12,FontWeights.SemiBold);
             DockPanel.SetDock(chip,Dock.Left); DockPanel.SetDock(value,Dock.Right);
             cell.Children.Add(chip); cell.Children.Add(value); cell.Children.Add(caption); legend.Children.Add(cell);
             return value;
         }
-        static SolidColorBrush ColorBrush(string color)
+        internal void RefreshTheme() {dial.InvalidateVisual();}
+        static TextBlock Label(string text,string role,double size,FontWeight weight)
         {
-            var brush=new SolidColorBrush((Color)ColorConverter.ConvertFromString(color)); brush.Freeze(); return brush;
-        }
-        static TextBlock Label(string text,Brush foreground,double size,FontWeight weight)
-        {
-            return new TextBlock {Text=text,Foreground=foreground,FontSize=size,FontWeight=weight,VerticalAlignment=VerticalAlignment.Center};
+            var label=new TextBlock {Text=text,FontSize=size,FontWeight=weight,VerticalAlignment=VerticalAlignment.Center};
+            label.SetResourceReference(TextBlock.ForegroundProperty,role);
+            return label;
         }
         static TextBlock Heading(string text)
         {
-            return new TextBlock {Text=text,Foreground=Ink,FontSize=15,FontWeight=FontWeights.SemiBold,Margin=new Thickness(0,0,0,5)};
+            var label=Label(text,Ink,15,FontWeights.SemiBold);
+            label.Margin=new Thickness(0,0,0,5);
+            return label;
         }
         static void Separator(Panel body)
         {
-            body.Children.Add(new Border {Height=1,Background=Line,Margin=new Thickness(0,10,0,9)});
+            var line=new Border {Height=1,Margin=new Thickness(0,10,0,9)};
+            line.SetResourceReference(Border.BackgroundProperty,Line);
+            body.Children.Add(line);
         }
         static StackPanel AddGroup(Panel parent,string title,string id)
         {
@@ -316,18 +321,18 @@ namespace Cadrivect
             var row=new FrameworkElementFactory(typeof(DockPanel)); surface.AppendChild(row);
             var arrow=new FrameworkElementFactory(typeof(Path),"Arrow");
             arrow.SetValue(DockPanel.DockProperty,Dock.Right); arrow.SetValue(FrameworkElement.VerticalAlignmentProperty,VerticalAlignment.Center);
-            arrow.SetValue(Shape.StrokeProperty,Muted); arrow.SetValue(Shape.StrokeThicknessProperty,1.6);
+            arrow.SetResourceReference(Shape.StrokeProperty,Muted); arrow.SetValue(Shape.StrokeThicknessProperty,1.6);
             arrow.SetValue(Path.DataProperty,Geometry.Parse("M 3,1 L 8,6 L 3,11")); row.AppendChild(arrow);
             var caption=new FrameworkElementFactory(typeof(ContentPresenter)); row.AppendChild(caption);
             var titleTemplate=new ControlTemplate(typeof(ToggleButton)) {VisualTree=surface};
             var open=new Trigger {Property=ToggleButton.IsCheckedProperty,Value=true};
             open.Setters.Add(new Setter(Path.DataProperty,Geometry.Parse("M 1,3 L 6,8 L 11,3"),"Arrow")); titleTemplate.Triggers.Add(open);
             var hover=new Trigger {Property=UIElement.IsMouseOverProperty,Value=true};
-            hover.Setters.Add(new Setter(Border.BackgroundProperty,ColorBrush("#213237"),"Surface")); titleTemplate.Triggers.Add(hover);
+            hover.Setters.Add(new Setter(Border.BackgroundProperty,new DynamicResourceExtension("Theme.Hover"),"Surface")); titleTemplate.Triggers.Add(hover);
 
             var stack=new FrameworkElementFactory(typeof(StackPanel));
             var toggle=new FrameworkElementFactory(typeof(ToggleButton));
-            toggle.SetValue(Control.TemplateProperty,titleTemplate); toggle.SetValue(Control.ForegroundProperty,Ink);
+            toggle.SetValue(Control.TemplateProperty,titleTemplate); toggle.SetResourceReference(Control.ForegroundProperty,Ink);
             toggle.SetValue(Control.FontSizeProperty,15.0); toggle.SetValue(Control.FontWeightProperty,FontWeights.SemiBold);
             toggle.SetValue(ContentControl.ContentProperty,new TemplateBindingExtension(HeaderedContentControl.HeaderProperty));
             toggle.SetBinding(ToggleButton.IsCheckedProperty,new Binding("IsExpanded") {RelativeSource=RelativeSource.TemplatedParent,Mode=BindingMode.TwoWay});
@@ -356,27 +361,27 @@ namespace Cadrivect
             var surface=new FrameworkElementFactory(typeof(Border),"Surface");
             surface.SetValue(Border.CornerRadiusProperty,new CornerRadius(5));
             surface.SetValue(Border.BorderThicknessProperty,new Thickness(1));
-            surface.SetValue(Border.BackgroundProperty,ColorBrush("#1D2B31")); surface.SetValue(Border.BorderBrushProperty,Line);
+            surface.SetResourceReference(Border.BackgroundProperty,"Theme.Control"); surface.SetResourceReference(Border.BorderBrushProperty,Line);
             var content=new FrameworkElementFactory(typeof(ContentPresenter));
             content.SetValue(ContentPresenter.HorizontalAlignmentProperty,HorizontalAlignment.Center);
             content.SetValue(ContentPresenter.VerticalAlignmentProperty,VerticalAlignment.Center);
             surface.AppendChild(content);
             var template=new ControlTemplate(typeof(ToggleButton)) {VisualTree=surface};
             var hover=new Trigger {Property=UIElement.IsMouseOverProperty,Value=true};
-            hover.Setters.Add(new Setter(Border.BorderBrushProperty,ColorBrush("#70918E"),"Surface")); template.Triggers.Add(hover);
+            hover.Setters.Add(new Setter(Border.BorderBrushProperty,new DynamicResourceExtension("Theme.StrongBorder"),"Surface")); template.Triggers.Add(hover);
             var selected=new Trigger {Property=ToggleButton.IsCheckedProperty,Value=true};
-            selected.Setters.Add(new Setter(Border.BackgroundProperty,ColorBrush("#263F3D"),"Surface"));
-            selected.Setters.Add(new Setter(Border.BorderBrushProperty,ColorBrush("#557D74"),"Surface"));
-            selected.Setters.Add(new Setter(Control.ForegroundProperty,Mint)); template.Triggers.Add(selected);
+            selected.Setters.Add(new Setter(Border.BackgroundProperty,new DynamicResourceExtension("Theme.Selected"),"Surface"));
+            selected.Setters.Add(new Setter(Border.BorderBrushProperty,new DynamicResourceExtension("Theme.StrongBorder"),"Surface"));
+            selected.Setters.Add(new Setter(Control.ForegroundProperty,new DynamicResourceExtension(Mint))); template.Triggers.Add(selected);
             var focus=new Trigger {Property=UIElement.IsKeyboardFocusedProperty,Value=true};
-            focus.Setters.Add(new Setter(Border.BorderBrushProperty,Mint,"Surface")); template.Triggers.Add(focus);
+            focus.Setters.Add(new Setter(Border.BorderBrushProperty,new DynamicResourceExtension(Mint),"Surface")); template.Triggers.Add(focus);
             var disabled=new Trigger {Property=UIElement.IsEnabledProperty,Value=false};
             disabled.Setters.Add(new Setter(UIElement.OpacityProperty,.44,"Surface")); template.Triggers.Add(disabled);
             return template;
         }
         static void StyleChip(ToggleButton chip)
         {
-            chip.Height=28; chip.Margin=new Thickness(2); chip.FontSize=11; chip.Foreground=Ink;
+            chip.Height=28; chip.Margin=new Thickness(2); chip.FontSize=11; chip.SetResourceReference(Control.ForegroundProperty,Ink);
             chip.FontWeight=FontWeights.SemiBold; ToolTipService.SetShowOnDisabled(chip,true);
             AutomationProperties.SetName(chip,chip.Content.ToString());
         }
@@ -562,8 +567,7 @@ namespace Cadrivect
 
         sealed class FrameRateDial : FrameworkElement
         {
-            static readonly Brush Track=ColorBrush("#2B3D43"), Tick=ColorBrush("#5C7378");
-            static readonly Pen MinorTick=new Pen(Tick,1),MajorTick=new Pen(Muted,1.3);
+            Brush ThemeBrush(string role) {return (Brush)FindResource("Theme."+role);}
             static readonly Typeface NumberFace=new Typeface(new FontFamily("Segoe UI"),FontStyles.Normal,FontWeights.SemiBold,FontStretches.Normal);
             static readonly Typeface LabelFace=new Typeface("Segoe UI");
             double target,source,presented,generated;
@@ -616,19 +620,23 @@ namespace Cadrivect
                 Point hub=new Point(ActualWidth/2,ActualHeight-10);
                 double radius=Math.Min(hub.X-18,hub.Y-11);
                 if(radius<45) return;
+                var ink=ThemeBrush("Text");
+                var muted=ThemeBrush("Muted");
+                var minorTick=new Pen(ThemeBrush("StrongBorder"),1);
+                var majorTick=new Pen(muted,1.3);
                 double peak=Math.Max(double.IsNaN(target)?0:target,double.IsNaN(presented)?0:presented);
                 double maximum=Math.Max(240,240*Math.Ceiling(peak/240));
                 for(int i=0;i<=16;i++) {
                     double angle=i*Math.PI/16;
                     bool major=i%4==0;
-                    dc.DrawLine(major ? MajorTick:MinorTick,Polar(hub,radius-10,angle),Polar(hub,radius-(major?3:i%2==0?5:7),angle));
+                    dc.DrawLine(major ? majorTick:minorTick,Polar(hub,radius-10,angle),Polar(hub,radius-(major?3:i%2==0?5:7),angle));
                     if(major) CenterText(dc,(maximum*i/16).ToString("0",CultureInfo.InvariantCulture),
-                        Polar(hub,radius+7,angle),10,LabelFace,Muted);
+                        Polar(hub,radius+7,angle),10,LabelFace,muted);
                 }
                 double ring=radius-18,split=Math.PI*source/maximum,end=Math.PI*presented/maximum;
-                Arc(dc,hub,ring,0,Math.PI,Track,true,true);
-                Arc(dc,hub,ring,0,split,Mint,true,generated==0);
-                Arc(dc,hub,ring,split,end,Amber,source==0,true);
+                Arc(dc,hub,ring,0,Math.PI,ThemeBrush("Track"),true,true);
+                Arc(dc,hub,ring,0,split,ThemeBrush("Source"),true,generated==0);
+                Arc(dc,hub,ring,split,end,ThemeBrush("Generated"),source==0,true);
                 if(!double.IsNaN(target)) {
                     double a=Math.PI*target/maximum;
                     var tip=Polar(hub,radius-16,a); var back=Polar(hub,radius-7,a);
@@ -639,10 +647,10 @@ namespace Cadrivect
                         g.LineTo(new Point(back.X+dx,back.Y+dy),true,false);
                         g.LineTo(new Point(back.X-dx,back.Y-dy),true,false);
                     }
-                    dc.DrawGeometry(Ink,new Pen(Dark,1),marker);
+                    dc.DrawGeometry(ink,new Pen(ThemeBrush("Panel"),1),marker);
                 }
-                CenterText(dc,Metric(presented,"","0.#"),new Point(hub.X,hub.Y-24),29,NumberFace,Ink);
-                CenterText(dc,"Output FPS",new Point(hub.X,hub.Y-2),10.5,LabelFace,Muted);
+                CenterText(dc,Metric(presented,"","0.#"),new Point(hub.X,hub.Y-24),29,NumberFace,ink);
+                CenterText(dc,"Output FPS",new Point(hub.X,hub.Y-2),10.5,LabelFace,muted);
             }
         }
     }

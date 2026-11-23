@@ -161,7 +161,8 @@ int main(int argc, char **argv)
 {
     if (argc == 2 && !strcmp(argv[1], "--version")) { puts("CadrivectDirect / libchiaki 1.10.1 / CDV1 + CDV2"); return 0; }
     if (argc == 3 && !strcmp(argv[1], "--register")) return register_console(argv[2]);
-    bool rest_control = argc >= 7 && !strcmp(argv[argc - 1], "--rest-control");
+    bool volume_control = argc >= 7 && !strcmp(argv[argc - 1], "--session-control");
+    bool rest_control = volume_control || (argc >= 7 && !strcmp(argv[argc - 1], "--rest-control"));
     if (rest_control) argc--;
     if (argc < 4 || argc > 7 || strlen(argv[3]) != 1) return 20;
     ChiakiConnectInfo info = {0};
@@ -184,10 +185,14 @@ int main(int argc, char **argv)
             rest_open(&core.rest, argv[1]);
             core.report_peer = GetFileType(GetStdHandle(STD_OUTPUT_HANDLE)) == FILE_TYPE_PIPE;
         }
-        status = run(&core, argv[1], &info);
+        // The dashboard initializes this scalar before releasing credentials on stdin.
+        // Fail before opening SDL if the required mapping is unavailable.
+        if (volume_control && !audio_open_volume(&core.audio, argv[1])) status = 28;
+        else status = run(&core, argv[1], &info);
     }
     rest_close(&core.rest);
     if (core.audio.device) SDL_CloseAudioDevice(core.audio.device);
+    audio_close_volume(&core.audio);
     if (core.gamepad.pad) SDL_GameControllerClose(core.gamepad.pad);
     SDL_Quit();
     if (core.video.pipe != INVALID_HANDLE_VALUE) CloseHandle(core.video.pipe);

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.IO.MemoryMappedFiles;
 using System.Linq;
 using System.Net;
 using System.Runtime.CompilerServices;
@@ -24,8 +25,10 @@ namespace Cadrivect
             public readonly string Pipe;
             readonly string prefix;
             readonly EventWaitHandle[] events=new EventWaitHandle[3];
+            MemoryMappedFile volumeMap;
+            MemoryMappedViewAccessor volume;
             Task pending;
-            public RestControl(string pipe,int pid)
+            public RestControl(string pipe,int pid,int? initialVolume)
             {
                 Pipe=pipe;
                 prefix="Local\\P5Cast.Rest."+pid.ToString(System.Globalization.CultureInfo.InvariantCulture)+"."+pipe+".";
@@ -40,13 +43,32 @@ namespace Cadrivect
                         events[i]=new EventWaitHandle(false,EventResetMode.ManualReset,prefix+names[i],out created,acl);
                         if(!created) throw new IOException("The console session controls are already in use.");
                     }
+                    if(initialVolume.HasValue) {
+                        var security=new MemoryMappedFileSecurity();
+                        security.SetAccessRuleProtection(true,false);
+                        using(var user=WindowsIdentity.GetCurrent())
+                            security.AddAccessRule(new AccessRule<MemoryMappedFileRights>(user.User,MemoryMappedFileRights.FullControl,AccessControlType.Allow));
+                        volumeMap=MemoryMappedFile.CreateNew(prefix+"volume",sizeof(int),MemoryMappedFileAccess.ReadWrite,
+                            MemoryMappedFileOptions.None,security,HandleInheritability.None);
+                        volume=volumeMap.CreateViewAccessor(0,sizeof(int),MemoryMappedFileAccess.ReadWrite);
+                        SetVolume(initialVolume.Value);
+                    }
                 } catch {Dispose(); throw;}
+            }
+            public void SetVolume(int percent)
+            {
+                lock(this) {
+                    if(volume!=null)volume.Write(0,Math.Max(0,Math.Min(100,percent)));
+                }
             }
             public Task Request(Process owned)
             {
                 lock(this) {
-                    if(pending==null) {
+                    if(pending==null || pending.IsFaulted) {
                         if(owned.HasExited) throw new InvalidOperationException("The Direct session has ended.");
+                        // A confirmed acceptance stays latched for the life of this session.
+                        // A fresh request may, however, recover after a rejection or timeout.
+                        events[2].Reset();
                         pending=Task.Run((Func<Task>)Send);
                     }
                     return pending;
@@ -70,8 +92,17 @@ namespace Cadrivect
             }
             public void Dispose()
             {
+                lock(this) {
+                    if(volume!=null){volume.Dispose();volume=null;}
+                    if(volumeMap!=null){volumeMap.Dispose();volumeMap=null;}
+                }
                 foreach(var handle in events) if(handle!=null) handle.Dispose();
             }
+        }
+        internal static void SetVolume(Process owned,int percent)
+        {
+            RestControl control;
+            if(owned!=null && restControls.TryGetValue(owned,out control))control.SetVolume(percent);
         }
         public static Task RequestRestAsync(string pipe,Process owned)
         {
@@ -219,6 +250,11 @@ namespace Cadrivect
 
         public Process Connect(string pipe,string host,int codec,int fps,int videoKbps=0,int streamHeight=1080)
         {
+            return Connect(pipe,host,codec,fps,videoKbps,streamHeight,null);
+        }
+
+        internal Process Connect(string pipe,string host,int codec,int fps,int videoKbps,int streamHeight,int? volume)
+        {
             if(Array.IndexOf(StreamHeights,streamHeight)<0)
                 throw new ArgumentOutOfRangeException("streamHeight","Choose a supported PS5 stream resolution.");
             if(videoKbps!=0 && (videoKbps<2000 || videoKbps>100000))
@@ -226,12 +262,12 @@ namespace Cadrivect
             if(string.IsNullOrEmpty(pipe) || pipe.Length>120 || pipe.Any(c=>!(c>='A' && c<='Z' || c>='a' && c<='z' || c>='0' && c<='9' || c=='-' || c=='_')))
                 throw new ArgumentException("Invalid Direct session pipe.");
             string address=Host(host);
-            string arguments=pipe+" "+address+" "+codec+" "+fps+" "+videoKbps.ToString(System.Globalization.CultureInfo.InvariantCulture)+" "+streamHeight.ToString(System.Globalization.CultureInfo.InvariantCulture)+" --rest-control";
+            string arguments=pipe+" "+address+" "+codec+" "+fps+" "+videoKbps.ToString(System.Globalization.CultureInfo.InvariantCulture)+" "+streamHeight.ToString(System.Globalization.CultureInfo.InvariantCulture)+(volume.HasValue?" --session-control":" --rest-control");
             byte[] secret=Keys(); Process p=null;
             try {
                 if(secret.Length!=32 && secret.Length!=36) throw new InvalidDataException("This registration needs to be paired again.");
                 p=Begin(arguments,true);
-                var control=new RestControl(pipe,p.Id);
+                var control=new RestControl(pipe,p.Id,volume);
                 try {
                     restControls.Add(p,control);
                     p.Exited+=delegate {control.Dispose();};

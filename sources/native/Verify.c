@@ -133,6 +133,61 @@ static void verify_audio(void)
     SDL_AudioQuit();
 }
 
+static void verify_first_audio_volume(void)
+{
+    char directory[MAX_PATH], filename[MAX_PATH], name[200];
+    CHECK(GetTempPathA(MAX_PATH, directory) > 0);
+    CHECK(GetTempFileNameA(directory, "p5v", 0, filename));
+    CHECK(SDL_setenv("SDL_DISKAUDIOFILE", filename, 1) == 0);
+    CHECK(SDL_AudioInit("disk") == 0 && !strcmp(SDL_GetCurrentAudioDriver(), "disk"));
+    snprintf(name, sizeof(name), "Local\\P5Cast.Rest.%lu.volume-test.volume", GetCurrentProcessId());
+    HANDLE map = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof(LONG), name);
+    CHECK(map && GetLastError() != ERROR_ALREADY_EXISTS);
+    volatile LONG *percent = MapViewOfFile(map, FILE_MAP_WRITE, 0, 0, sizeof(LONG));
+    CHECK(percent);
+    InterlockedExchange(percent, 0);
+    Audio audio = {0};
+    CHECK(!audio_open_volume(&audio, "wrong-session"));
+    CHECK(audio_open_volume(&audio, "volume-test"));
+    audio_settings(2, 48000, &audio);
+    CHECK(audio.device && !audio.failed);
+    int16_t pcm[240 * 2];
+    const LONG levels[] = {0, 25, 100};
+    for (size_t block = 0; block < 3; block++) {
+        InterlockedExchange(percent, levels[block]);
+        for (size_t i = 0; i < 240; i++) {
+            pcm[i*2] = block == 0 ? 29000 : 12000;
+            pcm[i*2+1] = block == 0 ? -27000 : -10000;
+        }
+        audio_frame(pcm, 240, &audio);
+        if (!block) CHECK(SDL_GetQueuedAudioSize(audio.device) == sizeof(pcm) && !audio.playing);
+    }
+    CHECK(audio.playing);
+    for (int i = 0; i < 200 && SDL_GetQueuedAudioSize(audio.device); i++) SDL_Delay(5);
+    CHECK(!SDL_GetQueuedAudioSize(audio.device));
+    SDL_Delay(25);
+    SDL_CloseAudioDevice(audio.device);
+    audio_close_volume(&audio); CHECK(!audio.volume_percent);
+    UnmapViewOfFile((const void *)percent); CloseHandle(map);
+    SDL_AudioQuit();
+
+    FILE *capture = fopen(filename, "rb");
+    CHECK(capture);
+    int16_t stereo[2]; int leading_silence = 0, scaled = 0, full = 0;
+    while (fread(stereo, sizeof(stereo), 1, capture) == 1) {
+        if (stereo[0] == 0 && stereo[1] == 0) {
+            if (!scaled && !full) leading_silence++;
+        } else if (stereo[0] == 3000 && stereo[1] == -2500) {
+            CHECK(!full); scaled++;
+        } else {
+            CHECK(stereo[0] == 12000 && stereo[1] == -10000); full++;
+        }
+    }
+    CHECK(!ferror(capture)); fclose(capture); CHECK(DeleteFileA(filename));
+    CHECK(leading_silence >= 240 && scaled == 240 && full == 240);
+    puts("Measured SDL disk output: first 240 stereo frames silent, next 240 at 25%, last 240 bit-exact at 100%.");
+}
+
 static void verify_virtual_pad(void)
 {
     SDL_SetHintWithPriority(SDL_HINT_JOYSTICK_HIDAPI, "0", SDL_HINT_OVERRIDE);
@@ -192,11 +247,12 @@ static void verify_rest(void)
     SetEvent(events[0]);
     rest_tick(&control, false, NULL, record_rest);
     CHECK(!rest_calls && WaitForSingleObject(events[2], 0) == WAIT_OBJECT_0);
-    rest_close(&control);
-    control = (RestControl){0};
     ResetEvent(events[2]);
-    rest_open(&control, "fixture");
     rest_tick(&control, true, NULL, record_rest);
+    CHECK(!rest_calls);
+    SetEvent(events[0]);
+    rest_tick(&control, true, NULL, record_rest);
+    SetEvent(events[0]);
     rest_tick(&control, true, NULL, record_rest);
     CHECK(rest_calls == 1 && WaitForSingleObject(events[1], 0) == WAIT_OBJECT_0);
     CHECK(WaitForSingleObject(events[2], 0) == WAIT_TIMEOUT);
@@ -214,6 +270,7 @@ int main(void)
         verify_video(codec, true);
     }
     verify_audio();
+    verify_first_audio_volume();
     verify_rest();
     verify_virtual_pad();
     puts("Verified video bitrate profiles, CDV1/CDV2 framing, actual decoded stereo Opus and bitrate, bounded dummy queue, virtual controller, and session-scoped explicit rest command exactly once.");

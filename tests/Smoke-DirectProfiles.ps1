@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param()
 $ErrorActionPreference='Stop'
 $qa=Join-Path ([IO.Path]::GetTempPath()) ('Cadrivect-profile-fixture-'+[guid]::NewGuid().ToString('N'))
@@ -8,6 +8,7 @@ try {
     $code=@'
 using System;
 using System.IO;
+using System.IO.MemoryMappedFiles;
 using System.Text;
 using System.Linq;
 using System.Reflection;
@@ -27,12 +28,30 @@ namespace Cadrivect {
                 if(args[0]!="--register") {
                     string expected=args[0]=="Cadrivect-BitrateFixture" ? "100000" : "0";
                     string height=args[0]=="Cadrivect-BitrateFixture" ? "720" : "1080";
-                    if(args.Length!=7 || args[3]!="60" || args[4]!=expected || args[5]!=height || args[6]!="--rest-control" || !request.SequenceEqual(dummyKeys)) return 41;
+                    if(args.Length!=7 || args[3]!="60" || args[4]!=expected || args[5]!=height || args[6]!=(args[0]=="AudioVolume"?"--session-control":"--rest-control") || !request.SequenceEqual(dummyKeys)) return 41;
                     string prefix="Local\\P5Cast.Rest."+Process.GetCurrentProcess().Id+"."+args[0]+".";
+                    if(args[0]=="AudioVolume") {
+                        using(var map=MemoryMappedFile.OpenExisting(prefix+"volume",MemoryMappedFileRights.Read))
+                        using(var view=map.CreateViewAccessor(0,4,MemoryMappedFileAccess.Read))
+                        using(var ready=new EventWaitHandle(false,EventResetMode.ManualReset,"Local\\P5Cast.VolumeFixture."+Process.GetCurrentProcess().Id)) {
+                            if(view.ReadInt32(0)!=0)return 48;
+                            ready.Set();
+                            for(int i=0;i<200;i++) {
+                                if(view.ReadInt32(0)==35)return 0;
+                                Thread.Sleep(10);
+                            }
+                            return 49;
+                        }
+                    }
                     using(var signal=EventWaitHandle.OpenExisting(prefix+"request"))
                     using(var ack=EventWaitHandle.OpenExisting(prefix+"accepted"))
                     using(var rejected=EventWaitHandle.OpenExisting(prefix+"rejected")) {
-                        if(args[0]=="RestAccept" || args[0]=="RestReject" || args[0]=="RestTimeout") {
+                        if(args[0]=="RestRetry") {
+                            if(!signal.WaitOne(4000)) return 46;
+                            signal.Reset();rejected.Set();
+                            if(!signal.WaitOne(4000) || rejected.WaitOne(0)) return 47;
+                            signal.Reset();ack.Set();
+                        } else if(args[0]=="RestAccept" || args[0]=="RestReject" || args[0]=="RestTimeout") {
                             if(!signal.WaitOne(4000)) return 43;
                             if(args[0]=="RestTimeout") return signal.WaitOne(0) ? 0 : 44;
                             (args[0]=="RestAccept" ? ack : rejected).Set();
@@ -76,6 +95,12 @@ namespace Cadrivect {
             using(var child=row.Connect("Cadrivect-BitrateFixture","fixture.invalid",2,60,100000,720)) {
                 Require(child.WaitForExit(4000) && child.ExitCode==0,"Explicit bitrate did not reach the helper");
             }
+            using(var child=row.Connect("AudioVolume","fixture.invalid",2,60,0,1080,0)) {
+                using(var ready=new EventWaitHandle(false,EventResetMode.ManualReset,"Local\\P5Cast.VolumeFixture."+child.Id))
+                    Require(ready.WaitOne(4000),"Saved mute available before the first audio frame");
+                DirectConsole.SetVolume(child,35);
+                Require(child.WaitForExit(4000) && child.ExitCode==0,"Live mapped Direct volume update");
+            }
             bool rejected=false;
             try {row.Connect("Cadrivect-BitrateFixture","fixture.invalid",2,60,100001);} catch(ArgumentOutOfRangeException){rejected=true;}
             Require(rejected,"Out-of-range source bitrate");
@@ -96,6 +121,14 @@ namespace Cadrivect {
                     catch(InvalidOperationException){failed=pipe=="RestReject";}
                     Require(failed && child.WaitForExit(1000) && child.ExitCode==0,"Unacknowledged rest request reported success");
                 }
+            }
+            using(var child=row.Connect("RestRetry","fixture.invalid",2,60)) {
+                bool retryNeeded=false;
+                try {DirectConsole.RequestRestAsync("RestRetry",child).GetAwaiter().GetResult();}
+                catch(InvalidOperationException) {retryNeeded=true;}
+                Require(retryNeeded,"The first rest attempt should report a rejection.");
+                DirectConsole.RequestRestAsync("RestRetry",child).GetAwaiter().GetResult();
+                Require(child.WaitForExit(1000) && child.ExitCode==0,"A rejected rest request could not be retried on the same session.");
             }
             DirectConsole.Pair("fixture.invalid",a,"01234567").GetAwaiter().GetResult();
             Require(Directory.GetFiles(dir).Length==1,"Atomic pairing replacement");

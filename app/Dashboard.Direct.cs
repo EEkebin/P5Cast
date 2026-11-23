@@ -138,6 +138,7 @@ namespace Cadrivect
             if(!stopRequested && (preparing || Active) && !closing && !stopping)
                 Show(preparing || (rendering!=null && !firstFrame) ? "Cancelling connection…" : "Disconnecting…");
             stopRequested=true;
+            ReleaseStreamAudio();
             if(wakeCheck!=null) wakeCheck.Cancel();
             stopping=preparing || Active;
             if(network!=null) {var owned=network; network=null; owned.Dispose(); surface.Clear(); stopping=false; Show("Disconnected");}
@@ -146,10 +147,12 @@ namespace Cadrivect
         }
         void Finish()
         {
+            ReleaseStreamAudio();
             preparing=stopping=false;
             sourceAspect=0; UpdateWipeInput();
             playingMac=playingPipe=null; EndDiscordSession();
-            if(UI<StackPanel>("StopPanel").Visibility==Visibility.Visible) SetPage("Play");
+            if(!requestingRest) closeAfterStop=false;
+            DismissStopPrompt();
             meter.Reset(mode,factor); meter.SetRequestedVideoKbps(source=="Direct"?DirectKbps():0); surface.Clear(); UpdateTransport();
             if(closing) QueueWindowClose();
         }
@@ -180,7 +183,7 @@ namespace Cadrivect
                     string pipe="Cadrivect-Video-"+Guid.NewGuid().ToString("N");
                     args.AddRange(new[]{"--direct-pipe",pipe,"--direct-runtime",runtime,"--target-fps",fps.ToString()});
                     sessionVideoKbps=DirectKbps();
-                    directCore=console.Connect(pipe,address,codec,fps,sessionVideoKbps,DirectStreamHeight());
+                    directCore=console.Connect(pipe,address,codec,fps,sessionVideoKbps,DirectStreamHeight(),EffectiveStreamVolume);
                     playingMac=console.Mac; playingPipe=pipe; titleAddress=address;
                     Show("Connecting to "+console.Name+"…");
                 } else if(source=="Demo") {
@@ -188,6 +191,7 @@ namespace Cadrivect
                 } else {
                     using(var sony=Process.GetProcessesByName("RemotePlay").FirstOrDefault(p=>p.MainWindowHandle!=IntPtr.Zero)) {
                         if(sony==null) throw new InvalidOperationException("Connect in Sony PS Remote Play first, or select Direct to PS5 for built-in pairing and playback.");
+                        AttachStreamAudio(sony.Id);
                         args.AddRange(new[]{"--hwnd",sony.MainWindowHandle.ToInt64().ToString(CultureInfo.InvariantCulture)});
                     }
                     Show("Capturing your Sony Remote Play session…");
@@ -243,11 +247,13 @@ namespace Cadrivect
                     Show(owned.Error ?? (code==0?"Network session ended.":"Network session ended (code "+code+")."),code!=0);
                 });
                 network=owned;
+                if(!pair && !Convert.ToBoolean(plan["muted"])) AttachStreamAudio(owned.ProcessId);
             } finally {preparing=false; if(network==null) Finish(); else UpdateTransport();}
         }
         static string CoreError(int code)
         {
             if(code==24 || code==25) return "The PS5 requires its user login PIN. Unlock the active console profile and reconnect.";
+            if(code==28) return "The Direct audio volume control could not open. Reconnect to start the session.";
             if(code==26) return "The audio output could not start. Select an available Windows playback device and reconnect.";
             if(code==23) return "The PS5 session disconnected. Check that the console is awake and its address is reachable.";
             return "The direct streaming engine stopped (code "+code+").";

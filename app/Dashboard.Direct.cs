@@ -80,6 +80,11 @@ namespace Cadrivect
         {
             if(rendering!=null) engine.ConfigureOutput(resolutionIds[UI<ComboBox>("RenderResolution").SelectedIndex],hdrIds[UI<ComboBox>("HdrOutput").SelectedIndex]);
         }
+        double sourceAspect;
+        void UpdateWipeInput()
+        {
+            surface.ConfigureWipe(rendering!=null && meter.ComparisonView=="wipe",meter.WipePosition,sourceAspect);
+        }
         void Tick()
         {
             TickDiscord();
@@ -96,6 +101,10 @@ namespace Cadrivect
                 // A selection made while the engine worker starts may precede its session.
                 if(!firstFrame && Field(snapshot,"comparisonView")!=meter.ComparisonView)
                     engine.SetComparison(meter.ComparisonView);
+                if(!firstFrame && meter.ComparisonView=="wipe") engine.SetWipePosition((float)meter.WipePosition);
+                double width=PlaybackMeter.Number(snapshot,"inputWidth"),height=PlaybackMeter.Number(snapshot,"inputHeight");
+                sourceAspect=width>0 && height>0 ? width/height : 0;
+                UpdateWipeInput();
                 meter.Update(snapshot);
                 if(!firstFrame && Field(snapshot,"presented")!="0" && Field(snapshot,"presented")!="") {
                     string label=source=="Demo"?"Offline demo":source=="Direct"?"PS5 connected":"Sony Remote Play";
@@ -115,6 +124,7 @@ namespace Cadrivect
         void Finish()
         {
             preparing=stopping=false;
+            sourceAspect=0; UpdateWipeInput();
             playingMac=playingPipe=null; EndDiscordSession();
             if(UI<StackPanel>("StopPanel").Visibility==Visibility.Visible) SetPage("Play");
             meter.Reset(mode,factor); meter.SetRequestedVideoKbps(source=="Direct"?DirectKbps():0); surface.Clear(); UpdateTransport();
@@ -159,7 +169,7 @@ namespace Cadrivect
                     }
                     Show("Capturing your Sony Remote Play session…");
                 }
-                args.AddRange(new[]{"--comparison",meter.ComparisonView});
+                args.AddRange(new[]{"--comparison",meter.ComparisonView,"--wipe-position",meter.WipePosition.ToString("R",CultureInfo.InvariantCulture)});
                 rendering=engine.Start(args.ToArray()); preparing=false; UpdateTransport();
                 int code=await rendering;
                 if(!stopping && directCore!=null && directCore.HasExited && directCore.ExitCode!=0) failure=CoreError(directCore.ExitCode);

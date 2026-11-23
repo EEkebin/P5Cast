@@ -8,6 +8,21 @@
     <shell:WindowChrome CaptionHeight="52" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False"/>
   </shell:WindowChrome.WindowChrome>
   <Window.Resources>
+    <Style x:Key="WipeSlider" TargetType="Slider">
+      <Setter Property="Height" Value="22"/><Setter Property="Margin" Value="2,2"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Slider">
+        <Grid Background="Transparent">
+          <Border Height="3" Margin="5,0" CornerRadius="1.5" Background="#4B6266"/>
+          <Track x:Name="PART_Track" Orientation="Horizontal">
+            <Track.DecreaseRepeatButton><RepeatButton Command="{x:Static Slider.DecreaseLarge}" Focusable="False" Opacity="0"/></Track.DecreaseRepeatButton>
+            <Track.Thumb><Thumb Width="12" Height="16" Cursor="SizeWE"><Thumb.Template><ControlTemplate TargetType="Thumb">
+              <Border CornerRadius="5" Background="#8FE6D0" BorderThickness="1" BorderBrush="#B9EEDF"/>
+            </ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
+            <Track.IncreaseRepeatButton><RepeatButton Command="{x:Static Slider.IncreaseLarge}" Focusable="False" Opacity="0"/></Track.IncreaseRepeatButton>
+          </Track>
+        </Grid>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
     <Style x:Key="TitleAction" TargetType="ButtonBase">
       <Setter Property="Foreground" Value="#D6E2E2"/><Setter Property="Background" Value="Transparent"/>
       <Setter Property="MinWidth" Value="38"/><Setter Property="Padding" Value="9,0"/>

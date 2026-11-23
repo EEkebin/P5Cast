@@ -14,6 +14,7 @@ internal sealed class DisplayHdr
     public bool Enabled { get; private set; }
     public bool WindowsHdrActive { get; private set; }
     public bool? HdrSupported { get; private set; }
+    public double RefreshHz { get; private set; }
     public int BitsPerColor { get; private set; }
     public bool HasReportedPeak { get; private set; }
     public float PeakNits { get; private set; }
@@ -125,6 +126,8 @@ internal sealed class DisplayHdr
         [FieldOffset(8)] public uint SourceId;
         [FieldOffset(20)] public Luid TargetAdapter;
         [FieldOffset(28)] public uint TargetId;
+        [FieldOffset(48)] public uint RefreshNumerator;
+        [FieldOffset(52)] public uint RefreshDenominator;
     }
     [StructLayout(LayoutKind.Sequential,Size=64)] struct DisplayMode { public uint InfoType; }
     [StructLayout(LayoutKind.Sequential)] struct Header
@@ -175,6 +178,7 @@ internal sealed class DisplayHdr
                 var p=paths[i];
                 var source=new SourceName { Header=Header.For<SourceName>(1,p.SourceAdapter,p.SourceId) };
                 if(GetSourceName(ref source)!=0 || !string.Equals(source.GdiName,output.DeviceName,StringComparison.OrdinalIgnoreCase)) continue;
+                if(p.RefreshDenominator!=0) output.RefreshHz=(double)p.RefreshNumerator/p.RefreshDenominator;
                 var target=new TargetName { Header=Header.For<TargetName>(2,p.TargetAdapter,p.TargetId) };
                 if(GetTargetName(ref target)==0 && !string.IsNullOrWhiteSpace(target.Friendly))
                     output.FriendlyName=target.Friendly;

@@ -23,9 +23,12 @@ namespace Cadrivect
         static readonly ControlTemplate ChipTemplate=MakeChipTemplate();
         static readonly ControlTemplate GroupTemplate=MakeGroupTemplate();
         readonly Action<int,int> change;
-        static readonly string[] ViewIds={"enhanced","original","side-by-side"};
+        static readonly string[] ViewIds={"enhanced","original","side-by-side","wipe"};
         readonly Action<string> compare;
-        readonly RadioButton[] views=new RadioButton[3];
+        readonly RadioButton[] views=new RadioButton[ViewIds.Length];
+        readonly Slider divider;
+        internal event Action<double> WipePositionChanged;
+        internal double WipePosition {get {return divider.Value/100;} set {divider.Value=value*100;}}
         int selectedView,previousView;
         readonly TextBlock comparisonGuide;
         public string ComparisonView {get {return ViewIds[selectedView];}}
@@ -90,14 +93,22 @@ namespace Cadrivect
             }
             var viewLabel=Label("Comparison view",Muted,11,FontWeights.Normal);
             viewLabel.Margin=new Thickness(0,9,0,2); picture.Children.Add(viewLabel);
-            var viewGrid=new UniformGrid {Rows=1,Columns=3,Margin=new Thickness(-2,0,-2,0)};
+            var viewGrid=new UniformGrid {Rows=2,Columns=2,Margin=new Thickness(-2,0,-2,0)};
             picture.Children.Add(viewGrid);
-            string[] viewLabels={"Enhanced","Original","Side by side"};
-            string[] viewControlIds={"ViewEnhanced","ViewOriginal","ViewSideBySide"};
+            string[] viewLabels={"Enhanced","Original","Side by side","Draggable split"};
+            string[] viewControlIds={"ViewEnhanced","ViewOriginal","ViewSideBySide","ViewWipe"};
             string[] viewTips={"Show your selected picture and interpolation settings.",
-                "Show the source picture at its original frame rate.","Show the full original on the left and the enhanced picture on the right."};
+                "Show the source picture at its original frame rate.","Show the full original on the left and the enhanced picture on the right.",
+                "Drag the divider across one full-size picture to reveal the original or enhanced image."};
             comparisonGuide=Label("Left: Original    ·    Right: Enhanced",Muted,11,FontWeights.Normal);
             comparisonGuide.Margin=new Thickness(0,4,0,0); picture.Children.Add(comparisonGuide);
+            divider=new Slider {Minimum=0,Maximum=100,Value=50,SmallChange=1,LargeChange=10,IsMoveToPointEnabled=true,AutoToolTipPlacement=AutoToolTipPlacement.TopLeft,
+                ToolTip="Drag the divider in the picture or use the arrow keys here."};
+            divider.SetResourceReference(FrameworkElement.StyleProperty,"WipeSlider");
+            AutomationProperties.SetName(divider,"Original picture percentage");
+            AutomationProperties.SetAutomationId(divider,"WipePosition");
+            divider.ValueChanged+=delegate {if(WipePositionChanged!=null) WipePositionChanged(WipePosition);};
+            picture.Children.Add(divider);
             for(int i=0;i<views.Length;i++) {
                 int index=i;
                 var button=new RadioButton {GroupName="View"+group,Content=viewLabels[i],Template=ChipTemplate,ToolTip=viewTips[i]};
@@ -118,6 +129,8 @@ namespace Cadrivect
             Subheading(diagnostics,"Video");
             AddMetric(diagnostics,"size","Input → output","Incoming frame size and presentation surface size in pixels.");
             AddMetric(diagnostics,"format","Video format","Source codec and active output color mode.");
+            AddMetric(diagnostics,"raster","Processing resolution","Resolution used by the selected picture effect before fitting the display.");
+            AddMetric(diagnostics,"refresh","Display refresh","Active Windows display mode in Hz. The FPS dial counts submitted frames.");
             AddMetric(diagnostics,"renderer","Video renderer","Graphics API currently presenting frames to the display.");
             AddMetric(diagnostics,"incomingFps","Incoming FPS","Frames received from the source each second.");
             AddMetric(diagnostics,"requested","Requested bitrate","Configured bitrate requested from the PS5 when connecting.");
@@ -265,7 +278,8 @@ namespace Cadrivect
         {
             if(index==1 && selectedView!=1) previousView=selectedView;
             selectedView=index; views[index].IsChecked=true;
-            comparisonGuide.Visibility=index==2 ? Visibility.Visible : Visibility.Collapsed;
+            comparisonGuide.Visibility=index>=2 ? Visibility.Visible : Visibility.Collapsed;
+            divider.Visibility=index==3 ? Visibility.Visible : Visibility.Collapsed;
         }
         public void ToggleOriginal()
         {
@@ -313,7 +327,7 @@ namespace Cadrivect
             if(value is bool) return (bool)value;
             bool parsed; return bool.TryParse(value as string,out parsed) ? (bool?)parsed : null;
         }
-        static double Number(Dictionary<string,object> data,string key)
+        internal static double Number(Dictionary<string,object> data,string key)
         {
             object raw=Field(data,key); double number;
             if(raw==null || !double.TryParse(Convert.ToString(raw,CultureInfo.InvariantCulture),NumberStyles.Float,CultureInfo.InvariantCulture,out number) ||
@@ -347,6 +361,8 @@ namespace Cadrivect
             values["incomingFps"].Text=Metric(waiting ? double.NaN : Number(snapshot,"sourceFps"),"","0.#");
             string input=Dimensions(snapshot,"input"),outputSize=Dimensions(snapshot,"output");
             values["size"].Text=input=="—" && outputSize=="—" ? "—" : input+" → "+outputSize;
+            values["raster"].Text=Dimensions(snapshot,"render");
+            values["refresh"].Text=Metric(Number(snapshot,"displayRefreshHz")," Hz","0.##");
             values["renderer"].Text=Dashboard.RendererName(Text(snapshot,"renderer"));
             string codec=Text(snapshot,"codec"); bool? hdrFlag=Flag(snapshot,"presenterHdr10") ?? Flag(snapshot,"hdrEnabled");
             string color=hdrFlag.HasValue ? (hdrFlag.Value ? "HDR10":"SDR") : "";

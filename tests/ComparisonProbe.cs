@@ -71,6 +71,60 @@ internal static partial class EmbeddedProbe
         return changed;
     }
 
+    static void CheckWipePixels(Bitmap actual,Bitmap original,Bitmap enhanced,Rectangle frame,float position) {
+        Check(original.Size==enhanced.Size && actual.Size==original.Size,"Wipe changed the output size.");
+        bool interior=position>0 && position<1;
+        int cut=frame.Left+(int)Math.Round(position*frame.Width);
+        int wrong=0,samples=0;
+        // Use screen coordinates so the test also checks that the letterbox and pillarbox stay put.
+        for(int y=0;y<actual.Height;y+=3) for(int x=0;x<actual.Width;x+=3) {
+            if(interior && y>=frame.Top && y<frame.Bottom && Math.Abs(x-cut)<=1) continue;
+            var reference=x<cut ? original : enhanced;
+            if(Math.Abs(reference.GetPixel(x,y).R-actual.GetPixel(x,y).R)>2) wrong++;
+            samples++;
+        }
+        Check(wrong==0,wrong+" of "+samples+" physical pixel samples differed from their full-view references at divider "+position+".");
+        if(interior) {
+            bool visible=false;
+            for(int x=cut-1;x<=cut;x++) {
+                int y=frame.Top+6;
+                if(Math.Abs(actual.GetPixel(x,y).R-original.GetPixel(x,y).R)>8) visible=true;
+            }
+            Check(visible,"Missing visible divider at the requested picture position "+position);
+        }
+    }
+
+    static Dictionary<string,object> SetWipePosition(Type api,float position) {
+        api.GetMethod("SetWipePosition").Invoke(null,new object[]{position});
+        return WaitSnapshot(api,s=>(string)s["comparisonView"]=="wipe" &&
+            Math.Abs(Convert.ToDouble(s["wipePosition"])-position)<.0001,"wipe at "+position);
+    }
+
+    static void CheckFullSizeWipe(Window window,Type api,Action<string> setView,
+                                  Func<string,string,Dictionary<string,object>> waitView,float[] positions) {
+        setView("original"); waitView("original","original");
+        using(var original=CaptureComparison(window)) {
+            var frame=CheckFixture(original,0,original.Width);
+            setView("enhanced"); var single=waitView("enhanced","sharp");
+            using(var enhanced=CaptureComparison(window)) {
+                Check(ChangedPixels(original,enhanced,frame)>20,"Original and enhanced reference frames did not distinguish sharpening.");
+                setView("wipe");
+                foreach(float position in positions) {
+                    var data=SetWipePosition(api,position);
+                    var reported=new Rectangle(Convert.ToInt32(data["pictureX"]),Convert.ToInt32(data["pictureY"]),
+                        Convert.ToInt32(data["pictureWidth"]),Convert.ToInt32(data["pictureHeight"]));
+                    Check(reported==frame,"The divider hit bounds differ from the physical picture.");
+                    Check(Convert.ToInt32(data["renderWidth"])==Convert.ToInt32(single["renderWidth"]) &&
+                          Convert.ToInt32(data["renderHeight"])==Convert.ToInt32(single["renderHeight"]),
+                          "Wipe changed the enhancement resolution.");
+                    using(var wipe=CaptureComparison(window)) CheckWipePixels(wipe,original,enhanced,frame,position);
+                }
+                Console.WriteLine("Wipe matched the original/enhanced full-size references in "+frame.Width+"x"+frame.Height+
+                    " picture pixels within a "+enhanced.Width+"x"+enhanced.Height+" surface.");
+            }
+        }
+    }
+
     static int CheckComparison(Type api,string[] args) {
         string id="P5CastCompare"+Guid.NewGuid().ToString("N");
         var host=new VideoHost();
@@ -129,17 +183,35 @@ internal static partial class EmbeddedProbe
                 api.GetMethod("Compare").Invoke(null,new object[]{true}); waitView("original","original");
                 api.GetMethod("Compare").Invoke(null,new object[]{false}); waitView("enhanced","sharp");
             }
+            if(supportsCapture) {
+                CheckFullSizeWipe(window,api,setView,waitView,new[]{.5f,.25f,.75f,0f,1f});
+                // Resize and cap the processing raster while the source is paused. The letterboxed output is wider than the 720p processing cap.
+                window.Width=1403; window.Height=811; window.UpdateLayout(); Pump();
+                ClientBounds resized;
+                Check(GetClientRect(host.Handle,out resized),"Cannot measure resized fixture.");
+                WaitSnapshot(api,s=>Convert.ToInt32(s["outputWidth"])==resized.Right && Convert.ToInt32(s["outputHeight"])==resized.Bottom,"resized wipe output");
+                api.GetMethod("ConfigureOutput").Invoke(null,new object[]{"720",null});
+                var capped=WaitSnapshot(api,s=>(string)s["resolution"]=="720","capped processing raster");
+                Check(Convert.ToInt32(capped["renderWidth"])<Convert.ToInt32(capped["outputWidth"]),"Fixture did not exercise processing below output resolution.");
+                CheckFullSizeWipe(window,api,setView,waitView,new[]{.35f,.65f});
+            } else {
+                setView("wipe"); SetWipePosition(api,.25f); SetWipePosition(api,.75f);
+            }
             setView("side-by-side"); var moving=waitView("side-by-side","sharp");
             int generated=Convert.ToInt32(moving["generated"]); pause.Reset();
             WaitSnapshot(api,s=>(string)s["comparisonView"]=="side-by-side" && Convert.ToInt32(s["generated"])>generated+3 &&
                 Convert.ToInt32(s["targetPresentedFps"])==60,"2x interpolation in the enhanced pane");
+            setView("wipe"); var wiped=SetWipePosition(api,.5f);
+            generated=Convert.ToInt32(wiped["generated"]);
+            WaitSnapshot(api,s=>(string)s["comparisonView"]=="wipe" && Convert.ToInt32(s["generated"])>generated+3 &&
+                Convert.ToInt32(s["targetPresentedFps"])==60,"2x interpolation during a wipe");
             Check(visible.SetEquals(VisibleWindows(desktop)),"Changing comparison opened a second top-level window.");
             api.GetMethod("Stop").Invoke(null,null); clock.Restart(); while(worker.IsAlive && clock.ElapsedMilliseconds<3000) Pump();
             Check(!worker.IsAlive && result==0,"Comparison playback did not stop cleanly.");
             var final=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(File.ReadAllText(args[4]));
             Check(Convert.ToInt32(final["sampledFrames"])>0 && Convert.ToInt32(final["sampleMaxLuma"])>Convert.ToInt32(final["sampleMinLuma"])+64,
                   "The GPU output did not contain the high-contrast fixture.");
-            Console.WriteLine(args[5]+" passed live view changes, focused original/enhanced output, and side-by-side with interpolation.");
+            Console.WriteLine(args[5]+" passed live view changes, focused original/enhanced output, side-by-side, and full-size wipe with interpolation.");
             return 0;
         } catch(Exception e) {
             Console.Error.WriteLine(e); File.WriteAllText(args[4]+".error.txt",e.ToString());

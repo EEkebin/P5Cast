@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.9.0.0")]
+[assembly: AssemblyVersion("0.10.0.0")]
 
 namespace Cadrivect
 {
@@ -118,7 +118,15 @@ namespace Cadrivect
             meter=new PlaybackMeter(delegate(int selectedMode,int multiplier) {
                 mode=selectedMode; factor=multiplier;
                 if(rendering!=null) engine.Configure(mode,factor);
-            },delegate(string view){if(rendering!=null) engine.SetComparison(view);});
+            },delegate(string view){
+                if(rendering!=null) engine.SetComparison(view);
+                UpdateWipeInput();
+            });
+            surface.WipePositionChanged+=delegate(double position){meter.WipePosition=position;};
+            meter.WipePositionChanged+=delegate(double position){
+                if(rendering!=null) engine.SetWipePosition((float)position);
+                UpdateWipeInput();
+            };
             UI<Border>("MeterHost").Child=meter;
             var saved = ReadSettings();
             InitDrawers(saved);
@@ -219,6 +227,7 @@ namespace Cadrivect
                 else if(chord && key==Key.O) ToggleStats();
                 else if(chord && key==Key.Q) {e.Handled=true; await UserStop(); return;}
                 else if(chord && key==Key.B && rendering!=null) meter.ToggleOriginal();
+                else if(key==Key.Escape && surface.CancelWipeDrag()) {e.Handled=true; return;}
                 else if(key==Key.Escape && UI<StackPanel>("StopPanel").IsVisible && !requestingRest) SetPage("Play");
                 else if(key==Key.Escape && UI<StackPanel>("PairPanel").IsVisible) SetPage("Play");
                 else if(key==Key.Escape && fullscreen) ToggleFullscreen();

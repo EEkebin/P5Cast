@@ -161,8 +161,8 @@ internal static partial class WindowChromeProbe
     static async Task CheckComparisonViews() {
         var api=AppDomain.CurrentDomain.GetAssemblies().Select(a=>a.GetType("Cadrivect.Engine.EmbeddedPlayback")).First(t=>t!=null);
         var snapshot=api.GetMethod("Snapshot");
-        string[] buttons={"ViewSideBySide","ViewOriginal","ViewEnhanced"};
-        string[] views={"side-by-side","original","enhanced"};
+        string[] buttons={"ViewSideBySide","ViewWipe","ViewOriginal","ViewEnhanced"};
+        string[] views={"side-by-side","wipe","original","enhanced"};
         for(int i=0;i<buttons.Length;i++) {
             var button=ViewButton(buttons[i]);
             Require(button!=null && button.IsEnabled,"Missing comparison control "+buttons[i]);
@@ -170,8 +170,17 @@ internal static partial class WindowChromeProbe
             string expected="\"comparisonView\":\""+views[i]+"\"";
             await Until(delegate{return button.IsChecked==true && ((string)snapshot.Invoke(null,null)).Contains(expected);},
                         "Dashboard selection did not reach the running engine: "+views[i]);
+            if(views[i]=="wipe") {
+                var slider=FindVisual(Find<Border>("MeterHost"),"Slider",e=>AutomationProperties.GetAutomationId(e)=="WipePosition");
+                var range=Peer(slider).GetPattern(PatternInterface.RangeValue) as IRangeValueProvider;
+                Require(range!=null && range.Minimum==0 && range.Maximum==100,"Wipe slider needs an accessible percentage range.");
+                range.SetValue(37);
+                await Until(delegate{return ((string)snapshot.Invoke(null,null)).Contains("\"wipePosition\":0.37");},
+                            "Drawer slider did not update the live wipe.");
+                range.SetValue(50);
+            }
         }
-        Note("The three comparison views switched on the running offline demo.");
+        Note("All four comparison views switched on the running offline demo.");
     }
     static async Task CheckScaling() {
         Click("InterfaceGroup");
@@ -384,6 +393,8 @@ internal static partial class WindowChromeProbe
                     string frame=(string)snapshot.Invoke(null,null);
                     Require(frame.Contains("\"renderer\":\""+keys[i]+"\"") && !choice.IsEnabled && Video()==video,
                             "Selected renderer was not presenting on the embedded surface: "+frame);
+                    if(Environment.GetEnvironmentVariable("P5CAST_PROBE_WIPE_INPUT")=="1")
+                        await CheckWipeInput(snapshot,keys[i]);
                     if(renderCheck=="hdr") {
                         Require(frame.Contains("\"hdrEnabled\":"+(expectHdr?"true":"false")),"Unexpected output color mode: "+frame);
                         if(expectHdr) {

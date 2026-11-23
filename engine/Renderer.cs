@@ -49,6 +49,7 @@ internal sealed partial class Renderer : IDisposable
     readonly Buffer changeFlag,changeReadback;
     readonly UnorderedAccessView changeView;
     readonly SamplerState sampler;
+    readonly RasterizerState scissor;
     readonly VertexShader vertex;
     readonly Dictionary<string,PixelShader> shaders=new Dictionary<string,PixelShader>();
     readonly ShaderResourceView[] unbind=new ShaderResourceView[3];
@@ -57,7 +58,9 @@ internal sealed partial class Renderer : IDisposable
     GpuImage curr,prev,incoming,motion,mixed,scaled;
     Size srcSize,outSize,screenSize;
     Rectangle viewport,originalViewport;
-    bool sideBySide;
+    bool sideBySide,wipe;
+    float wipePosition=.5f;
+    public Rectangle PictureViewport { get; private set; }
     readonly IntPtr hwnd;
     readonly bool clearOnDispose;
     Size renderLimit;
@@ -78,6 +81,7 @@ internal sealed partial class Renderer : IDisposable
     public bool PresenterHdr10 { get { return presentation!=null ? presentation.Hdr10 : outputInfo.Enabled; } }
     public string OutputNotice { get; private set; }
     public string DisplayName { get { return outputInfo.DeviceName; } }
+    public double DisplayRefreshHz { get { return outputInfo.RefreshHz; } }
     public int DisplayBitsPerColor { get { return outputInfo.BitsPerColor; } }
     public void InvalidateDisplay() { monitor=IntPtr.Zero; }
     bool motionReady,suppressNextPair;
@@ -121,8 +125,11 @@ internal sealed partial class Renderer : IDisposable
             var sampling=SamplerStateDescription.Default();
             sampling.Filter=Filter.MinMagMipLinear; sampling.AddressU=sampling.AddressV=sampling.AddressW=TextureAddressMode.Clamp;
             sampler=new SamplerState(Device,sampling);
+            var clipped=RasterizerStateDescription.Default();
+            clipped.IsScissorEnabled=true;
+            scissor=new RasterizerState(Device,clipped);
             vertex=new VertexShader(Device,Shader("Fullscreen"));
-            foreach(string name in new [] {"Original","Sharp","Easu","Rcas","Motion","Interpolate","OpticalField","NgxVectors"})
+            foreach(string name in new [] {"Original","Sharp","Easu","Rcas","Motion","Interpolate","OpticalField","NgxVectors","WipeDivider"})
                 shaders.Add(name,new PixelShader(Device,Shader(name)));
             InitHdrShaders();
             context.InputAssembler.PrimitiveTopology=PrimitiveTopology.TriangleList;
@@ -253,14 +260,23 @@ internal sealed partial class Renderer : IDisposable
         sideBySide=enabled;
         SetViewport();
     }
+    public void SetWipe(bool enabled,float position)
+    {
+        if(float.IsNaN(position) || float.IsInfinity(position)) throw new ArgumentOutOfRangeException("position");
+        wipePosition=Math.Max(0,Math.Min(1,position));
+        if(wipe==enabled) return;
+        wipe=enabled;
+        SetViewport();
+    }
     void SetViewport()
     {
         if(srcSize.IsEmpty || screenSize.IsEmpty) return;
         double ratio=Math.Min((double)screenSize.Width/srcSize.Width,(double)screenSize.Height/srcSize.Height);
         var next=new Size(Math.Max(1,(int)Math.Round(srcSize.Width*ratio)),Math.Max(1,(int)Math.Round(srcSize.Height*ratio)));
-        viewport=new Rectangle((screenSize.Width-next.Width)/2,(screenSize.Height-next.Height)/2,next.Width,next.Height);
+        PictureViewport=new Rectangle((screenSize.Width-next.Width)/2,(screenSize.Height-next.Height)/2,next.Width,next.Height);
+        viewport=PictureViewport;
         originalViewport=Rectangle.Empty;
-        if(sideBySide && screenSize.Width>=2)
+        if(sideBySide && !wipe && screenSize.Width>=2)
         {
             // Keep the single-view processing resolution. Shrinking the effect target here
             // could change an upscaler's operating mode in the middle of the comparison.
@@ -326,7 +342,7 @@ internal sealed partial class Renderer : IDisposable
         curr=prev=incoming=motion=mixed=null;
     }
     void Draw(string name, RenderTargetView target, Rectangle area, ShaderResourceView input, float phase,
-              ShaderResourceView previous=null, ShaderResourceView flow=null)
+              ShaderResourceView previous=null, ShaderResourceView flow=null,Rectangle? clip=null)
     {
         var info=new FrameInfo { SourceX=srcSize.Width,SourceY=srcSize.Height,OutputX=outSize.Width,OutputY=outSize.Height,
                                  Phase=phase,OriginX=area.X,OriginY=area.Y,TargetX=area.Width,TargetY=area.Height };
@@ -337,7 +353,13 @@ internal sealed partial class Renderer : IDisposable
         context.PixelShader.SetShaderResource(1,previous);
         context.PixelShader.SetShaderResource(2,flow);
         context.PixelShader.Set(shaders[name]);
+        if(clip.HasValue) {
+            var rect=clip.Value;
+            context.Rasterizer.SetScissorRectangle(rect.Left,rect.Top,rect.Right,rect.Bottom);
+            context.Rasterizer.State=scissor;
+        }
         context.Draw(3,0);
+        if(clip.HasValue) context.Rasterizer.State=null;
         context.PixelShader.SetShaderResources(0,unbind);
         context.OutputMerger.ResetTargets();
     }
@@ -399,17 +421,13 @@ internal sealed partial class Renderer : IDisposable
         }
         EffectivePictureMode=vendor ? neuralMode : mode;
         context.ClearRenderTargetView(display,new RawColor4(0,0,0,1));
-        if(!originalViewport.IsEmpty)
-        {
-            // Hold the last real frame while the enhanced pane shows the in-between frames.
-            bool holdPrevious=(finishPrevious || (phase<1 && HasPrevious)) && (!vendor || havePriorEnhanced);
-            if(HdrEnabled) DrawHdr("original",1,holdPrevious,originalViewport);
-            else DrawFinal("Original",holdPrevious ? prev.Read : curr.Read,1,originalViewport);
-        }
+        // The reference holds its last real frame between enhanced presentations.
+        bool holdOriginal=(finishPrevious || (phase<1 && HasPrevious)) && (!vendor || havePriorEnhanced);
+        if(!originalViewport.IsEmpty) DrawOriginal(originalViewport,holdOriginal);
         if(HdrEnabled && !vendor)
         {
             DrawHdr(mode,phase,finishPrevious,viewport);
-            return Present(samplePixel);
+            return Present(samplePixel,holdOriginal);
         }
         if(phase<1 && HasPrevious)
         {
@@ -418,7 +436,7 @@ internal sealed partial class Renderer : IDisposable
             {
                 DrawFinal("Interpolate",neuralCurrent.Read,phase,viewport,neuralPrevious.Read,motion.Read,HdrEnabled);
                 Generated++;
-                return Present(samplePixel);
+                return Present(samplePixel,holdOriginal);
             }
             if(!vendor)
             {
@@ -438,11 +456,16 @@ internal sealed partial class Renderer : IDisposable
             DrawFinal("Rcas",source,phase,viewport);
         }
         else DrawFinal(mode=="sharp" ? "Sharp":"Original",source,phase,viewport,null,null,HdrEnabled && vendor);
-        return Present(samplePixel);
+        return Present(samplePixel,holdOriginal);
     }
-    void DrawFinal(string shader,ShaderResourceView source,float phase,Rectangle area,ShaderResourceView previous=null,ShaderResourceView flow=null,bool linear2020=false)
+    void DrawOriginal(Rectangle area,bool holdPrevious,Rectangle? clip=null)
     {
-        if(!linear2020 && outSize==area.Size) { Draw(shader,display,area,source,phase,previous,flow); return; }
+        if(HdrEnabled) DrawHdr("original",1,holdPrevious,area,clip);
+        else DrawFinal("Original",holdPrevious ? prev.Read : curr.Read,1,area,clip:clip);
+    }
+    void DrawFinal(string shader,ShaderResourceView source,float phase,Rectangle area,ShaderResourceView previous=null,ShaderResourceView flow=null,bool linear2020=false,Rectangle? clip=null)
+    {
+        if(!linear2020 && outSize==area.Size) { Draw(shader,display,area,source,phase,previous,flow,clip); return; }
         var format=linear2020 ? Format.R16G16B16A16_Float : Format.B8G8R8A8_UNorm;
         if(raster==null || raster.Texture.Description.Format!=format)
         {
@@ -450,10 +473,21 @@ internal sealed partial class Renderer : IDisposable
             raster=new GpuImage(Device,outSize.Width,outSize.Height,format,true);
         }
         Draw(shader,raster.Write,new Rectangle(System.Drawing.Point.Empty,outSize),source,phase,previous,flow);
-        Draw(linear2020 ? "HdrLinear2020ToPq" : "Original",display,area,raster.Read,1);
+        Draw(linear2020 ? "HdrLinear2020ToPq" : "Original",display,area,raster.Read,1,clip:clip);
     }
-    int Present(bool samplePixel)
+    int Present(bool samplePixel,bool holdOriginal)
     {
+        if(wipe)
+        {
+            int width=(int)Math.Round((double)wipePosition*viewport.Width);
+            // Both layers retain their full viewport and processing raster. Clip only the
+            // final original draw, so the divider never shifts or rescales texture samples.
+            if(width>0) DrawOriginal(viewport,holdOriginal,new Rectangle(viewport.Left,viewport.Top,width,viewport.Height));
+            if(width>0 && width<viewport.Width) {
+                var line=new Rectangle(viewport.Left+width-1,viewport.Top,2,viewport.Height);
+                Draw("WipeDivider",display,line,null,HdrEnabled ? .58f : .92f);
+            }
+        }
         if(VerifyNextOutput)
         {
             SampleOutput();
@@ -529,7 +563,7 @@ internal sealed partial class Renderer : IDisposable
         if(backBuffer!=null) backBuffer.Dispose();
         if(raster!=null) raster.Dispose();
         foreach(var shader in shaders.Values) shader.Dispose();
-        foreach(IDisposable item in new IDisposable[]{changeView,changeFlag,changeReadback,changed,vertex,sampler,
+        foreach(IDisposable item in new IDisposable[]{changeView,changeFlag,changeReadback,changed,vertex,sampler,scissor,
                 constants,swap,presentation,context,Device})
             if(item!=null) item.Dispose();
     }

@@ -49,7 +49,7 @@ internal sealed partial class Renderer
         PrepareMotion(hdrGuideCurrent,hdrGuidePrevious);
     }
 
-    void DrawHdr(string mode,float phase,bool finishPrevious,Rectangle area)
+    void DrawHdr(string mode,float phase,bool finishPrevious,Rectangle area,Rectangle? clip=null)
     {
         var srcArea=new Rectangle(Point.Empty,srcSize);
         var outputArea=new Rectangle(Point.Empty,outSize);
@@ -83,8 +83,8 @@ internal sealed partial class Renderer
         else
         {
             if (mode!="original" && mode!="sharp") throw new ArgumentException("The selected enhancement needs its own HDR rendering path.");
-            Draw(mode=="sharp" ? "HdrSharpToPq" : "HdrToPq",target,targetArea,source,1);
+            Draw(mode=="sharp" ? "HdrSharpToPq" : "HdrToPq",target,targetArea,source,1,clip:separateOutput ? null : clip);
         }
-        if (separateOutput) Draw("Original",display,area,hdrProcessed.Read,1);
+        if (separateOutput) Draw("Original",display,area,hdrProcessed.Read,1,clip:clip);
     }
 }

@@ -36,6 +36,8 @@ namespace Cadrivect.Engine
                     session=new HostedSurface(new IntPtr(long.Parse(args[index+1],CultureInfo.InvariantCulture)));
                     int view=Array.IndexOf(args,"--comparison");
                     if(view>=0) session.ComparisonView=ValidateComparison(view+1<args.Length ? args[view+1] : null);
+                    int split=Array.IndexOf(args,"--wipe-position");
+                    if(split>=0) session.WipePosition=ParseWipePosition(split+1<args.Length ? args[split+1] : null);
                     current=session;
                 } catch(Exception ex) { error=ex.Message; return 1; }
             }
@@ -59,14 +61,31 @@ namespace Cadrivect.Engine
         }
         internal static string ValidateComparison(string view)
         {
-            if(view!="enhanced" && view!="original" && view!="side-by-side")
-                throw new ArgumentException("Choose enhanced, original, or side-by-side.","view");
+            if(view!="enhanced" && view!="original" && view!="side-by-side" && view!="wipe")
+                throw new ArgumentException("Choose enhanced, original, side-by-side, or wipe.","view");
             return view;
         }
         public static void SetComparison(string view)
         {
             ValidateComparison(view);
             lock(Gate) if(current!=null) current.ComparisonView=view;
+        }
+        internal static float ParseWipePosition(string value)
+        {
+            float position;
+            if(!float.TryParse(value,NumberStyles.Float,CultureInfo.InvariantCulture,out position))
+                throw new ArgumentException("Expected a divider position between 0 and 1.");
+            return ValidatePosition(position);
+        }
+        static float ValidatePosition(float position)
+        {
+            if(!(position>=0 && position<=1)) throw new ArgumentOutOfRangeException("position");
+            return position;
+        }
+        public static void SetWipePosition(float position)
+        {
+            ValidatePosition(position);
+            lock(Gate) if(current!=null) current.WipePosition=position;
         }
         public static void Compare(bool enabled) { SetComparison(enabled ? "original" : "enhanced"); }
         public static void Stop() { lock(Gate) if(current!=null) current.Stopped=true; }
@@ -87,6 +106,7 @@ namespace Cadrivect.Engine
         public readonly IntPtr Handle;
         public volatile bool Stopped;
         public volatile string ComparisonView="enhanced";
+        public volatile float WipePosition=0.5f;
         public HostedSurface(IntPtr hwnd) {
             uint pid;
             using(var process=Process.GetCurrentProcess())

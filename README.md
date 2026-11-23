@@ -16,6 +16,10 @@ The installer places the app in `%LOCALAPPDATA%\Programs\P5Cast` and adds **P5Ca
 
 In the performance drawer, open **Picture → Comparison view**. Choose **Side by side** for the full original on the left and the full enhanced picture on the right. The left follows the source frame rate. The right uses your selected effects and interpolation. Both views share the same stream, audio and controls.
 
+Choose **Draggable split** for one full-size picture. Drag the vertical line across a detail to compare the same screen pixels. The original and enhanced layers keep identical framing and scale, including in fullscreen. The slider in the drawer also accepts the arrow keys. Move it to either end to see the entire original or enhanced picture.
+
+For a spatial comparison of sharpening or upscaling, set **Frame interpolation → Off**. With interpolation on, the original holds each source frame while the enhanced side can advance between frames. Under **Stream diagnostics → Video**, **Processing resolution** shows the effect raster and **Display refresh** shows the Windows display mode in Hz. The FPS dial shows how many frames P5Cast submitted per second.
+
 Choose **Original** or **Enhanced** to give either picture the whole window. During playback, **Ctrl+Alt+B** switches to the original and back to your previous view, including side by side. You can try this with **Offline demo** and **Sharpen** before connecting.
 
 ## Connect to a PS5

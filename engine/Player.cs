@@ -291,6 +291,8 @@ internal static class Player
                         string requestedMode=null, settingsNotice=null;
                         int requestedMultiplier=multiplier;
                         bool changeRequested=false,compare=false;
+                        float initialPosition=host!=null ? host.WipePosition : EmbeddedPlayback.ParseWipePosition(Option(args,"--wipe-position","0.5"));
+                        float wipePosition=initialPosition;
                         string previousView="enhanced",comparisonView="enhanced";
                         Action<string,int> change=delegate(string picture,int factor) {
                             if(picture!=null) requestedMode=picture;
@@ -320,7 +322,10 @@ internal static class Player
                                 comparisonView=host==null ? window.ComparisonView:host.ComparisonView;
                                 compare=comparisonView=="original";
                                 double now=clock.Elapsed.TotalMilliseconds;
-                                bool redraw=false;
+                                float requestedPosition=host!=null ? host.WipePosition : initialPosition;
+                                bool redraw=comparisonView=="wipe" && requestedPosition!=wipePosition;
+                                wipePosition=requestedPosition;
+                                if(redraw || previousView!=comparisonView) renderer.SetWipe(comparisonView=="wipe",wipePosition);
                                 string newSize,newHdr;
                                 if(host!=null && host.TakeOutput(out newSize,out newHdr)) {
                                     try {
@@ -360,7 +365,7 @@ internal static class Player
                                         (renderer.Presented-snapshotPresented)*perSecond,(renderer.Generated-snapshotGenerated)*perSecond)
                                         +",\"mode\":"+JsonString(mode)+",\"multiplier\":"+multiplier+",\"effectivePictureMode\":"+JsonString(renderer.EffectivePictureMode)
                                         +",\"effectNotice\":"+JsonString(settingsNotice ?? (string.IsNullOrEmpty(renderer.EffectNotice) ? renderer.OutputNotice : renderer.EffectNotice))+",\"compare\":"+(compare ? "true":"false")
-                                        +",\"comparisonView\":"+JsonString(comparisonView)+",\"sampleId\":"+(++sampleId)+",\"elapsedMs\":"+Number(now)+",\"display\":"+JsonString(renderer.DisplayName)
+                                        +",\"wipePosition\":"+wipePosition.ToString("R",CultureInfo.InvariantCulture)+",\"comparisonView\":"+JsonString(comparisonView)+",\"sampleId\":"+(++sampleId)+",\"elapsedMs\":"+Number(now)+",\"display\":"+JsonString(renderer.DisplayName)
                                         +",\"hdrEnabled\":"+(renderer.HdrEnabled ? "true":"false")+",\"outputWidth\":"+renderer.OutputSize.Width+",\"outputHeight\":"+renderer.OutputSize.Height
                                         +",\"resolution\":"+JsonString(resolution)+",\"hdrMode\":"+JsonString(hdr)
                                         +",\"renderWidth\":"+renderer.RenderSize.Width+",\"renderHeight\":"+renderer.RenderSize.Height
@@ -448,7 +453,7 @@ internal static class Player
                             +",\"embedded\":"+(host!=null ? "true":"false")+",\"fullscreen\":"+(window!=null && window.Fullscreen ? "true":"false")+",\"hdrEnabled\":"+(renderer.HdrEnabled ? "true":"false")
                             +",\"outputWidth\":"+renderer.OutputSize.Width+",\"outputHeight\":"+renderer.OutputSize.Height
                             +",\"renderWidth\":"+renderer.RenderSize.Width+",\"renderHeight\":"+renderer.RenderSize.Height
-                            +",\"comparisonView\":"+JsonString(comparisonView)+",\"outputStatus\":"+JsonString(renderer.OutputStatus)+",\"effectivePictureMode\":"+JsonString(renderer.EffectivePictureMode)
+                            +",\"wipePosition\":"+wipePosition.ToString("R",CultureInfo.InvariantCulture)+",\"comparisonView\":"+JsonString(comparisonView)+",\"outputStatus\":"+JsonString(renderer.OutputStatus)+",\"effectivePictureMode\":"+JsonString(renderer.EffectivePictureMode)
                             +",\"effectNotice\":"+JsonString(renderer.EffectNotice)
                             +",\"medianPcSubmitMs\":"+Number(liveFrameAges.Count==0 ? -1:liveFrameAges[median])
                             +Telemetry(renderer,decoded,targetFps,compare ? 1:multiplier,lastRealAge,demo)+"}";
@@ -495,8 +500,11 @@ internal static class Player
     static string Telemetry(Renderer renderer,DirectVideo direct,int targetFps,int factor,double age,bool demo)
     {
         Size input=renderer.InputSize;
+        var picture=renderer.PictureViewport;
         var audio=direct==null ? null:direct.Audio;
         return ",\"presenterHdr10\":"+(renderer.PresenterHdr10 ? "true":"false")
+               +",\"displayRefreshHz\":"+Number(renderer.DisplayRefreshHz>0 ? renderer.DisplayRefreshHz : -1)
+               +",\"pictureX\":"+picture.X+",\"pictureY\":"+picture.Y+",\"pictureWidth\":"+picture.Width+",\"pictureHeight\":"+picture.Height
                +",\"displayBitsPerColor\":"+Number(renderer.DisplayBitsPerColor>0 ? renderer.DisplayBitsPerColor : -1)
                +",\"presentationColorSpace\":"+JsonString(renderer.PresenterHdr10 ? "BT.2020 PQ":"sRGB")
                +",\"presenterHdrFormat\":"+(renderer.PresenterHdr10 ? "\"RGB10A2_UNORM\"":"null")

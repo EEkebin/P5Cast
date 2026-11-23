@@ -210,6 +210,12 @@ internal static partial class EmbeddedProbe
             var split=WaitSnapshot(api,s=>(string)s["comparisonView"]=="side-by-side" && (bool)s["presenterHdr10"] &&
                 Convert.ToInt32(s["presented"])>lastPresented+5,"HDR10 side-by-side");
             CheckRenderer(split,renderer);
+            api.GetMethod("SetComparison").Invoke(null,new object[]{"wipe"});
+            api.GetMethod("Configure").Invoke(null,new object[]{1,1});
+            WaitSnapshot(api,s=>(string)s["comparisonView"]=="wipe" && (string)s["effectivePictureMode"]=="sharp","sharpened HDR wipe");
+            var wiped=SetWipePosition(api,.33f);
+            Check((bool)wiped["presenterHdr10"] && (string)wiped["presenterHdrFormat"]=="RGB10A2_UNORM","Wipe lost HDR10 output.");
+            SetWipePosition(api,.77f);
             window.Width+=37; window.UpdateLayout();
             api.GetMethod("ConfigureOutput").Invoke(null,new object[]{null,"off"});
             verify(hdrScreen,"off",false);

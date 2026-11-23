@@ -16,6 +16,17 @@ namespace LumaRelay {
         [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
         [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr mode);
         [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+        [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string title);
+        [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
+        public static IntPtr PlayerWindow(int processId) {
+            IntPtr cursor = IntPtr.Zero;
+            while ((cursor = FindWindowEx(IntPtr.Zero,cursor,null,"LumaRelay Player")) != IntPtr.Zero) {
+                uint pid;
+                GetWindowThreadProcessId(cursor,out pid);
+                if (pid == processId) return cursor;
+            }
+            return IntPtr.Zero;
+        }
         public static void Save(IntPtr window, string path) {
             var previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
             try {
@@ -99,13 +110,13 @@ try {
     } 'a playable demo window under the isolated profile'
     Click-Control 'Enhance'
     $viewStatus = Wait-Text 'Status' '^Enhanced view opened'
-    $player = Wait-For {
+    $playerWindow = Wait-For {
         Get-CimInstance Win32_Process -Filter "Name='LumaPlayer.exe' AND ParentProcessId=$($process.Id)" |
-            ForEach-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue } |
-            Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+            ForEach-Object { [LumaRelay.DashboardSnapshot]::PlayerWindow($_.ProcessId) } |
+            Where-Object { $_ -ne [IntPtr]::Zero } | Select-Object -First 1
     } 'the GPU player launched by this dashboard'
     Start-Sleep -Seconds 2
-    [void][LumaRelay.DashboardSnapshot]::PostMessage($player.MainWindowHandle,0x0312,[IntPtr]1,[IntPtr]::Zero)
+    [void][LumaRelay.DashboardSnapshot]::PostMessage($playerWindow,0x0312,[IntPtr]1,[IntPtr]::Zero)
     $viewSummary = Wait-Text 'Status' '^Session ended'
     $reportFile = Get-ChildItem (Join-Path $stage 'LumaRelay\sessions') -Filter '*.json' | Select-Object -First 1
     $report = Get-Content $reportFile.FullName -Raw | ConvertFrom-Json

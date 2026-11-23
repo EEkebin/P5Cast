@@ -15,7 +15,7 @@ Download the Windows x64 ZIP from the [private releases](https://github.com/EEke
 1. On the host, open **Host**, select its LAN or private VPN IPv4 address, and click **Start sharing**. This starts an encrypted Sunshine session that shares the desktop and system audio. A paired client can send keyboard, mouse, and supported gamepad input. Keep the host awake with its display active.
 2. On another Windows PC, open **LumaRelay Client** from the Start menu, or select **Client** in the portable app. Enter the host address and click **Pair with host**. Enter the displayed PIN on the host and click **Approve PIN**.
 3. Select a stream profile and click **Start stream**. Switch the host into the game or its enhanced view. A supported Moonlight client on a handheld can also connect to the same address and launch the **LumaRelay** application entry.
-4. **Ctrl+Alt+Shift+Q** ends a Moonlight PC session. On the host, click **Stop sharing** when finished. The host runs independently of the dashboard, so reopen the dashboard if needed.
+4. **Ctrl+Alt+Shift+Q** ends a Moonlight PC session. On the host, click **Stop sharing** when finished. The host runs independently of the dashboard, so reopen the dashboard if needed. While hosting, **Manage paired clients → Load devices** lists clients and lets you revoke individual pairings.
 
 For internet play, connect both devices to the same private VPN first, then bind the host to its VPN address and enter that address on the client. LAN connections require the host firewall to allow Sunshine from the client. LumaRelay leaves router and firewall configuration to the owner. An external device and a real internet connection are needed to validate bandwidth, firewall access, and latency on your network.
 

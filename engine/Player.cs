@@ -307,6 +307,8 @@ internal static class Player
                         }
                         var clock=Stopwatch.StartNew();
                         double nextSample=0, previousTime=0, period=16.667, due=0, pairStart=0, lastSubmit=-1000;
+                        bool repaintPending=false;
+                        double lastRepaint=-1000;
                         bool verifyOutput=Array.IndexOf(args,"--verify-output")>=0;
                         double nextOutputSample=0;
                         int step=0, count=1, drawTick=0;
@@ -354,7 +356,7 @@ internal static class Player
                                     renderer.ResetFrameHistory(); if(controls!=null) controls.Sync(mode,multiplier);
                                     renderer.SetSideBySide(comparisonView=="side-by-side");
                                     step=0; previousTime=0; previousView=comparisonView;
-                                    if(renderer.Captured>0) renderer.Show(compare ? "original":mode,1,testing);
+                                    redraw=true;
                                     requestedMode=null; changeRequested=false;
                                 }
                                 if(controls!=null) {
@@ -367,7 +369,7 @@ internal static class Player
                                         "{{\"captured\":{0},\"presented\":{1},\"generated\":{2},\"sourceFps\":{3:F1},\"submittedFps\":{4:F1},\"generatedFps\":{5:F1}",
                                         renderer.Captured,renderer.Presented,renderer.Generated,(renderer.Captured-snapshotInput)*perSecond,
                                         (renderer.Presented-snapshotPresented)*perSecond,(renderer.Generated-snapshotGenerated)*perSecond)
-                                        +",\"mode\":"+JsonString(mode)+",\"multiplier\":"+multiplier+",\"effectivePictureMode\":"+JsonString(renderer.EffectivePictureMode)
+                                        +",\"repaints\":"+renderer.Repaints+",\"mode\":"+JsonString(mode)+",\"multiplier\":"+multiplier+",\"effectivePictureMode\":"+JsonString(renderer.EffectivePictureMode)
                                         +",\"effectNotice\":"+JsonString(settingsNotice ?? (string.IsNullOrEmpty(renderer.EffectNotice) ? renderer.OutputNotice : renderer.EffectNotice))+",\"compare\":"+(compare ? "true":"false")
                                         +",\"wipeHorizontal\":"+(wipeHorizontal ? "true" : "false")+",\"wipePosition\":"+wipePosition.ToString("R",CultureInfo.InvariantCulture)+",\"comparisonView\":"+JsonString(comparisonView)+",\"sampleId\":"+(++sampleId)+",\"elapsedMs\":"+Number(now)+",\"display\":"+JsonString(renderer.DisplayName)
                                         +",\"hdrEnabled\":"+(renderer.HdrEnabled ? "true":"false")+",\"outputWidth\":"+renderer.OutputSize.Width+",\"outputHeight\":"+renderer.OutputSize.Height
@@ -398,8 +400,7 @@ internal static class Player
                                 double timestamp;
                                 bool deduplicate=multiplier>1 || testing || vendor;
                                 bool fresh=demo ? offline.Read(renderer,out timestamp) : direct ? decoded.Read(renderer,deduplicate,out timestamp) : capture.Read(renderer,deduplicate,out timestamp);
-                                // A paused upstream window may send nothing after resizing its display surface.
-                                if(redraw && !fresh && step==0 && renderer.Captured>0) renderer.Show(compare ? "original":mode,1,testing);
+                                repaintPending|=redraw;
                                 if(fresh)
                                 {
                                     double elapsed=timestamp-previousTime;
@@ -431,7 +432,17 @@ internal static class Player
                                     step++;
                                     if(step>count) step=0;
                                     lastSubmit=clock.Elapsed.TotalMilliseconds;
+                                    repaintPending=false;
                                     due=pairStart+(step-1)*period/count;
+                                }
+                                // Moving video picks up the latest divider on its next submission. A stalled
+                                // source still responds to dragging, with at most 60 UI-only repaints per second.
+                                if(repaintPending && step==0 && renderer.Captured>0 &&
+                                   now-lastSubmit>=period*1.25 && now-lastRepaint>=1000.0/60)
+                                {
+                                    renderer.Repaint(compare ? "original":mode);
+                                    lastRepaint=clock.Elapsed.TotalMilliseconds;
+                                    repaintPending=false;
                                 }
                                 if(renderer.Captured==0 && now>(direct ? 30000:15000))
                                     throw new InvalidOperationException(direct ? "No video frames arrived from the Direct backend within 30 seconds. Check the console connection and retry."

@@ -239,14 +239,36 @@ internal static partial class EmbeddedProbe
                     SetWipePosition(api,0); SetWipePosition(api,1);
                 }
             }
+            // The fixture is paused. Scrubbing the divider must update the picture without creating video FPS.
+            var still=WaitSnapshot(api,s=>Convert.ToDouble(s["submittedFps"])==0,"paused video meter");
+            foreach(float position in new[]{.9f,.1f,.8f,.2f}) {
+                var dragged=SetWipePosition(api,position);
+                Check(Equals(dragged["captured"],still["captured"]) && Equals(dragged["presented"],still["presented"]) &&
+                      Equals(dragged["generated"],still["generated"]) && Convert.ToDouble(dragged["submittedFps"])==0,
+                      "Divider redraws inflated the video FPS meter while the source was paused.");
+            }
             setView("side-by-side"); var moving=waitView("side-by-side","sharp");
             int generated=Convert.ToInt32(moving["generated"]); pause.Reset();
             WaitSnapshot(api,s=>(string)s["comparisonView"]=="side-by-side" && Convert.ToInt32(s["generated"])>generated+3 &&
                 Convert.ToInt32(s["targetPresentedFps"])==60,"2x interpolation in the enhanced pane");
             setView("wipe"); var wiped=SetWipePosition(api,.5f);
             generated=Convert.ToInt32(wiped["generated"]);
-            WaitSnapshot(api,s=>(string)s["comparisonView"]=="wipe" && Convert.ToInt32(s["generated"])>generated+3 &&
+            var running=WaitSnapshot(api,s=>(string)s["comparisonView"]=="wipe" && Convert.ToInt32(s["generated"])>generated+3 &&
                 Convert.ToInt32(s["targetPresentedFps"])==60,"2x interpolation during a wipe");
+            var setPosition=api.GetMethod("SetWipePosition");
+            var scrub=Stopwatch.StartNew();
+            while(scrub.ElapsedMilliseconds<1500) {
+                float position=Math.Abs((scrub.ElapsedMilliseconds%400)-200)/200f;
+                setPosition.Invoke(null,new object[]{position});
+                Pump();
+            }
+            var movingWipe=SetWipePosition(api,.45f);
+            int inputs=Convert.ToInt32(movingWipe["captured"])-Convert.ToInt32(running["captured"]);
+            int interpolated=Convert.ToInt32(movingWipe["generated"])-Convert.ToInt32(running["generated"]);
+            int outputs=Convert.ToInt32(movingWipe["presented"])-Convert.ToInt32(running["presented"]);
+            // A frame already pending at the start of the sampling interval can also be submitted.
+            Check(inputs>0 && interpolated>0 && outputs>interpolated && outputs<=inputs+interpolated+1,
+                  "Scrubbing during playback corrupted video FPS accounting.");
             Check(visible.SetEquals(VisibleWindows(desktop)),"Changing comparison opened a second top-level window.");
             api.GetMethod("Stop").Invoke(null,null); clock.Restart(); while(worker.IsAlive && clock.ElapsedMilliseconds<3000) Pump();
             Check(!worker.IsAlive && result==0,"Comparison playback did not stop cleanly.");

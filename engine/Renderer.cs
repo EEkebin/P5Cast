@@ -89,6 +89,7 @@ internal sealed partial class Renderer : IDisposable
     public int Captured { get; private set; }
     public int Duplicates { get; private set; }
     public int Presented { get; private set; }
+    public int Repaints { get; private set; }
     public int Generated { get; private set; }
     public bool HasPrevious { get; private set; }
     public int SampleMinLuma { get; private set; }
@@ -416,6 +417,18 @@ internal sealed partial class Renderer : IDisposable
     public int Show(string mode,float phase,bool samplePixel,bool finishPrevious=false)
     {
         if(curr==null) return 0;
+        int pixel=DrawFrame(mode,phase,samplePixel,finishPrevious);
+        Presented++;
+        return pixel;
+    }
+    public void Repaint(string mode)
+    {
+        if(curr==null) return;
+        DrawFrame(mode,1,false,false);
+        Repaints++;
+    }
+    int DrawFrame(string mode,float phase,bool samplePixel,bool finishPrevious)
+    {
         finishPrevious=finishPrevious && HasPrevious;
         var source=finishPrevious ? prev.Read:curr.Read;
         if(mode==failedMode) mode="original";
@@ -508,7 +521,6 @@ internal sealed partial class Renderer : IDisposable
         int pixel=samplePixel ? ReadCenterPixel() : 0;
         if(presentation==null) swap.Present(0,PresentFlags.None);
         else presentation.Present(Device,context,backBuffer,screenSize);
-        Presented++;
         return pixel;
     }
     void SampleOutput()

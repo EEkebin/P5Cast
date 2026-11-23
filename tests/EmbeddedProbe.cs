@@ -314,8 +314,8 @@ internal static partial class EmbeddedProbe
                 } else if(stage==4 && elapsed>pauseStart+650) {
                     Check(data["audioBitrateKbps"]==null && data["audioSampleRate"]==null && data["audioChannels"]==null,
                           "The CDV2 unavailable fields retained stale audio metrics.");
-                    start=captured; beforeRepaint=Convert.ToInt32(data["presented"]); window.Width+=53; stage=5;
-                } else if(stage==5 && Convert.ToInt32(data["presented"])>beforeRepaint) {
+                    start=captured; beforeRepaint=Convert.ToInt32(data["repaints"]); window.Width+=53; stage=5;
+                } else if(stage==5 && Convert.ToInt32(data["repaints"])>beforeRepaint) {
                     Check(captured==start,"Paused source unexpectedly supplied a new frame during resize.");
                     stage=6; api.GetMethod("Stop").Invoke(null,null);
                 }

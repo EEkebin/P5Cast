@@ -26,25 +26,28 @@ namespace Cadrivect
         {
             if(!fullscreen) {
                 previousWindowState=window.WindowState; window.WindowState=WindowState.Normal;
+                System.Windows.Shell.WindowChrome.SetWindowChrome(window,null);
                 window.WindowStyle=WindowStyle.None; window.WindowState=WindowState.Maximized;
             } else {
                 window.WindowState=WindowState.Normal; window.WindowStyle=WindowStyle.SingleBorderWindow;
+                System.Windows.Shell.WindowChrome.SetWindowChrome(window,titleChrome);
                 window.WindowState=previousWindowState;
             }
             fullscreen=!fullscreen; UI<Button>("Fullscreen").Content=fullscreen?"Windowed":"Fullscreen";
-            UI<RowDefinition>("HeaderRow").Height=new GridLength(fullscreen?0:69);
+            UpdateFrameInsets();
+            UI<RowDefinition>("HeaderRow").Height=new GridLength(fullscreen?0:titleChrome.CaptionHeight);
+            UI<Border>("HeaderBar").Visibility=fullscreen?Visibility.Collapsed:Visibility.Visible;
             UI<RowDefinition>("TransportRow").Height=new GridLength(fullscreen?0:52);
             UI<RowDefinition>("SettingsRow").Height=new GridLength(fullscreen?0:181);
             UI<RowDefinition>("StatusRow").Height=fullscreen?new GridLength(0):GridLength.Auto;
             UI<Grid>("Workspace").Margin=fullscreen?new Thickness(0):new Thickness(16,14,16,12);
-            UI<ColumnDefinition>("MeterColumn").Width=new GridLength(!fullscreen && stats?312:0);
+            ApplySidebar(false);
             window.Focus();
         }
         void ToggleStats()
         {
-            if(fullscreen) ToggleFullscreen();
-            stats=!stats; UI<ColumnDefinition>("MeterColumn").Width=new GridLength(stats?312:0);
-            UI<Border>("MeterHost").Visibility=stats?Visibility.Visible:Visibility.Collapsed;
+            if(fullscreen) {stats=true; ToggleFullscreen(); return;}
+            stats=!stats; ApplySidebar(true);
         }
         void UpdateTransport()
         {

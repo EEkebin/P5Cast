@@ -1,9 +1,29 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="P5Cast" Width="1320" Height="860" MinWidth="880" MinHeight="590"
         Background="#10171C" Foreground="#E8F0F1" FontFamily="Segoe UI"
         FontSize="14" WindowStartupLocation="CenterScreen" UseLayoutRounding="True">
+  <shell:WindowChrome.WindowChrome>
+    <shell:WindowChrome CaptionHeight="52" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False"/>
+  </shell:WindowChrome.WindowChrome>
   <Window.Resources>
+    <Style x:Key="TitleAction" TargetType="ButtonBase">
+      <Setter Property="Foreground" Value="#D6E2E2"/><Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Height" Value="34"/><Setter Property="MinWidth" Value="38"/><Setter Property="Padding" Value="9,0"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ButtonBase">
+        <Border Name="ButtonFace" Background="{TemplateBinding Background}" BorderThickness="1" BorderBrush="Transparent" CornerRadius="5" Padding="{TemplateBinding Padding}">
+          <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+        </Border>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ButtonFace" Property="Background" Value="#304147"/></Trigger>
+          <MultiTrigger><MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="Tag" Value="Close"/></MultiTrigger.Conditions><Setter TargetName="ButtonFace" Property="Background" Value="#A63E47"/></MultiTrigger>
+          <Trigger Property="IsPressed" Value="True"><Setter TargetName="ButtonFace" Property="Opacity" Value="0.7"/></Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="ButtonFace" Property="BorderBrush" Value="#8FE6D0"/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
     <Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/></Style>
     <Style x:Key="Detail" TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="Foreground" Value="#B3C1C4"/><Setter Property="FontSize" Value="14"/><Setter Property="LineHeight" Value="21"/></Style>
     <Style x:Key="Heading" TargetType="TextBlock"><Setter Property="FontSize" Value="21"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Margin" Value="0,0,0,10"/></Style>
@@ -57,16 +77,34 @@
       </ControlTemplate></Setter.Value></Setter>
     </Style>
   </Window.Resources>
-  <Grid>
-    <Grid.RowDefinitions><RowDefinition Name="HeaderRow" Height="69"/><RowDefinition Height="*"/><RowDefinition Name="StatusRow" Height="Auto"/></Grid.RowDefinitions>
-    <Border BorderBrush="#2A373E" BorderThickness="0,0,0,1" Padding="30,0">
-      <DockPanel LastChildFill="False" VerticalAlignment="Center">
-        <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
-          <Image Width="32" Height="32" Stretch="Uniform" Source="{Binding Icon, RelativeSource={RelativeSource AncestorType=Window}}"/>
-          <TextBlock Text="P5Cast" FontWeight="SemiBold" FontSize="24" Margin="9,-2,0,0"/>
+  <Grid Name="WindowFrame">
+    <Grid.RowDefinitions><RowDefinition Name="HeaderRow" Height="52"/><RowDefinition Height="*"/><RowDefinition Name="StatusRow" Height="Auto"/></Grid.RowDefinitions>
+    <Border Name="HeaderBar" Background="#152026" BorderBrush="#2A393E" BorderThickness="0,0,0,1" Padding="16,0,6,0">
+      <DockPanel LastChildFill="False">
+        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,24,0">
+          <Image Width="26" Height="26" Stretch="Uniform" Source="{Binding Icon, RelativeSource={RelativeSource AncestorType=Window}}"/>
+          <TextBlock Text="P5Cast" FontWeight="SemiBold" FontSize="19" VerticalAlignment="Center" Margin="8,0,0,0"/>
         </StackPanel>
-        <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
-          <Button Name="PlayNav" Content="Play"/><Button Name="HostNav" Content="Host"/><Button Name="ClientNav" Content="Client" Margin="0"/>
+        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+          <Button Name="PlayNav" Content="Play" Style="{StaticResource TitleAction}" MinWidth="58"/>
+          <Button Name="HostNav" Content="Host" Style="{StaticResource TitleAction}" MinWidth="58"/>
+          <Button Name="ClientNav" Content="Client" Style="{StaticResource TitleAction}" MinWidth="58"/>
+        </StackPanel>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+          <ToggleButton Name="ShowStats" Style="{StaticResource TitleAction}" AutomationProperties.Name="Performance sidebar">
+            <Canvas Width="22" Height="22" IsHitTestVisible="False">
+              <Line Name="MenuTop" X1="2" X2="20" Y1="11" Y2="11" Stroke="#8FE6D0" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round">
+                <Line.RenderTransform><TransformGroup><RotateTransform CenterX="11" CenterY="11"/><TranslateTransform Y="-3"/></TransformGroup></Line.RenderTransform>
+              </Line>
+              <Line Name="MenuBottom" X1="2" X2="20" Y1="11" Y2="11" Stroke="#8FE6D0" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round">
+                <Line.RenderTransform><TransformGroup><RotateTransform CenterX="11" CenterY="11"/><TranslateTransform Y="3"/></TransformGroup></Line.RenderTransform>
+              </Line>
+            </Canvas>
+          </ToggleButton>
+          <Border Background="#354449" Width="1" Height="18" Margin="6,0"/>
+          <Button Name="MinimizeWindow" Style="{StaticResource TitleAction}" ToolTip="Minimize" AutomationProperties.Name="Minimize"><Path Stroke="#C5D3D4" StrokeThickness="1.2" Data="M0,5 H10"/></Button>
+          <Button Name="MaximizeWindow" Style="{StaticResource TitleAction}" ToolTip="Maximize" AutomationProperties.Name="Maximize"><Path Name="MaximizeGlyph" Stroke="#C5D3D4" StrokeThickness="1.2" Data="M0,0 H10 V10 H0 Z"/></Button>
+          <Button Name="CloseWindow" Tag="Close" Style="{StaticResource TitleAction}" ToolTip="Close" AutomationProperties.Name="Close P5Cast"><Path Stroke="#E4EEEE" StrokeThickness="1.25" Data="M0,0 L10,10 M10,0 L0,10"/></Button>
         </StackPanel>
       </DockPanel>
     </Border>
@@ -79,7 +117,6 @@
           <Button DockPanel.Dock="Left" Name="OpenSource" Content="Connect" Width="108" Style="{StaticResource Primary}"/>
           <ComboBox DockPanel.Dock="Left" Name="SourceChoice" Padding="6,4" VerticalContentAlignment="Center" Width="142" Margin="0,0,10,0"/>
           <Button DockPanel.Dock="Right" Name="Fullscreen" Content="Fullscreen" ToolTip="Fullscreen video (F11). Press Escape or double-click the video to return." Margin="0"/>
-          <Button DockPanel.Dock="Right" Name="ShowStats" Content="Stats" ToolTip="Toggle the picture and performance panel"/>
         </DockPanel>
         <Border Grid.Row="2" Background="#172127" CornerRadius="8" BorderBrush="#2C3A41" BorderThickness="1">
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
@@ -173,7 +210,9 @@
       </Grid>
         </ScrollViewer></Border>
       </Grid>
-      <Border Grid.Column="1" Name="MeterHost" Background="#172127" CornerRadius="8" BorderBrush="#2C3A41" BorderThickness="1" Margin="12,0,0,0"/>
+      <Border Grid.Column="1" ClipToBounds="True">
+        <Border Name="MeterHost" Background="#172127" CornerRadius="8" BorderBrush="#2C3A41" BorderThickness="1" Margin="12,0,0,0"><Border.RenderTransform><TranslateTransform/></Border.RenderTransform></Border>
+      </Border>
     </Grid>
     <Border Grid.Row="2" Padding="30,11" Background="#121D22" BorderBrush="#293940" BorderThickness="0,1,0,0">
       <DockPanel><Ellipse Name="Indicator" DockPanel.Dock="Left" Width="8" Height="8" Fill="#91DECA" Margin="0,0,10,0"/><TextBlock Name="Status" Text="Ready" Foreground="#CAD8D9" FontSize="13" Height="21" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/></DockPanel>

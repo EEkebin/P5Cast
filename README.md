@@ -9,8 +9,8 @@ Extract the entire Windows x64 ZIP and open `P5Cast.exe`. To install it for your
 The installer places the app in `%LOCALAPPDATA%\Programs\P5Cast` and adds **P5Cast** and **P5Cast Client** under **Start → P5Cast**. Existing console registrations, preferences and network pairings carry over when upgrading from Cadrivect.
 
 1. Open **Play**, choose **Offline demo**, then **Play demo**. A 960×540 scene runs inside the dashboard. Use the arrow keys or A/D to steer and Space to accelerate. The demo runs without a console, network connection, decoder download or controller.
-2. The **Stats** panel is visible at startup. Begin with **Original** and interpolation **Off**. Try **Sharpen**, **AMD FSR 1** or an available NVIDIA mode, then compare with **Compare original**. Pick **2×**, **3×** or **4×** to test interpolation.
-3. Use **Fullscreen** or F11 for edge-to-edge video. Press Escape or double-click the picture to return. **Stop** turns the same video area black and clears the live measurements. With the dashboard focused, Ctrl+Alt+O toggles Stats, Ctrl+Alt+B toggles comparison, and Ctrl+Alt+Q stops playback.
+2. The two-line button in the title bar opens the performance sidebar and becomes an X while the sidebar is open. P5Cast remembers your choice. Begin with **Original** and interpolation **Off**. Try **Sharpen**, **AMD FSR 1** or an available NVIDIA mode, then compare with **Compare original**. Pick **2×**, **3×** or **4×** to test interpolation.
+3. Use **Fullscreen** or F11 for edge-to-edge video. Press Escape or double-click the picture to return. **Stop** turns the same video area black and clears the live measurements. With the dashboard focused, Ctrl+Alt+O toggles the sidebar, Ctrl+Alt+B toggles comparison, and Ctrl+Alt+Q stops playback.
 
 ## Connect to a PS5
 

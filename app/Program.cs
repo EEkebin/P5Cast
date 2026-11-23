@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.4.2.0")]
+[assembly: AssemblyVersion("0.5.0.0")]
 
 namespace Cadrivect
 {
@@ -105,6 +105,7 @@ namespace Cadrivect
             },delegate(bool enabled){comparing=enabled; if(rendering!=null) engine.Compare(enabled);});
             UI<Border>("MeterHost").Child=meter;
             var saved = ReadSettings();
+            InitTitleBar(!Field(saved,"sidebarOpen").Equals("False",StringComparison.OrdinalIgnoreCase));
             InitDiscord(saved);
             var output=UI<ComboBox>("PlaybackDisplay");
             RefreshDisplays(Field(saved,"display"));
@@ -183,7 +184,6 @@ namespace Cadrivect
                 if(Active || preparing) await UserStop(); else await StartPlayback();
             };
             UI<Button>("Fullscreen").Click+=delegate {ToggleFullscreen();};
-            UI<Button>("ShowStats").Click+=delegate {ToggleStats();};
             window.PreviewKeyDown+=async delegate(object sender,KeyEventArgs e) {
                 bool chord=(Keyboard.Modifiers & (ModifierKeys.Control|ModifierKeys.Alt))==(ModifierKeys.Control|ModifierKeys.Alt);
                 var key=e.Key==Key.System?e.SystemKey:e.Key;
@@ -356,8 +356,8 @@ namespace Cadrivect
 
         void Highlight(Button b, bool on)
         {
-            b.Background = on ? mint : grey;
-            b.Foreground = on ? dark : light;
+            b.Background = on ? dark : Brushes.Transparent;
+            b.Foreground = on ? mint : light;
             b.FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal;
         }
 
@@ -493,7 +493,7 @@ namespace Cadrivect
                 Directory.CreateDirectory(Path.GetDirectoryName(preferences));
                 var hostTarget=UI<ComboBox>("HostDisplay").SelectedItem as DisplayTarget;
                 var console=UI<ComboBox>("ConsolePicker").SelectedItem as DirectConsole;
-                var settings = new { discordPresence=UI<CheckBox>("SharePresence").IsChecked==true,
+                var settings = new { sidebarOpen=stats, discordPresence=UI<CheckBox>("SharePresence").IsChecked==true,
                     discordGame=UI<CheckBox>("ShareGame").IsChecked==true,discordProject=UI<CheckBox>("ShareProject").IsChecked==true,stopChoices=stopChoices,directMbps=DirectKbps()/1000, relayMbps=networkRates[UI<ComboBox>("NetworkBitrate").SelectedIndex],audioLayout=UI<ComboBox>("NetworkAudio").SelectedIndex,pictureDefaults=1, mode=mode, multiplier=factor-1,
                     consoleMac=console==null?"":console.Mac,consoleAddresses=consoleAddresses,directFps=UI<ComboBox>("DirectFps").SelectedIndex,
                     display=SelectedDisplayName(), resolution=UI<ComboBox>("RenderResolution").SelectedIndex,hdr=UI<ComboBox>("HdrOutput").SelectedIndex,

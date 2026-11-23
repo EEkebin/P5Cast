@@ -299,6 +299,27 @@ internal static partial class WindowChromeProbe
         Require(scale.SelectedItem.ToString()=="150%","Could not save the manual scale for relaunch.");
     }
 
+    static async Task CheckNvidiaOutput(MethodInfo snapshot,bool hdr,bool videoSr,bool fruc,string label)
+    {
+        var json=new System.Web.Script.Serialization.JavaScriptSerializer();
+        Func<Dictionary<string,object>> read=()=>json.Deserialize<Dictionary<string,object>>((string)snapshot.Invoke(null,null));
+        // Counters can include frames submitted before the output switch. Observe new submissions.
+        var before=read();
+        await Until(delegate {
+            var now=read();
+            if(!Equals(now["presenterHdr10"],hdr) || !Equals(now["hdrEnabled"],hdr) ||
+                !Equals(now["presentationColorSpace"],hdr ? "BT.2020 PQ" : "sRGB") ||
+                (hdr && !Equals(now["presenterHdrFormat"],"RGB10A2_UNORM"))) return false;
+            if(videoSr && (!Equals(now["effectivePictureMode"],"rtxvideo") || !Equals(now["activeNvidiaEffect"],"rtxvideo") ||
+                Convert.ToInt32(now["nvidiaEvaluations"])<=Convert.ToInt32(before["nvidiaEvaluations"]))) return false;
+            if(fruc && (!Equals(now["activeFrameGenerationProvider"],"fruc") ||
+                Convert.ToInt32(now["generated"])<=Convert.ToInt32(before["generated"]) ||
+                Convert.ToInt32(now["frucMidpoints"])<=Convert.ToInt32(before["frucMidpoints"]))) return false;
+            return string.IsNullOrEmpty(Convert.ToString(now["effectNotice"])) &&
+                Convert.ToInt32(now["presented"])>Convert.ToInt32(before["presented"]);
+        },label+" did not present frames with the requested NVIDIA effects.",15000);
+    }
+
     static async void CheckWindow()
     {
         try {
@@ -456,32 +477,30 @@ internal static partial class WindowChromeProbe
                             Require(frame.Contains("\"presenterHdr10\":true") && frame.Contains("\"presentationColorSpace\":\"BT.2020 PQ\"") &&
                                 frame.Contains("\"presenterHdrFormat\":\"RGB10A2_UNORM\""),"Missing negotiated HDR10 surface: "+frame);
                             var fruc=(RadioButton)FindVisual(meter,"RadioButton",e=>AutomationProperties.GetAutomationId(e)=="NvidiaFrucFrameGeneration");
-                            Require(fruc!=null && !fruc.IsEnabled,"FRUC must be disabled during HDR playback.");
-                            bool testFruc=Equals(fruc.ToolTip,"NVIDIA FRUC requires SDR. Choose SDR in Graphics & display.");
+                            var vsr=(RadioButton)FindVisual(meter,"RadioButton",e=>AutomationProperties.GetAutomationId(e)=="Picture_rtxvideo");
+                            var caps=(Dictionary<string,object>)meter.Child.GetType().GetProperty("Capabilities",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(meter.Child,null);
+                            bool testFruc=Convert.ToBoolean(caps["frucFrameGeneration"]),testVsr=Convert.ToBoolean(caps["rtxvideo"]);
+                            Require(fruc!=null && fruc.IsEnabled==testFruc && vsr!=null && vsr.IsEnabled==testVsr,
+                                "The HDR Picture drawer disagrees with the GPU effect checks on "+labels[i]+".");
+                            if(testVsr) await SelectPlaybackMode(vsr);
+                            if(testFruc) await SelectPlaybackMode(fruc);
+                            await CheckNvidiaOutput(snapshot,true,testVsr,testFruc,labels[i]+" HDR10");
                             color.SelectedItem="SDR";
                             await WaitForOperation("Applying the playback setting");
-                            await Until(delegate{return ((string)snapshot.Invoke(null,null)).Contains("\"hdrEnabled\":false");},"Live SDR switch failed.");
-                            if(testFruc) {
-                                await Until(()=>fruc.IsEnabled,"FRUC did not become available after selecting SDR.");
-                                var amd=(RadioButton)FindVisual(meter,"RadioButton",e=>AutomationProperties.GetAutomationId(e)=="AmdFrameGeneration");
-                                if(amd.IsEnabled) {
-                                    await SelectPlaybackMode(amd);
-                                    await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"activeFrameGenerationProvider\":\"amd\""),"AMD failed before switching to FRUC.",12000);
-                                }
+                            await CheckNvidiaOutput(snapshot,false,testVsr,testFruc,labels[i]+" SDR");
+                            var amd=(RadioButton)FindVisual(meter,"RadioButton",e=>AutomationProperties.GetAutomationId(e)=="AmdFrameGeneration");
+                            if(testFruc && amd.IsEnabled) {
+                                await SelectPlaybackMode(amd);
+                                await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"activeFrameGenerationProvider\":\"amd\""),"AMD failed before switching to FRUC.",12000);
                                 await SelectPlaybackMode(fruc);
-                                await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"activeFrameGenerationProvider\":\"fruc\""),"Selected FRUC failed to produce an intermediate frame.",12000);
                                 Require(amd.IsChecked!=true,"Both vendor providers are selected.");
                             }
                             color.SelectedItem="HDR10";
                             await WaitForOperation("Applying the playback setting");
-                            await Until(delegate{return ((string)snapshot.Invoke(null,null)).Contains("\"hdrEnabled\":true");},"HDR10 did not resume.");
-                            if(testFruc) {
-                                await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"multiplier\":1") && fruc.IsChecked!=true && !fruc.IsEnabled,
-                                    "HDR did not turn FRUC off.");
-                                var hint=(TextBlock)FindVisual(meter,"TextBlock",e=>AutomationProperties.GetAutomationId(e)=="FrucHdrNotice");
-                                Require(hint!=null && hint.Visibility==Visibility.Visible,"HDR transition did not explain that FRUC was turned off.");
-                                Note(labels[i]+" presented NVIDIA FRUC in SDR and turned frame generation off for HDR10.");
-                            }
+                            await CheckNvidiaOutput(snapshot,true,testVsr,testFruc,labels[i]+" restored HDR10");
+                            if(testVsr && testFruc) Note(labels[i]+" presented HDR10 with RTX Video SR and advancing NVIDIA FRUC midpoints, including after an SDR round trip.");
+                            if(testFruc) await SelectPlaybackMode((RadioButton)FindVisual(meter,"RadioButton",e=>Equals(((RadioButton)e).Content,"Off")));
+                            if(testVsr) await SelectPlaybackMode((RadioButton)FindVisual(meter,"RadioButton",e=>AutomationProperties.GetAutomationId(e)=="Picture_original"));
                             Note(labels[i]+" presented HDR10 and switched to SDR and back during playback.");
                             if(keys[i]=="d3d12" || keys[i]=="vulkan") {
                                 var picture=Find<Border>("MeterHost");

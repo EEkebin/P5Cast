@@ -88,13 +88,13 @@ try {
     Require ($fruc.IsEnabled -and !$amd.IsChecked -and $provider.GetValue($meter) -eq 'fruc' -and $frucSetup.Visibility -eq 'Collapsed') 'Selecting FRUC replaces AMD with NVIDIA at 2x'
     $saveProvider=$meter.GetType().GetMethod('SavedProvider',[Reflection.BindingFlags]'Static,NonPublic')
     Require ($saveProvider.Invoke($null,@('fruc',2)) -eq 'fruc' -and $saveProvider.Invoke($null,@('amd',2)) -eq 'amd' -and $saveProvider.Invoke($null,@('fruc',4)) -eq 'p5cast') 'FRUC and existing AMD selections round-trip at valid multipliers'
+    $caps['rtxvideo']=$true
+    $meter.SetCapabilities($caps); $pictureButtons[3].IsChecked=$true
     (Widget HdrOutput).SelectedItem='HDR10'
-    Require (!$fruc.IsEnabled -and !$fruc.IsChecked -and $fruc.ToolTip -like '*requires SDR*' -and $provider.GetValue($meter) -eq 'p5cast') 'Requesting HDR disables SDR-only FRUC before live telemetry arrives'
-    $frucHdrNotice=$meter.GetType().GetField('frucHdrNotice','Instance,NonPublic').GetValue($meter)
-    $frucFactors=$meter.GetType().GetField('factors','Instance,NonPublic').GetValue($meter)
-    Require ($frucFactors[0].IsChecked -and $frucHdrNotice.Visibility -eq 'Visible') 'HDR visibly selects Off and explains why FRUC stopped'
+    Require ($fruc.IsEnabled -and $fruc.IsChecked -and $provider.GetValue($meter) -eq 'fruc') 'Requesting HDR10 keeps the NVIDIA FRUC provider selected'
+    Require ($pictureButtons[3].IsEnabled -and $pictureButtons[3].IsChecked) 'RTX Video SR stays selected alongside FRUC when HDR10 is requested'
     (Widget HdrOutput).SelectedItem='SDR'
-    Require ($fruc.IsEnabled -and $frucHdrNotice.Visibility -eq 'Collapsed') 'Returning to SDR makes the probed FRUC provider available again'
+    Require ($fruc.IsChecked -and $pictureButtons[3].IsChecked) 'Returning to SDR preserves both selected NVIDIA effects'
     Require (!$pictureButtons[8].IsEnabled) 'NIS waits for the selected graphics device probe'
     $caps['adapter']='AMD test adapter'; $caps['nis']=$true
     $caps['fsr-temporal']=$true; $caps['fsrVersion']='4.1.2'

@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.22.0.0")]
+[assembly: AssemblyVersion("0.23.0.0")]
 
 namespace Cadrivect
 {
@@ -126,7 +126,6 @@ namespace Cadrivect
             meter=new PlaybackMeter(delegate(int selectedMode,int multiplier) {
                 bool pictureChanged=mode!=selectedMode;
                 pictureSelectionRevision++; mode=selectedMode; factor=multiplier;
-                if(pictureChanged && !Active && !preparing) RefreshFrucOutputIntent();
                 if(rendering!=null && !restoringSwitch) {
                     engine.Configure(mode,factor,meter.FrameGenerationProvider);
                     TrackSwitch(SwitchControl.Picture,pictureChanged ? "Applying "+PictureLabels.Modes[mode] : "Changing frame generation");
@@ -194,7 +193,7 @@ namespace Cadrivect
             UI<CheckBox>("ClientHdr").IsChecked=string.Equals(Field(saved,"clientHdr"),"True",StringComparison.OrdinalIgnoreCase);
             output.DropDownOpened += delegate { RefreshDisplays(SelectedDisplayName()); };
             output.SelectionChanged += delegate {
-                if(!refreshingDisplays && window.IsLoaded) {MoveDashboard(); RefreshFrucOutputIntent();}
+                if(!refreshingDisplays && window.IsLoaded) MoveDashboard();
             };
             UI<ComboBox>("HdrOutput").ItemsSource=new[]{"Auto","SDR","HDR10"};
             preferredHdr=ParseIndex(saved,"hdr",0,hdrIds.Length);
@@ -210,7 +209,6 @@ namespace Cadrivect
             UI<ComboBox>("HdrOutput").SelectionChanged+=delegate {
                 if(restoringSwitch) return;
                 if(!UsesSdrPresenter) preferredHdr=UI<ComboBox>("HdrOutput").SelectedIndex;
-                RefreshFrucOutputIntent();
                 UpdateOutput();
             };
             UI<ComboBox>("RenderResolution").SelectionChanged+=delegate {UpdateOutput();};
@@ -409,7 +407,6 @@ namespace Cadrivect
                 if(!Active && !preparing && revision==pictureSelectionRevision) {
                     if(mode==0 && requested>=3 && Field(gpu,modeIds[requested]).Equals("true",StringComparison.OrdinalIgnoreCase))
                         mode=requested;
-                    RefreshFrucOutputIntent();
                     if(meter.ProviderAvailable(restoreProvider)) {meter.FrameGenerationProvider=restoreProvider; factor=2;}
                     meter.Reset(mode,factor);
                 }
@@ -432,7 +429,6 @@ namespace Cadrivect
             if(message==0x02E0 || message==0x007E) QueueInterfaceScale(); // WM_DPICHANGED / WM_DISPLAYCHANGE
             if(message==0x232 || message==0x7E) {
                 RefreshDisplays(DisplayTarget.DeviceForWindow(hwnd));
-                RefreshFrucOutputIntent();
                 if(engine!=null) engine.InvalidateDisplay();
             }
             return IntPtr.Zero;

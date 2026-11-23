@@ -11,7 +11,7 @@ using SharpDX.Mathematics.Interop;
 using Device = SharpDX.Direct3D11.Device;
 using Buffer = SharpDX.Direct3D11.Buffer;
 
-class VerifyHdr
+partial class VerifyHdr
 {
     const int W=896, H=360;
     // Black, SDR reference white, 1,000 nits, 10,000 nits, and extended scRGB colors outside BT.709.
@@ -47,7 +47,8 @@ class VerifyHdr
         public void Dispose() { write.Dispose(); read.Dispose(); texture.Dispose(); }
     }
     static int Main(string[] args) {
-        try { Run(Assembly.LoadFrom(Path.GetFullPath(args[0])),Array.IndexOf(args,"--nvidia")>=0); return 0; }
+        try { Run(Assembly.LoadFrom(Path.GetFullPath(args[0])),Array.IndexOf(args,"--nvidia")>=0,
+            Array.IndexOf(args,"--fruc")>=0,Array.IndexOf(args,"--d3d12")>=0); return 0; }
         catch(Exception e) { Console.Error.WriteLine(e); return 1; }
     }
     static byte[] Shader(Assembly a,string name) {
@@ -156,8 +157,9 @@ class VerifyHdr
             if(sharpError>=linearError) throw new InvalidDataException("Sharp lost one-pixel stroke contrast.");
         }
     }
-    static void Run(Assembly compiled,bool nvidia) {
-        using(var d=new Device(DriverType.Hardware,DeviceCreationFlags.BgraSupport))
+    static void Run(Assembly compiled,bool nvidia,bool fruc,bool d3d12) {
+        using(var d=d3d12 ? (Device)compiled.GetType("SelectedEffectDevice",true).GetMethod("CreateD3D12").Invoke(null,new object[]{IntPtr.Zero})
+                          : new Device(DriverType.Hardware,DeviceCreationFlags.BgraSupport))
         using(var src=new Image(d,W,H,Format.R16G16B16A16_Float))
         using(var zero=new Image(d,W,H,Format.R16G16B16A16_Float))
         using(var temp=new Image(d,W,H,Format.R16G16B16A16_Float))
@@ -199,6 +201,7 @@ class VerifyHdr
             draw("HdrToLinear2020",src,temp); draw("HdrLinear2020ToPq",temp,hdr10); Check(d,hdr10,"Linear BT.2020 round trip",1);
             draw("HdrToPq",src,temp); draw("Easu",temp,enlarged); draw("Rcas",enlarged,hdr10); Check(d,hdr10,"FSR flat patches",1);
             draw("Interpolate",src,temp); draw("HdrToPq",temp,hdr10); Check(d,hdr10,"Interpolated half-luminance",.5);
+            if(fruc) CheckFrucHdr(compiled,d,draw);
             if(nvidia) {
                 draw("HdrToLinear2020",src,temp);
                 var ngxType=compiled.GetType("NgxVideo",true);

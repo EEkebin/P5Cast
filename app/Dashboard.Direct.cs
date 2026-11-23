@@ -120,14 +120,6 @@ namespace Cadrivect
                 TrackSwitch(SwitchControl.Output,"Applying display settings");
             }
         }
-        void RefreshFrucOutputIntent()
-        {
-            int color=UI<ComboBox>("HdrOutput").SelectedIndex;
-            if(color<0) return;
-            var display=UI<ComboBox>("PlaybackDisplay").SelectedItem as DisplayTarget;
-            bool wantsHdr=color==2 || (color==0 && mode!=3 && display!=null && display.AdvancedColorEnabled);
-            meter.SetFrucOutputIntent(hdrIds[color],wantsHdr);
-        }
         double sourceAspect;
         void UpdateWipeInput()
         {
@@ -206,7 +198,7 @@ namespace Cadrivect
             playingMac=playingPipe=null; EndDiscordSession();
             if(!requestingRest) closeAfterStop=false;
             DismissStopPrompt();
-            meter.Reset(mode,factor); RefreshFrucOutputIntent();
+            meter.Reset(mode,factor);
             meter.SetRequestedVideoKbps(source=="Direct"?DirectKbps():0); surface.Clear(); UpdateTransport();
             if(closing) QueueWindowClose();
         }
@@ -237,7 +229,7 @@ namespace Cadrivect
                     if(string.IsNullOrEmpty(runtime)) throw new IOException("The video decoder runtime is unavailable.");
                     int fps=UI<ComboBox>("DirectFps").SelectedIndex==1?30:60;
                     var display=DisplayTarget.Select("source",surface.Handle); int hdr=UI<ComboBox>("HdrOutput").SelectedIndex;
-                    int codec=hdr==2 || (hdr==0 && display.AdvancedColorEnabled && mode!=3)?3:2;
+                    int codec=hdr==2 || (hdr==0 && display.AdvancedColorEnabled)?3:2;
                     string pipe="Cadrivect-Video-"+Guid.NewGuid().ToString("N");
                     args.AddRange(new[]{"--direct-pipe",pipe,"--direct-runtime",runtime,"--target-fps",fps.ToString()});
                     sessionVideoKbps=DirectKbps();

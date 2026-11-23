@@ -369,8 +369,51 @@ internal static partial class EmbeddedProbe {
         }
         return pass;
     }
+    static void CheckHdrVsr(Type type,object renderer,Device device,Texture2D input,Texture2D output,int[] original) {
+        var enhanced=ReadPresentedTexture(device,output);
+        int worstPatch=0;
+        // Black, 80/200/1000-nit neutral fields and a colored patch.
+        for(int patch=0;patch<5;patch++) for(int ch=0;ch<3;ch++) {
+            int i=OutputW*(OutputH/10)+(2*patch+1)*OutputW/10;
+            int shift=ch*10;
+            worstPatch=Math.Max(worstPatch,Math.Abs(((enhanced[i]>>shift)&1023)-((original[i]>>shift)&1023)));
+        }
+        Check(worstPatch<=1,"RTX Video SR changed a flat HDR10 color.");
+        int detailPixels=0;
+        for(int i=0;i<enhanced.Length;i++)
+            if(Math.Abs((enhanced[i]&1023)-(original[i]&1023))>3) detailPixels++;
+        Check(detailPixels>100,"RTX Video SR did not change detail on the HDR fixture.");
+
+        var ramp=new ushort[InputW*InputH*4];
+        for(int x=0;x<InputW;x++) {
+            ushort level=PositiveHalf(Nits((x+1)/(double)InputW)/80.0);
+            for(int y=0;y<InputH;y++) {
+                int i=4*(y*InputW+x);
+                ramp[i]=ramp[i+1]=ramp[i+2]=level; ramp[i+3]=0x3c00;
+            }
+        }
+        device.ImmediateContext.UpdateSubresource(ramp,input,0,InputW*8,0);
+        type.GetMethod("Receive").Invoke(renderer,new object[]{input,new Rectangle(0,0,InputW,InputH),false});
+        type.GetMethod("Show").Invoke(renderer,new object[]{"rtxvideo",1f,false,false});
+        enhanced=ReadPresentedTexture(device,output);
+        type.GetMethod("SetPictureMode").Invoke(renderer,new object[]{"original"});
+        type.GetMethod("Show").Invoke(renderer,new object[]{"original",1f,false,false});
+        var reference=ReadPresentedTexture(device,output);
+        var codes=new HashSet<int>();
+        var originalCodes=new HashSet<int>();
+        int worstRamp=0;
+        for(int x=0;x<OutputW;x++) {
+            int index=(OutputH/2)*OutputW+x;
+            int color=enhanced[index]&1023,baseline=reference[index]&1023;
+            codes.Add(color); originalCodes.Add(baseline);
+            worstRamp=Math.Max(worstRamp,Math.Abs(color-baseline));
+        }
+        Console.WriteLine("HDR RTX Video SR: flat color error {0} PQ10 code, {1} detail pixels changed, {2}/{3} distinct enhanced/original ramp codes, peak {4}, max ramp error {5}.",
+            worstPatch,detailPixels,codes.Count,originalCodes.Count,codes.Max(),worstRamp);
+        Check(codes.Count>800 && codes.Max()>=1022 && worstRamp<=1,"RTX Video SR lost 10-bit precision or peak range on the grayscale ramp.");
+    }
     public static int RunQuality(string[] args) {
-        if(args.Length==4) return RunOnDesktop(args,"P5CastNgx"+Guid.NewGuid().ToString("N"));
+        if(args.Length==4) return RunOnDesktop(args,"P5CastNgx"+Guid.NewGuid().ToString("N"),120000u);
         if(args.Length!=5 || args[4]!="--inactive-desktop") return 2;
         try {
             var assembly=Assembly.LoadFrom(args[0]); var type=assembly.GetType("Renderer",true);
@@ -466,12 +509,13 @@ internal static partial class EmbeddedProbe {
                                 }
                             }
                         }
-                        if(!hdr && videoSr) {
+                        if(videoSr) {
                             type.GetMethod("SetPictureMode").Invoke(renderer,new object[]{"rtxvideo"});
                             type.GetMethod("Show").Invoke(renderer,new object[]{"rtxvideo",1f,false,false});
                             Check((string)type.GetProperty("EffectivePictureMode").GetValue(renderer,null)=="rtxvideo" &&
                                   (Size)type.GetProperty("RenderSize").GetValue(renderer,null)==new Size(OutputW,OutputH),
                                   "RTX Video SR did not produce the enlarged video resolution.");
+                            if(hdr) CheckHdrVsr(type,renderer,device,input,(Texture2D)backBuffer.GetValue(renderer),baseline);
                         }
                     }
                     pass&=CheckFullHdFit(type,renderer,device,backBuffer,hdr);

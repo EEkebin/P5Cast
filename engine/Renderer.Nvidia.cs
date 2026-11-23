@@ -105,10 +105,12 @@ internal sealed partial class Renderer
             var format=HdrEnabled ? Format.R16G16B16A16_Float : Format.R8G8B8A8_UNorm;
             neuralCurrent=new GpuImage(Device,target.Width,target.Height,format,true,true);
             neuralPrevious=new GpuImage(Device,target.Width,target.Height,format,true,true);
-            var vendorFormat=mode=="dlss-nr" ? Format.R16G16B16A16_Float : format;
+            // RTX Video SDK 1.1 accepts 8-bit video. HDR uses its result as a luminance detail guide.
+            var vendorFormat=mode=="rtxvideo" ? Format.R8G8B8A8_UNorm : mode=="dlss-nr" ? Format.R16G16B16A16_Float : format;
             rgba=new GpuImage(Device,srcSize.Width,srcSize.Height,vendorFormat,true);
             if(mode=="rtxvideo") {
                 if(video==null) video=new RtxVideo(Device.NativePointer);
+                if(HdrEnabled) ngxOutput=new GpuImage(Device,target.Width,target.Height,vendorFormat,true,true);
             }
             else
             {
@@ -131,7 +133,7 @@ internal sealed partial class Renderer
             havePriorEnhanced=HasPrevious && evaluatedFrame==Captured-1 && !resetHistory;
             var temp=neuralPrevious; neuralPrevious=neuralCurrent; neuralCurrent=temp;
             var area=new Rectangle(Point.Empty,srcSize);
-            Draw(HdrEnabled ? "HdrToLinear2020" : "Original",rgba.Write,area,curr.Read,1);
+            Draw(HdrEnabled ? (mode=="rtxvideo" ? "HdrMotionGuide" : "HdrToLinear2020") : "Original",rgba.Write,area,curr.Read,1);
             if(ngx!=null || temporalFsr!=null || neuralRendering!=null)
             {
                 if(havePriorEnhanced)
@@ -147,9 +149,11 @@ internal sealed partial class Renderer
                     neuralRendering.Evaluate(rgba.Texture,vectors.Texture,depth.Texture,ngxOutput.Texture,!havePriorEnhanced);
                 else ngx.Evaluate(context,rgba.Texture,vectors.Texture,depth.Texture,ngxOutput.Texture,0,0,frameMilliseconds,!havePriorEnhanced);
             }
-            else video.Evaluate(context.NativePointer,rgba.Texture.NativePointer,neuralCurrent.Texture.NativePointer,
+            else video.Evaluate(context.NativePointer,rgba.Texture.NativePointer,(HdrEnabled ? ngxOutput : neuralCurrent).Texture.NativePointer,
                                 srcSize.Width,srcSize.Height,target.Width,target.Height);
             RestoreDrawState();
+            if(video!=null && HdrEnabled) Draw("HdrVsrReconstruct",neuralCurrent.Write,new Rectangle(Point.Empty,neuralSize),
+                curr.Read,1,ngxOutput.Read,rgba.Read);
             if(ngx!=null || temporalFsr!=null || neuralRendering!=null) Draw("PreserveNgxStrokes",neuralCurrent.Write,new Rectangle(Point.Empty,neuralSize),
                 ngxOutput.Read,HdrEnabled ? 1 : 0,rgba.Read,strokeMask.Read);
             if(temporalFsr==null) VendorEvaluations++; else FsrEvaluations++;

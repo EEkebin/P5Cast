@@ -22,7 +22,9 @@ namespace Cadrivect
                 await Script("sources/Install-Fruc.ps1","-RuntimePath",picker.FileName);
                 if(closing) return;
                 await ReadGpu(mode);
-                if(!closing) Show("FRUC runtime imported. Choose SDR with Direct3D 11 or 12 to use NVIDIA FRUC 2× on a supported GPU.");
+                if(closing) return;
+                if(meter.ProviderAvailable("fruc")) Show("NVIDIA FRUC 2× is ready for SDR and HDR10 playback.");
+                else Show("FRUC runtime imported. "+meter.FrucAvailabilityReason,true);
             } catch(Exception error) {
                 if(!closing) Show("FRUC setup failed. "+error.Message,true);
             } finally {importingFruc=false;}

@@ -177,6 +177,23 @@ internal static partial class EmbeddedProbe
     }
     [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr window,IntPtr after,int x,int y,int w,int h,uint flags);
 
+    // The moving PQ fixture has an Annex B access-unit delimiter and a complete
+    // intra frame at every boundary so it can loop through the Direct decoder.
+    static byte[][] HdrMotionPackets(byte[] clip)
+    {
+        var offsets=new List<int>();
+        for(int i=0;i+5<clip.Length;i++)
+            if(clip[i]==0 && clip[i+1]==0 && clip[i+2]==0 && clip[i+3]==1 && clip[i+4]==(35<<1)) offsets.Add(i);
+        Check(offsets.Count>=2 && offsets[0]==0,"Missing HDR fixture frame boundaries.");
+        offsets.Add(clip.Length);
+        var frames=new byte[offsets.Count-1][];
+        for(int i=0;i<frames.Length;i++) {
+            frames[i]=new byte[offsets[i+1]-offsets[i]];
+            Buffer.BlockCopy(clip,offsets[i],frames[i],0,frames[i].Length);
+        }
+        return frames;
+    }
+
     static int CheckDirectHdr(Type api,string[] args,string displayName)
     {
         var serializer=new JavaScriptSerializer();
@@ -192,7 +209,9 @@ internal static partial class EmbeddedProbe
             string surface=host.Handle.ToInt64().ToString(CultureInfo.InvariantCulture);
             worker=Start(api,new[]{"--surface",surface,"--direct-pipe",pipe,"--direct-runtime",args[1],
                 "--renderer",renderer,"--hdr","hdr10","--verify-output","--report",args[4]},delegate(int value){ result=value; });
-            byte[][] frames={File.ReadAllBytes(args[2])};
+            bool testNvidia=args[3]=="rtx-fruc";
+            var clip=File.ReadAllBytes(args[2]);
+            byte[][] frames=testNvidia ? HdrMotionPackets(clip) : new[]{clip};
             new Thread(delegate(){SendFixture(pipe,frames,pause,end,3);}) {IsBackground=true}.Start();
             int lastPresented=0;
             Action<Forms.Screen,string,bool> verify=delegate(Forms.Screen screen,string mode,bool hdr) {
@@ -212,6 +231,21 @@ internal static partial class EmbeddedProbe
                 throw new Exception("Expected "+mode+" (HDR "+hdr+") on "+screen.DeviceName+". "+api.GetProperty("Error").GetValue(null,null)+" "+api.GetMethod("Snapshot").Invoke(null,null));
             };
             verify(hdrScreen,"hdr10",true);
+            if(testNvidia) {
+                api.GetMethod("ConfigureWithGeneration").Invoke(null,new object[]{3,2,"fruc"});
+                var active=WaitSnapshot(api,s=>Equals(s["activeNvidiaEffect"],"rtxvideo") &&
+                    Equals(s["activeFrameGenerationProvider"],"fruc"),"both NVIDIA HDR effects",12000);
+                var sample=WaitSnapshot(api,s=>Convert.ToInt32(s["nvidiaEvaluations"])>=Convert.ToInt32(active["nvidiaEvaluations"])+3 &&
+                    Convert.ToInt32(s["frucMidpoints"])>=Convert.ToInt32(active["frucMidpoints"])+2 &&
+                    Convert.ToInt32(s["generated"])>Convert.ToInt32(active["generated"]),"presented HDR video and intermediate frames",8000);
+                Check(Equals(sample["codec"],"HEVC HDR") && Equals(sample["presentationColorSpace"],"BT.2020 PQ") &&
+                    Equals(sample["presenterHdrFormat"],"RGB10A2_UNORM") && Equals(sample["effectivePictureMode"],"rtxvideo") &&
+                    Equals(sample["activeFrameGenerationProvider"],"fruc") &&
+                    Convert.ToInt32(sample["renderWidth"])>Convert.ToInt32(sample["inputWidth"]) &&
+                    string.IsNullOrEmpty(Convert.ToString(sample["effectNotice"])),"NVIDIA effects lost upscaling, FRUC, or HDR10.");
+                Console.WriteLine(renderer+" decoded moving 10-bit HEVC, upscaled with RTX Video SR and presented FRUC midpoints in BT.2020 PQ.");
+                api.GetMethod("ConfigureWithGeneration").Invoke(null,new object[]{0,1,"p5cast"});
+            }
             api.GetMethod("SetComparison").Invoke(null,new object[]{"side-by-side"});
             var split=WaitSnapshot(api,s=>(string)s["comparisonView"]=="side-by-side" && (bool)s["presenterHdr10"] &&
                 Convert.ToInt32(s["presented"])>lastPresented+5,"HDR10 side-by-side");

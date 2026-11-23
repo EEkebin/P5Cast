@@ -273,7 +273,6 @@ internal static class Player
             Renderer.ValidateFrameGeneration(generation,multiplier);
             if(host==null && generation=="amd" && backend!="d3d12" && backend!="vulkan") throw new ArgumentException("AMD frame generation requires Direct3D 12 or Vulkan.");
             if(host==null && generation=="fruc" && !Renderer.SupportsFrucBackend(backend)) throw new ArgumentException(Renderer.FrucBackendReason);
-            if(host==null && generation=="fruc" && hdr=="hdr10") throw new ArgumentException(Renderer.FrucHdrReason);
             if(multiplier<1 || multiplier>4) throw new ArgumentException("Multiplier must be between 1 and 4.");
             int seconds=int.Parse(Option(args,"--seconds",testing ? "4":"0"),CultureInfo.InvariantCulture);
             using(var sample=testing ? new SampleWindow():null)
@@ -520,7 +519,6 @@ internal static class Player
                             inputFps,renderer.Presented/testSeconds,liveFrameAges.Count==0 ? 0:liveFrameAges[median],renderer.SampledFrames,
                             renderer.SampledFrames==0 ? 0:renderer.SampleMinLuma,renderer.SampleMaxLuma)
                             +",\"frameGenerationProvider\":"+JsonString(generation)
-                            +",\"activeNvidiaEffect\":\""+renderer.ActiveEffect+"\",\"nvidiaEvaluations\":"+renderer.VendorEvaluations
                             +",\"hardwareMotionPairs\":"+renderer.HardwareMotionPairs
                             +",\"display\":"+JsonString(renderer.DisplayName)+",\"resolution\":"+JsonString(resolution)
                             +",\"embedded\":"+(host!=null ? "true":"false")+",\"fullscreen\":"+(window!=null && window.Fullscreen ? "true":"false")+",\"hdrEnabled\":"+(renderer.HdrEnabled ? "true":"false")
@@ -587,6 +585,7 @@ internal static class Player
                +",\"outputNotice\":"+JsonString(renderer.OutputNotice)
                +",\"activeFrameGenerationVersion\":"+JsonString(renderer.ActiveFrameGenerationVersion)
                +",\"activeFrameGenerationProvider\":"+JsonString(renderer.ActiveFrameGenerationProvider)
+               +",\"activeNvidiaEffect\":"+JsonString(renderer.ActiveEffect)+",\"nvidiaEvaluations\":"+renderer.VendorEvaluations
                +",\"frucEvaluations\":"+renderer.FrucEvaluations+",\"frucMidpoints\":"+renderer.FrucMidpoints
                +",\"activeNisFilter\":"+JsonString(renderer.ActiveNisFilter)+",\"nisEvaluations\":"+renderer.NisEvaluations
                +",\"fsrVersion\":"+JsonString(renderer.ActiveFsrVersion)+",\"fsrEvaluations\":"+renderer.FsrEvaluations

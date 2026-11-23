@@ -4,7 +4,7 @@ param([string]$PlayerExe,[string]$DirectRuntime,[string]$OutputDirectory,
 $ErrorActionPreference='Stop'
 $repo=Split-Path $PSScriptRoot
 if (!$PlayerExe) { $PlayerExe=Join-Path $repo 'engine\bin\CadrivectPlayer.exe' }
-if (!$DirectRuntime -and !$CheckNeuralRendering -and !$CheckFruc) {
+if (!$DirectRuntime -and !$CheckNeuralRendering -and (!$CheckFruc -or $HdrDisplay)) {
     $runtime=& "$repo\sources\Prepare-Decoder.ps1" | ConvertFrom-Json
     if (!$runtime.ok) { throw $runtime.error }
     $DirectRuntime=$runtime.runtime
@@ -15,10 +15,10 @@ $framework=Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 $refs=@('System.Xaml','System.Web.Extensions','System.Windows.Forms','System.Drawing') | ForEach-Object { "/r:$_.dll" }
 $refs+=@('PresentationCore','PresentationFramework','WindowsBase') | ForEach-Object { "/r:$framework\WPF\$_.dll" }
 $probe=Join-Path $OutputDirectory 'EmbeddedProbe.exe'
-$entry=if($CheckFruc){'FrucPlaybackRunner'}else{'EmbeddedProbe'}
+$entry=if($CheckFruc -and !$HdrDisplay){'FrucPlaybackRunner'}else{'EmbeddedProbe'}
 & "$framework\csc.exe" /nologo /optimize+ /platform:x64 "/main:$entry" @refs "/out:$probe" "$PSScriptRoot\EmbeddedProbe.cs" "$PSScriptRoot\ComparisonProbe.cs" "$PSScriptRoot\FrucPlaybackProbe.cs"
 if ($LASTEXITCODE) { throw 'Embedded WPF probe compilation failed.' }
-if ($CheckFruc) {
+if ($CheckFruc -and !$HdrDisplay) {
     $PlayerExe=(Resolve-Path -LiteralPath $PlayerExe).Path
     if($Renderer -eq 'auto'){$Renderer='d3d11'}
     if($Renderer -notin 'd3d11','d3d12'){throw 'FRUC playback verification requires d3d11 or d3d12.'}
@@ -44,7 +44,9 @@ if ($CheckComparison) {
     return
 }
 if ($HdrDisplay) {
-    & $probe $PlayerExe $DirectRuntime "$PSScriptRoot\fixtures\text-pq10.hevc" "$PSScriptRoot\fixtures\text-pq10.hevc" "$OutputDirectory\hdr.json" $Renderer "--hdr-display=$HdrDisplay"
+    $fixture=if($CheckFruc){'motion-pq10.hevc'}else{'text-pq10.hevc'}
+    $effects=if($CheckFruc){'rtx-fruc'}else{'original'}
+    & $probe $PlayerExe $DirectRuntime "$PSScriptRoot\fixtures\$fixture" $effects "$OutputDirectory\hdr.json" $Renderer "--hdr-display=$HdrDisplay"
     if ($LASTEXITCODE) { throw "Embedded HDR test failed. Inspect $OutputDirectory" }
     return
 }

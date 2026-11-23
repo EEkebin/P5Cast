@@ -57,6 +57,26 @@ float4 HdrMotionGuide(Vertex v) : SV_Target {
     return float4(pq,pq,pq,1);
 }
 
+float4 HdrVsrReconstruct(Vertex v) : SV_Target {
+    // NVIDIA processes a monochrome PQ guide. Keep the original floating-point
+    // BT.2020 color and add only the change in detail measured on that guide.
+    float3 color=max(0,LinearScRgbTo2020(SamplePicture(v)));
+    float luminance=dot(color,float3(0.2627,0.6780,0.0593));
+    float guide=flow.SampleLevel(linearClamp,v.uv,0).r;
+    float enhanced=previous.SampleLevel(linearClamp,v.uv,0).r;
+    float4 footprint=flow.GatherRed(linearClamp,v.uv);
+    float lo=min(min(footprint.x,footprint.y),min(footprint.z,footprint.w));
+    float hi=max(max(footprint.x,footprint.y),max(footprint.z,footprint.w));
+    // A quantization boundary on a smooth 10-bit gradient is not an edge.
+    float detail=clamp(clamp(enhanced,lo,hi)-guide,-0.025,0.025)*smoothstep(1.0/255.0,4.0/255.0,hi-lo);
+    if(abs(detail)<0.00001 || luminance<=0) return float4(color,1);
+    float code=saturate(EncodePq80(luminance.xxx).x+detail);
+    float p=pow(code,32.0/2523.0);
+    float adjusted=125.0*pow(max(p-3424.0/4096.0,0)/(2413.0/128.0-2392.0/128.0*p),16384.0/2610.0);
+    float peak=max(color.r,max(color.g,color.b));
+    return float4(color*min(adjusted/luminance,125.0/peak),1);
+}
+
 // Theme colors are sRGB in SDR. Map UI white to 203 nits for PQ presentation.
 float3 WipeColor(float3 rgb) {
     float3 srgb=rgb/255.0;

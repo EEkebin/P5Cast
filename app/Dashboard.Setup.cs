@@ -233,7 +233,6 @@ namespace Cadrivect
             preferredHdr=setupColorPreference;
             if(!Active && !preparing) UI<ComboBox>("VideoRenderer").SelectedItem=UI<ComboBox>("SetupRenderer").SelectedItem;
             UI<ComboBox>("HdrOutput").SelectedItem=UI<ComboBox>("SetupColor").SelectedItem;
-            RefreshFrucOutputIntent();
             UI<ComboBox>("DirectStreamSize").SelectedItem=UI<ComboBox>("SetupStream").SelectedItem;
             var console=UI<ComboBox>("SetupConsole").SelectedItem as DirectConsole;
             if(console!=null) {

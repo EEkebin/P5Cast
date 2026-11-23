@@ -75,7 +75,6 @@ namespace Cadrivect
                     preferredHdr=Array.IndexOf(hdrIds,color);
                     UI<ComboBox>("HdrOutput").SelectedIndex=preferredHdr;
                     UI<ComboBox>("RenderResolution").SelectedIndex=Array.IndexOf(resolutionIds,size);
-                    RefreshFrucOutputIntent();
                     if(send) engine.ConfigureOutput(size,color);
                 }
                 if((switchedControls&SwitchControl.Model)!=0) {
@@ -130,7 +129,7 @@ namespace Cadrivect
                         picker.SelectedItem=old;
                         preferredHdr=previousHdr; RefreshRendererOutput();
                         mode=previousMode; factor=previousFactor; meter.FrameGenerationProvider=previousProvider;
-                        meter.SetCapabilities(previousGpu); meter.Reset(mode,factor); RefreshFrucOutputIntent();
+                        meter.SetCapabilities(previousGpu); meter.Reset(mode,factor);
                     } finally {restoringSwitch=false;}
                     if(previousGpu==null) {
                         CommitOperation(id,"Checking GPU support for "+old+"…");

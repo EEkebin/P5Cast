@@ -300,11 +300,6 @@ internal sealed partial class Renderer : IDisposable
             if(hdr=="hdr10") throw new InvalidOperationException(Backend+" presents SDR on Windows. Choose Direct3D 11, Direct3D 12 or Vulkan for HDR10.");
             return false;
         }
-        if(pictureMode=="rtxvideo")
-        {
-            if(hdr=="hdr10") throw new InvalidOperationException("RTX Video SR processes SDR. Choose Auto or SDR, or select another picture mode for HDR10.");
-            return false;
-        }
         var output=DisplayHdr.Probe(hwnd);
         if(hdr=="hdr10" && !output.WindowsHdrActive)
             throw new InvalidOperationException("HDR10 needs an active Windows HDR display. Select SDR or enable HDR on "+(output.FriendlyName ?? output.DeviceName)+".");
@@ -463,7 +458,6 @@ internal sealed partial class Renderer : IDisposable
         if(!IsVendor(mode) && mode!="original" && mode!="sharp" && mode!="fsr" && mode!="nis") throw new ArgumentException("Unknown picture mode.");
         if(mode=="nis" && !NisScaler.SupportsBackend(Backend)) throw new InvalidOperationException(NisScaler.BackendReason);
         if(mode=="dlss-nr" && HdrEnabled) throw new InvalidOperationException(NeuralRendering.HdrReason);
-        if(mode=="rtxvideo" && HdrEnabled) throw new InvalidOperationException("RTX Video SR requires SDR output. Select SDR before switching picture mode.");
         if(mode==pictureMode && failedMode==null) return;
         // Verify NIS at the current stream and target dimensions before releasing a working effect.
         if(mode=="nis" && curr!=null) try { EvaluateNis(curr.Read,1,ProcessingSize(mode)); }

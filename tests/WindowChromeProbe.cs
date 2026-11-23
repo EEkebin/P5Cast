@@ -446,6 +446,8 @@ internal static partial class WindowChromeProbe
                                 var picture=Find<Border>("MeterHost");
                                 var dlss=(RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"DLSS"));
                                 await Until(()=>!Equals(dlss.ToolTip,"Checking GPU support."),labels[i]+" capability probe did not finish.",45000);
+                                var nr=(RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"DLSS 5 NR"));
+                                Require(nr!=null && !nr.IsEnabled,"Neural rendering must stay disabled on an HDR stream.");
                                 var fsr=(RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"AMD FSR Temporal"));
                                 var amdFrames=(RadioButton)FindVisual(picture,"RadioButton",e=>AutomationProperties.GetAutomationId(e)=="AmdFrameGeneration");
                                 Func<Dictionary<string,object>> sample=()=>new System.Web.Script.Serialization.JavaScriptSerializer()

@@ -12,8 +12,8 @@ using System.Windows.Forms;
 // independent of the SDR/HDR video swap chain. It has no taskbar or Alt+Tab entry.
 internal sealed class PlaybackControls : Form
 {
-    internal static readonly string[] Modes={"original","sharp","fsr","rtxvideo","dlss","dlaa","fsr-temporal"};
-    static readonly string[] Names={"Original","Sharpen","AMD FSR 1","RTX Video SR","DLSS","DLAA","AMD FSR Temporal"};
+    internal static readonly string[] Modes={"original","sharp","fsr","rtxvideo","dlss","dlaa","fsr-temporal","dlss-nr"};
+    static readonly string[] Names={"Original","Sharpen","AMD FSR 1","RTX Video SR","DLSS","DLAA","AMD FSR Temporal","DLSS 5 NR"};
     static readonly Color Surface=Color.FromArgb(19,30,35), Idle=Color.FromArgb(31,45,51),
         Edge=Color.FromArgb(63,81,87), TextColor=Color.FromArgb(235,244,243),
         Muted=Color.FromArgb(174,193,195), Mint=Color.FromArgb(146,232,209);

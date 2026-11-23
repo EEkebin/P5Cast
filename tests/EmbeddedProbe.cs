@@ -38,7 +38,7 @@ internal static partial class EmbeddedProbe
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
     [DllImport("kernel32.dll")] static extern uint WaitForSingleObject(IntPtr handle,uint timeout);
     [DllImport("kernel32.dll")] static extern bool GetExitCodeProcess(IntPtr handle,out int code);
-    static int RunOnDesktop(string[] args,string id)
+    static int RunOnDesktop(string[] args,string id,uint timeoutMs=30000)
     {
         IntPtr desktop=CreateDesktop(id,IntPtr.Zero,IntPtr.Zero,0,0xf01ff,IntPtr.Zero);
         if(desktop==IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -53,7 +53,7 @@ internal static partial class EmbeddedProbe
                 throw new Win32Exception(Marshal.GetLastWin32Error());
             CloseHandle(process.Thread);
             try {
-                Check(WaitForSingleObject(process.Process,30000)==0,"Inactive-desktop test timed out.");
+                Check(WaitForSingleObject(process.Process,timeoutMs)==0,"Inactive-desktop test timed out.");
                 int code; GetExitCodeProcess(process.Process,out code); return code;
             } finally { CloseHandle(process.Process); }
         } finally { CloseDesktop(desktop); }
@@ -260,12 +260,69 @@ internal static partial class EmbeddedProbe
         }
     }
 
+    static int CheckNeuralRendering(Type api,string report)
+    {
+        var host=new VideoHost();
+        var window=new Window {Title="P5Cast Neural Rendering test",Width=1120,Height=690,Content=host,ShowActivated=false};
+        var serializer=new JavaScriptSerializer();
+        var caps=api.Assembly.GetType("GpuCapabilities",true).GetMethod("ProbeForBackend").Invoke(null,new object[]{"vulkan"});
+        var capabilities=serializer.Deserialize<Dictionary<string,object>>((string)caps.GetType().GetMethod("ToJson").Invoke(caps,null));
+        bool available=(bool)capabilities["dlss-nr"],installable=(bool)capabilities["dlssNeuralRuntimeDownloadAvailable"];
+        string reason=(string)capabilities["dlss-nrReason"];
+        Check(available?(!installable && reason==""):!string.IsNullOrWhiteSpace(reason),"Ambiguous Neural Rendering capability.");
+        Thread worker=null;
+        int result=-1;
+        try {
+            window.Show();window.UpdateLayout();Pump();
+            worker=Start(api,new[]{"--surface",host.Handle.ToInt64().ToString(CultureInfo.InvariantCulture),"--demo","--renderer","vulkan",
+                "--mode","dlss-nr","--hdr","off","--resolution","4k","--verify-output","--report",report},delegate(int value) {result=value;});
+            var state=WaitSnapshot(api,s=>Convert.ToInt32(s["presented"])>=8 && Convert.ToInt32(s["elapsedMs"])>=1400,
+                "Neural Rendering or fallback presentations",45000);
+            CheckVideoSize(state,960,540);
+            string selected=(string)state["effectivePictureMode"];
+            Check(selected=="dlss-nr" || selected=="original","Unexpected effective Neural Rendering mode.");
+            if(!available && reason.Contains("RTX 50"))
+                Check(selected=="original" && !installable,"Unsupported RTX hardware enabled Neural Rendering or its download.");
+            if(selected=="original")
+                Check(!string.IsNullOrWhiteSpace((string)state["effectNotice"]),"Missing fallback reason.");
+            int before=Convert.ToInt32(state["presented"]);
+            api.GetMethod("ConfigureOutput").Invoke(null,new object[]{null,"auto"});
+            var display=WaitSnapshot(api,s=>(string)s["hdrMode"]=="auto" && Convert.ToInt32(s["presented"])>before+6,"output after selecting Auto HDR");
+            if((bool)display["hdrEnabled"]) {
+                Check((bool)display["presenterHdr10"] && (string)display["effectivePictureMode"]=="original" &&
+                      ((string)display["effectNotice"]).Contains("SDR"),"Selecting Auto HDR lost the original HDR picture or the SDR restriction.");
+                CheckVideoSize(display,960,540);
+                Console.WriteLine("HDR10 remained active with native-size Original playback.");
+            }
+            api.GetMethod("Stop").Invoke(null,null);
+            var clock=Stopwatch.StartNew();while(worker.IsAlive && clock.ElapsedMilliseconds<5000) Pump();
+            Check(!worker.IsAlive && result==0,"Forced Neural Rendering interrupted playback.");
+            var data=serializer.Deserialize<Dictionary<string,object>>(File.ReadAllText(report));
+            CheckVideoSize(data,960,540);
+            Check(Convert.ToInt32(data["sampledFrames"])>=2 && Convert.ToInt32(data["sampleMaxLuma"])>Convert.ToInt32(data["sampleMinLuma"]),
+                "Presented frames did not contain the calibration picture.");
+            Check((Convert.ToInt32(data["nvidiaEvaluations"])>0)==(selected=="dlss-nr"),"Inaccurate Neural Rendering evaluation counter.");
+            Console.WriteLine("Vulkan NR capability={0}, download={1}, SDR playback={2}. {3}",available,installable,selected,state["effectNotice"]);
+            return 0;
+        } catch(Exception e) {File.WriteAllText(report+".error.txt",e.ToString());return 1;}
+        finally {
+            api.GetMethod("Stop").Invoke(null,null);
+            var clock=Stopwatch.StartNew();while(worker!=null && worker.IsAlive && clock.ElapsedMilliseconds<2500) Pump();
+            window.Close();
+        }
+    }
+
     [STAThread] static int Main(string[] args)
     {
         string id="CadrivectEmbedded"+Guid.NewGuid().ToString("N");
         bool hdrProbe=args.Length>=7 && args[6].StartsWith("--hdr-display=",StringComparison.Ordinal);
         bool compareProbe=args.Length>=7 && args[6]=="--comparison";
-        if(args.Length==6 || (args.Length==7 && (hdrProbe || compareProbe))) return RunOnDesktop(args,id);
+        bool neuralProbe=args.Length>=7 && args[6]=="--neural";
+        if(args.Length==6 || (args.Length==7 && (hdrProbe || compareProbe || neuralProbe))) return RunOnDesktop(args,id,neuralProbe?120000u:30000u);
+        if(args.Length==8 && neuralProbe && args[7]=="--inactive-desktop") {
+            var neuralApi=Assembly.LoadFrom(Path.GetFullPath(args[0])).GetType("Cadrivect.Engine.EmbeddedPlayback",true);
+            return CheckNeuralRendering(neuralApi,args[4]);
+        }
         if(args.Length==8 && compareProbe && args[7]=="--inactive-desktop") {
             var compareApi=Assembly.LoadFrom(Path.GetFullPath(args[0])).GetType("Cadrivect.Engine.EmbeddedPlayback",true);
             return CheckComparison(compareApi,args);

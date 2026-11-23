@@ -1,10 +1,10 @@
 [CmdletBinding()]
 param([string]$PlayerExe,[string]$DirectRuntime,[string]$OutputDirectory,
-      [ValidateSet('auto','d3d11','d3d12','vulkan','opengl')][string]$Renderer='auto',[string]$HdrDisplay,[switch]$CheckComparison)
+      [ValidateSet('auto','d3d11','d3d12','vulkan','opengl')][string]$Renderer='auto',[string]$HdrDisplay,[switch]$CheckComparison,[switch]$CheckNeuralRendering)
 $ErrorActionPreference='Stop'
 $repo=Split-Path $PSScriptRoot
 if (!$PlayerExe) { $PlayerExe=Join-Path $repo 'engine\bin\CadrivectPlayer.exe' }
-if (!$DirectRuntime) {
+if (!$DirectRuntime -and !$CheckNeuralRendering) {
     $runtime=& "$repo\sources\Prepare-Decoder.ps1" | ConvertFrom-Json
     if (!$runtime.ok) { throw $runtime.error }
     $DirectRuntime=$runtime.runtime
@@ -17,6 +17,11 @@ $refs+=@('PresentationCore','PresentationFramework','WindowsBase') | ForEach-Obj
 $probe=Join-Path $OutputDirectory 'EmbeddedProbe.exe'
 & "$framework\csc.exe" /nologo /optimize+ /platform:x64 @refs "/out:$probe" "$PSScriptRoot\EmbeddedProbe.cs" "$PSScriptRoot\ComparisonProbe.cs"
 if ($LASTEXITCODE) { throw 'Embedded WPF probe compilation failed.' }
+if ($CheckNeuralRendering) {
+    & $probe $PlayerExe unused unused unused "$OutputDirectory\neural.json" vulkan --neural
+    if ($LASTEXITCODE) {throw "Embedded Neural Rendering verification failed. Inspect $OutputDirectory"}
+    return
+}
 if ($CheckComparison) {
     # Midtone glyph edges leave headroom for sharpening at the native video resolution.
     & $probe $PlayerExe $DirectRuntime "$PSScriptRoot\fixtures\comparison.h264" "$PSScriptRoot\fixtures\comparison-inverted.h264" "$OutputDirectory\comparison.json" $Renderer --comparison

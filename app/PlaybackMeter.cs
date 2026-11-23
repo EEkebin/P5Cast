@@ -7,6 +7,7 @@ using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
+using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Shapes;
 
@@ -14,10 +15,10 @@ namespace Cadrivect
 {
     internal sealed class PlaybackMeter : UserControl
     {
-        static readonly string[] ModeIds={"original","sharp","fsr","rtxvideo","dlss","dlaa","fsr-temporal"};
-        static readonly string[] ModeLabels={"Original","Sharpen","AMD FSR 1","RTX Video SR","DLSS","DLAA","AMD FSR Temporal"};
+        static readonly string[] ModeIds={"original","sharp","fsr","rtxvideo","dlss","dlaa","fsr-temporal","dlss-nr"};
+        static readonly string[] ModeLabels={"Original","Sharpen","AMD FSR 1","RTX Video SR","DLSS","DLAA","AMD FSR Temporal","DLSS 5 NR"};
         static readonly string[] Descriptions={"Display the source picture.","Sharpen edges at the source resolution.","AMD FidelityFX Super Resolution 1.",
-            "NVIDIA RTX Video Super Resolution for SDR video.","Experimental DLSS with motion estimated from the stream.","Experimental DLAA at the source resolution.","AMD temporal upscaling. The SDK selects a provider supported by the GPU."};
+            "NVIDIA RTX Video Super Resolution for SDR video.","Experimental DLSS with motion estimated from the stream.","Experimental DLAA at the source resolution.","AMD temporal upscaling. The SDK selects a provider supported by the GPU.","Experimental DLSS 5 neural rendering at source resolution. Uses motion estimated from the PS5 video. Requires Vulkan, SDR and a compatible RTX GPU."};
         static readonly Brush Ink=ColorBrush("#E9F3F1"), Muted=ColorBrush("#A5B9BB"), Line=ColorBrush("#304147"), Dark=ColorBrush("#141F24");
         static readonly Brush Mint=ColorBrush("#8FE6D0"), Amber=ColorBrush("#EABC8E");
         static readonly ControlTemplate ChipTemplate=MakeChipTemplate();
@@ -36,6 +37,24 @@ namespace Cadrivect
             set {modelChoice.SelectedIndex=Math.Max(0,Array.IndexOf(ModelIds,value));}
         }
         internal event Action<string> DlssModelChanged;
+        readonly StackPanel neuralSetup;
+        readonly Button neuralDownload;
+        bool neuralSetupBusy;
+        internal event Action NeuralDownloadRequested,NeuralLicenseRequested;
+        internal bool CanDownloadNeural {get {return Flag(gpu,"dlssNeuralRuntimeDownloadAvailable")==true;}}
+        internal bool NeuralReady {get {return Flag(gpu,"dlss-nr")==true;}}
+        internal string NeuralReason {get {return Text(gpu,"dlss-nrReason") ?? Text(gpu,"probeFailure");}}
+        internal void SetNeuralSetupBusy(bool busy)
+        {
+            neuralSetupBusy=busy;
+            neuralDownload.Content=busy ? "Downloading and verifying…" : "Download runtime · 368 MB";
+            UpdateNeuralSetup();
+        }
+        void UpdateNeuralSetup()
+        {
+            neuralSetup.Visibility=CanDownloadNeural || neuralSetupBusy ? Visibility.Visible : Visibility.Collapsed;
+            neuralDownload.IsEnabled=CanDownloadNeural && !neuralSetupBusy;
+        }
         readonly StackPanel qualityGroup;
         readonly TextBlock activeQuality;
         internal string DlssQuality {
@@ -125,6 +144,17 @@ namespace Cadrivect
             AutomationProperties.SetAutomationId(modelChoice,"DlssModelHint");
             modelChoice.SelectionChanged+=delegate {if(DlssModelChanged!=null) DlssModelChanged(DlssModelHint);};
             modelGroup.Children.Add(modelChoice); picture.Children.Add(modelGroup);
+            neuralSetup=new StackPanel {Margin=new Thickness(0,7,0,0),Visibility=Visibility.Collapsed};
+            neuralSetup.Children.Add(Label("DLSS Neural Rendering",Ink,12,FontWeights.SemiBold));
+            var licenseLink=new Hyperlink(new Run("NVIDIA SDK license")) {Foreground=Mint};
+            licenseLink.Click+=delegate {if(NeuralLicenseRequested!=null) NeuralLicenseRequested();};
+            var licenseText=Label("",Muted,11,FontWeights.Normal);licenseText.TextWrapping=TextWrapping.Wrap;
+            licenseText.Inlines.Add(new Run("Optional runtime · "));licenseText.Inlines.Add(licenseLink);
+            neuralSetup.Children.Add(licenseText);
+            neuralDownload=new Button {Content="Download runtime · 368 MB",Margin=new Thickness(0,4,0,0)};
+            AutomationProperties.SetAutomationId(neuralDownload,"DownloadNeuralRuntime");
+            neuralDownload.Click+=delegate {if(CanDownloadNeural && !neuralSetupBusy && NeuralDownloadRequested!=null) NeuralDownloadRequested();};
+            neuralSetup.Children.Add(neuralDownload);picture.Children.Add(neuralSetup);
             var resolutionHeader=new DockPanel {Margin=new Thickness(0,7,0,0)};
             pictureScale=Label("",Mint,11,FontWeights.SemiBold);
             DockPanel.SetDock(pictureScale,Dock.Right);
@@ -392,6 +422,7 @@ namespace Cadrivect
         }
         void RefreshAvailability()
         {
+            UpdateNeuralSetup();
             bool noAdapter=string.Equals(Text(gpu,"adapter"),"Unavailable",StringComparison.OrdinalIgnoreCase);
             for(int i=0;i<modes.Length;i++)
             {
@@ -399,7 +430,9 @@ namespace Cadrivect
                 bool available=i==0 || (!noAdapter && (!vendor || Flag(gpu,ModeIds[i])==true));
                 string reason=Descriptions[i];
                 if(!available) reason=gpu==null ? "Checking GPU support." : Text(gpu,ModeIds[i]+"Reason") ?? Text(gpu,"probeFailure") ?? "This mode is unavailable on the active GPU.";
-                if(i==3 && hdr) {available=false; reason="RTX Video SR requires SDR output.";}
+                if(hdr && (ModeIds[i]=="rtxvideo" || (ModeIds[i]=="dlss-nr" && available))) {
+                    available=false; reason=ModeLabels[i]+" requires SDR output.";
+                }
                 if(ModeIds[i]=="fsr-temporal" && available && !string.IsNullOrEmpty(Text(gpu,"fsrVersion")))
                     reason="AMD temporal upscaling · "+Text(gpu,"fsrVersion");
                 modes[i].IsEnabled=available; modes[i].ToolTip=reason;

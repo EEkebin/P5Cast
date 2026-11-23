@@ -51,6 +51,25 @@ try {
     Require ($entries[0].IsError -and !$entries[1].IsError -and $entries[0].Timestamp -is [datetime]) 'History preserves severity changes and timestamps'
     # The arc counts submitted frames. Input and output can diverge while the stream is running.
     $meter=$type.GetField('meter','Instance,NonPublic').GetValue($dash)
+    $neuralPanel=$meter.GetType().GetField('neuralSetup','Instance,NonPublic').GetValue($meter)
+    $neuralButton=$meter.GetType().GetField('neuralDownload','Instance,NonPublic').GetValue($meter)
+    $caps=[Collections.Generic.Dictionary[string,object]]::new()
+    $meter.SetCapabilities($caps)
+    Require ($neuralPanel.Visibility -eq 'Collapsed') 'A missing capability report must not offer the optional download'
+    $caps['dlssNeuralRuntimeDownloadAvailable']=$false; $caps['adapter']='NVIDIA GeForce RTX 4090'
+    $meter.SetCapabilities($caps)
+    Require ($neuralPanel.Visibility -eq 'Collapsed') 'An ineligible adapter must not offer the runtime'
+    $caps['dlssNeuralRuntimeDownloadAvailable']=$true
+    $meter.SetCapabilities($caps)
+    Require ($neuralPanel.Visibility -eq 'Visible' -and $neuralButton.IsEnabled) 'An affirmative runtime-missing report offers optional setup'
+    $busyMethod=$meter.GetType().GetMethod('SetNeuralSetupBusy',[Reflection.BindingFlags]'Instance,NonPublic')
+    $null=$busyMethod.Invoke($meter,@($true))
+    Require (!$neuralButton.IsEnabled) 'An active runtime download cannot be started twice'
+    $caps['dlssNeuralRuntimeDownloadAvailable']=$false; $caps['dlss-nr']=$true
+    $meter.SetCapabilities($caps)
+    $null=$busyMethod.Invoke($meter,@($false))
+    Require ($neuralPanel.Visibility -eq 'Collapsed') 'Completed setup removes the download action'
+    $meter.SetCapabilities($null)
     $dial=$meter.GetType().GetField('dial','Instance,NonPublic').GetValue($meter)
     $sample=[Collections.Generic.Dictionary[string,object]]::new()
     $sample['captured']=120; $sample['sourceFps']=90; $sample['submittedFps']=120; $sample['generatedFps']=60

@@ -169,6 +169,7 @@ internal sealed partial class Renderer : IDisposable
     // Vendor SDK entry points require the native resource type expected by that backend.
     internal static bool HasVendorBridge(string backend,string mode)
     {
+        if(mode=="dlss-nr") return backend=="vulkan";
         if(mode=="fsr-temporal") return backend=="d3d12" || backend=="vulkan";
         return backend=="d3d11" || backend=="d3d12";
     }
@@ -226,6 +227,7 @@ internal sealed partial class Renderer : IDisposable
         {
             // WGC and DirectVideo will deliver the corresponding input format on the next frame.
             ReleaseSource(); srcSize=Size.Empty; ResetFrameHistory(); HdrEnabled=hdr;
+            if(failedMode=="dlss-nr") {failedMode=null;EffectNotice="";}
         }
     }
     bool ConfigurePortableDisplay(Size window,bool hdr,bool allowSdr,bool displayChanged)
@@ -438,7 +440,7 @@ internal sealed partial class Renderer : IDisposable
         context.PixelShader.SetShaderResources(0,unbind);
         context.OutputMerger.ResetTargets();
     }
-    internal static bool IsVendor(string mode) { return mode=="fsr-temporal" || mode=="dlss" || mode=="dlaa" || mode=="rtxvideo"; }
+    internal static bool IsVendor(string mode) { return mode=="fsr-temporal" || mode=="dlss" || mode=="dlaa" || mode=="rtxvideo" || mode=="dlss-nr"; }
     static bool IsEffectFailure(Exception error)
     {
         var dx=error as SharpDXException;
@@ -458,6 +460,7 @@ internal sealed partial class Renderer : IDisposable
     public void SetPictureMode(string mode)
     {
         if(!IsVendor(mode) && mode!="original" && mode!="sharp" && mode!="fsr") throw new ArgumentException("Unknown picture mode.");
+        if(mode=="dlss-nr" && HdrEnabled) throw new InvalidOperationException(NeuralRendering.HdrReason);
         if(mode=="rtxvideo" && HdrEnabled) throw new InvalidOperationException("RTX Video SR requires SDR output. Select SDR before switching picture mode.");
         if(mode==pictureMode && failedMode==null) return;
         // NGX initialization and shutdown are scoped to the device. Close the old feature before opening a different one.
@@ -560,7 +563,7 @@ internal sealed partial class Renderer : IDisposable
             }
             DrawFinal("Rcas",source,phase,viewport);
         }
-        else if((mode=="dlss" || mode=="dlaa" || mode=="fsr-temporal") && neuralSize!=viewport.Size)
+        else if((mode=="dlss" || mode=="dlaa" || mode=="dlss-nr" || mode=="fsr-temporal") && neuralSize!=viewport.Size)
             Draw("FitNgxFrame",display,viewport,source,HdrEnabled ? 1 : 0,finishPrevious && havePriorEnhanced ? prev.Read : curr.Read);
         else DrawFinal(mode=="sharp" ? "Sharp":"Original",source,phase,viewport,null,null,HdrEnabled && vendor);
         return Present(samplePixel,holdOriginal);

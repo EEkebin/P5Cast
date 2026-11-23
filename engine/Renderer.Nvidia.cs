@@ -11,6 +11,7 @@ internal sealed partial class Renderer
     bool triedOptical;
     RtxVideo video;
     NgxVideo ngx;
+    NeuralRendering neuralRendering;
     FsrUpscaler temporalFsr;
     public string ActiveFsrVersion { get {return temporalFsr!=null && EffectivePictureMode=="fsr-temporal" ? temporalFsr.ActiveVersion : "";} }
     public int FsrEvaluations {get;private set;}
@@ -81,6 +82,8 @@ internal sealed partial class Renderer
 
     ShaderResourceView EnhancedFrame(string mode,bool previous)
     {
+        if(mode=="dlss-nr" && Backend!="vulkan") throw new InvalidOperationException(NeuralRendering.BackendReason);
+        if(mode=="dlss-nr" && HdrEnabled) throw new InvalidOperationException(NeuralRendering.HdrReason);
         if(!HasVendorBridge(Backend,mode))
             throw new InvalidOperationException("The selected graphics API has no native bridge for this effect.");
         // With no enlargement the NGX native-resolution feature is the appropriate configuration.
@@ -98,24 +101,28 @@ internal sealed partial class Renderer
             neuralSize=target;
             neuralMode=effective;
             configuredQuality=quality; configuredModel=model;
+            if(mode=="dlss-nr") neuralRendering=new NeuralRendering(Device,srcSize.Width,srcSize.Height);
             var format=HdrEnabled ? Format.R16G16B16A16_Float : Format.R8G8B8A8_UNorm;
             neuralCurrent=new GpuImage(Device,target.Width,target.Height,format,true,true);
             neuralPrevious=new GpuImage(Device,target.Width,target.Height,format,true,true);
-            rgba=new GpuImage(Device,srcSize.Width,srcSize.Height,format,true);
+            var vendorFormat=mode=="dlss-nr" ? Format.R16G16B16A16_Float : format;
+            rgba=new GpuImage(Device,srcSize.Width,srcSize.Height,vendorFormat,true);
             if(mode=="rtxvideo") {
                 if(video==null) video=new RtxVideo(Device.NativePointer);
             }
             else
             {
                 strokeMask=new GpuImage(Device,srcSize.Width,srcSize.Height,Format.R8_UNorm,true);
-                ngxOutput=new GpuImage(Device,target.Width,target.Height,format,true,true);
+                ngxOutput=new GpuImage(Device,target.Width,target.Height,vendorFormat,true,true);
                 vectors=new GpuImage(Device,srcSize.Width,srcSize.Height,Format.R16G16_Float,true);
                 depth=new GpuImage(Device,srcSize.Width,srcSize.Height,Format.R32_Float,true);
                 // Remote Play supplies no scene geometry. Model the finished video as one plane.
                 context.ClearRenderTargetView(depth.Write,new RawColor4(0.5f,0,0,1));
                 if(mode=="fsr-temporal") temporalFsr=new FsrUpscaler(Device,srcSize.Width,srcSize.Height,target.Width,target.Height,HdrEnabled,Backend);
-                else if(ngx==null) ngx=new NgxVideo(Device,srcSize.Width,srcSize.Height,target.Width,target.Height,native,HdrEnabled,quality);
-                else ngx.Resize(context,target.Width,target.Height,native,HdrEnabled,quality);
+                else if(mode=="dlss" || mode=="dlaa") {
+                    if(ngx==null) ngx=new NgxVideo(Device,srcSize.Width,srcSize.Height,target.Width,target.Height,native,HdrEnabled,quality);
+                    else ngx.Resize(context,target.Width,target.Height,native,HdrEnabled,quality);
+                }
             }
             RestoreDrawState();
         }
@@ -125,7 +132,7 @@ internal sealed partial class Renderer
             var temp=neuralPrevious; neuralPrevious=neuralCurrent; neuralCurrent=temp;
             var area=new Rectangle(Point.Empty,srcSize);
             Draw(HdrEnabled ? "HdrToLinear2020" : "Original",rgba.Write,area,curr.Read,1);
-            if(ngx!=null || temporalFsr!=null)
+            if(ngx!=null || temporalFsr!=null || neuralRendering!=null)
             {
                 if(havePriorEnhanced)
                 {
@@ -136,12 +143,14 @@ internal sealed partial class Renderer
                 // The console's camera jitter is unknown. Do not invent offsets for captured pixels.
                 if(temporalFsr!=null)
                     temporalFsr.Evaluate(context,rgba.Texture,vectors.Texture,depth.Texture,ngxOutput.Texture,frameMilliseconds,!havePriorEnhanced);
+                else if(neuralRendering!=null)
+                    neuralRendering.Evaluate(rgba.Texture,vectors.Texture,depth.Texture,ngxOutput.Texture,!havePriorEnhanced);
                 else ngx.Evaluate(context,rgba.Texture,vectors.Texture,depth.Texture,ngxOutput.Texture,0,0,frameMilliseconds,!havePriorEnhanced);
             }
             else video.Evaluate(context.NativePointer,rgba.Texture.NativePointer,neuralCurrent.Texture.NativePointer,
                                 srcSize.Width,srcSize.Height,target.Width,target.Height);
             RestoreDrawState();
-            if(ngx!=null || temporalFsr!=null) Draw("PreserveNgxStrokes",neuralCurrent.Write,new Rectangle(Point.Empty,neuralSize),
+            if(ngx!=null || temporalFsr!=null || neuralRendering!=null) Draw("PreserveNgxStrokes",neuralCurrent.Write,new Rectangle(Point.Empty,neuralSize),
                 ngxOutput.Read,HdrEnabled ? 1 : 0,rgba.Read,strokeMask.Read);
             if(temporalFsr==null) VendorEvaluations++; else FsrEvaluations++;
             evaluatedFrame=Captured;
@@ -160,6 +169,7 @@ internal sealed partial class Renderer
     }
     void ReleaseEffects(bool keepRuntime=false)
     {
+        if(neuralRendering!=null) {neuralRendering.Dispose();neuralRendering=null;}
         if(temporalFsr!=null) {temporalFsr.Dispose(); temporalFsr=null;}
         if(!keepRuntime && ngx!=null) { ngx.Dispose(); ngx=null; }
         if(!keepRuntime && video!=null) { video.Dispose(); video=null; }

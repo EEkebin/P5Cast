@@ -34,9 +34,9 @@ internal static partial class EmbeddedProbe
         } catch { bitmap.Dispose(); throw; }
     }
 
-    static Dictionary<string,object> WaitSnapshot(Type api,Func<Dictionary<string,object>,bool> accept,string condition) {
+    static Dictionary<string,object> WaitSnapshot(Type api,Func<Dictionary<string,object>,bool> accept,string condition,int timeoutMs=5000) {
         var clock=Stopwatch.StartNew(); var serializer=new JavaScriptSerializer(); string last="";
-        while(clock.ElapsedMilliseconds<5000) {
+        while(clock.ElapsedMilliseconds<timeoutMs) {
             Pump(); last=(string)api.GetMethod("Snapshot").Invoke(null,null);
             var sample=serializer.Deserialize<Dictionary<string,object>>(last);
             if(sample.ContainsKey("comparisonView") && accept(sample)) return sample;

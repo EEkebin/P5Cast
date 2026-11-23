@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.16.0.0")]
+[assembly: AssemblyVersion("0.16.1.0")]
 
 namespace Cadrivect
 {
@@ -61,7 +61,7 @@ namespace Cadrivect
         readonly string preferences = Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA") ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LumaRelay", "dashboard.json");
         readonly string[] names = { "Direct", "Sony", "Demo" };
         readonly string[] titles = { "Direct to PS5", "Sony Remote Play", "Offline demo" };
-        readonly string[] modeIds = { "original", "sharp", "fsr", "rtxvideo", "dlss", "dlaa", "fsr-temporal" };
+        readonly string[] modeIds = { "original", "sharp", "fsr", "rtxvideo", "dlss", "dlaa", "fsr-temporal", "dlss-nr" };
         readonly string[] hdrIds = { "auto","off","hdr10" };
         readonly string[] rendererIds = { "auto","d3d11","d3d12","vulkan","opengl" };
         internal static string RendererName(string id)
@@ -138,6 +138,11 @@ namespace Cadrivect
                 UpdateWipeInput();
             };
             UI<Border>("MeterHost").Child=meter;
+            meter.NeuralDownloadRequested+=InstallNeuralRuntime;
+            meter.NeuralLicenseRequested+=delegate {
+                try {Process.Start(new ProcessStartInfo("https://github.com/NVIDIA/DLSS/blob/9981c6350dc58c0ce21f024fd65e31e851c31689/LICENSE.txt"){UseShellExecute=true});}
+                catch(System.ComponentModel.Win32Exception ex) {Show(ex.Message,true);}
+            };
             var saved = ReadSettings();
             meter.DlssModelHint=Field(saved,"dlssModelHint");
             meter.DlssModelChanged+=delegate(string model) {
@@ -328,11 +333,29 @@ namespace Cadrivect
             picker.SelectedItem=rows.FirstOrDefault(c=>c.Mac==mac)??rows.FirstOrDefault();
         }
         int gpuProbeGeneration, pictureSelectionRevision;
+        async void InstallNeuralRuntime()
+        {
+            if(!meter.CanDownloadNeural || SelectedRenderer!="vulkan") return;
+            meter.SetNeuralSetupBusy(true);
+            try {
+                Show("Downloading the optional NVIDIA neural rendering runtime.");
+                await Script("sources/Install-DlssNeural.ps1");
+                if(closing) return;
+                if(SelectedRenderer!="vulkan") {Show("NVIDIA neural rendering runtime installed.");return;}
+                Show("Runtime installed. Testing neural rendering on Vulkan…");
+                await ReadGpu(mode);
+                if(closing || SelectedRenderer!="vulkan") return;
+                if(meter.NeuralReady) Show("DLSS Neural Rendering is ready in Picture.");
+                else Show("Runtime installed. "+(meter.NeuralReason ?? "GPU evaluation did not confirm neural rendering support."),true);
+            } catch(Exception error) {
+                if(!closing) Show("Neural rendering setup failed. "+error.Message,true);
+            } finally {meter.SetNeuralSetupBusy(false);}
+        }
         async Task ReadGpu(int requested)
         {
             int generation=++gpuProbeGeneration, revision=pictureSelectionRevision;
             bool restoreAmd=meter.FrameGenerationProvider=="amd" && factor==2;
-            if(meter.FrameGenerationProvider=="amd") {
+            if(!Active && !preparing && meter.FrameGenerationProvider=="amd") {
                 meter.FrameGenerationProvider="p5cast"; factor=1; meter.Reset(mode,factor);
             }
             bool completed=false;

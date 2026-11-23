@@ -280,7 +280,7 @@
             <StackPanel Margin="0,0,12,0"><TextBlock Text="Paired console" Margin="0,0,0,5"/><ComboBox Name="ConsolePicker"/></StackPanel>
             <StackPanel Grid.Column="1" Margin="0,0,12,0"><TextBlock Text="Console address" Margin="0,0,0,5"/><TextBox Name="ConsoleAddress" ToolTip="Local IP address or DNS name of your PS5"/></StackPanel>
             <Button Grid.Column="2" Name="AddConsole" Content="Add console" VerticalAlignment="Bottom"/>
-            <WrapPanel Grid.Row="1" Grid.ColumnSpan="3" Margin="0,8,0,0"><TextBlock Text="When I press Stop" VerticalAlignment="Center" Margin="0,0,9,0"/><ComboBox Name="StopBehavior" Width="182" ToolTip="Remembered separately for each paired console."/><Button Name="WakeConsole" Content="Wake PS5" Margin="12,0,0,0" ToolTip="Wake the paired PS5 from rest mode without starting a stream."/></WrapPanel>
+            <WrapPanel Grid.Row="1" Grid.ColumnSpan="3" Margin="0,8,0,0"><TextBlock Text="When I disconnect" VerticalAlignment="Center" Margin="0,0,9,0"/><ComboBox Name="StopBehavior" Width="182" ToolTip="Applies when stopping a Direct session or closing P5Cast. Remembered separately for each paired console."/><Button Name="WakeConsole" Content="Wake PS5" Margin="12,0,0,0" ToolTip="Wake the paired PS5 from rest mode without starting a stream."/></WrapPanel>
           </Grid>
           <StackPanel Name="StreamSettings" Visibility="Collapsed">
             <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>

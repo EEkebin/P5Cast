@@ -27,7 +27,13 @@ internal sealed class PlayerWindow : Form
     readonly Size chosenSize;
     DisplayTarget target;
     Rectangle restored;
-    public bool Compare;
+    public string ComparisonView="enhanced";
+    string previousView="enhanced";
+    void ToggleOriginal()
+    {
+        if(ComparisonView=="original") ComparisonView=previousView;
+        else {previousView=ComparisonView; ComparisonView="original";}
+    }
     public PlaybackControls ControlPanel;
     public event Action<string,int> SettingsRequested;
     public bool Fullscreen { get { return fullscreen; } }
@@ -141,7 +147,7 @@ internal sealed class PlayerWindow : Form
     }
     protected override void OnKeyDown(KeyEventArgs e)
     {
-        if(e.KeyCode==Keys.Escape) Close(); else if(e.KeyCode==Keys.B) Compare=!Compare;
+        if(e.KeyCode==Keys.Escape) Close(); else if(e.KeyCode==Keys.B) ToggleOriginal();
         base.OnKeyDown(e);
     }
     protected override bool ProcessCmdKey(ref Message message,Keys keys)
@@ -152,7 +158,7 @@ internal sealed class PlayerWindow : Form
                 case Keys.O: if(ControlPanel!=null) ControlPanel.Toggle(); return true;
                 case Keys.Q: Close(); return true;
                 case Keys.Right: CycleDisplay(); return true;
-                case Keys.B: Compare=!Compare; return true;
+                case Keys.B: ToggleOriginal(); return true;
             }
         }
         return base.ProcessCmdKey(ref message,keys);
@@ -162,7 +168,7 @@ internal sealed class PlayerWindow : Form
         if(message.Msg==0x0312)
         {
             if(message.WParam.ToInt32()==1) Close();
-            if(message.WParam.ToInt32()==2) Compare=!Compare;
+            if(message.WParam.ToInt32()==2) ToggleOriginal();
             if(message.WParam.ToInt32()==3) ToggleFullscreen();
             if(message.WParam.ToInt32()==4) CycleDisplay();
             if(message.WParam.ToInt32()==5 && ControlPanel!=null) ControlPanel.Toggle();
@@ -271,6 +277,7 @@ internal static class Player
                 using(var window=host==null ? new PlayerWindow(source,DisplayTarget.Select(displayName,source),raster,windowed):null)
                 {
                     if(window!=null) {
+                        window.ComparisonView=EmbeddedPlayback.ValidateComparison(Option(args,"--comparison","enhanced"));
                         window.Show(); window.EnableShortcuts();
                         if(!testing && !direct) WindowsApi.SetForegroundWindow(source);
                     }
@@ -283,7 +290,8 @@ internal static class Player
                     {
                         string requestedMode=null, settingsNotice=null;
                         int requestedMultiplier=multiplier;
-                        bool changeRequested=false, wasComparing=false,compare=false;
+                        bool changeRequested=false,compare=false;
+                        string previousView="enhanced",comparisonView="enhanced";
                         Action<string,int> change=delegate(string picture,int factor) {
                             if(picture!=null) requestedMode=picture;
                             if(factor>0) requestedMultiplier=factor;
@@ -309,7 +317,8 @@ internal static class Player
                                 if(host==null || renderer.Backend!="d3d11") Application.DoEvents();
                                 if(host!=null) host.TakeChanges(change);
                                 if((window!=null && window.Ended) || (seconds>0 && clock.Elapsed.TotalSeconds>=seconds)) break;
-                                compare=host==null ? window.Compare:host.Comparing;
+                                comparisonView=host==null ? window.ComparisonView:host.ComparisonView;
+                                compare=comparisonView=="original";
                                 double now=clock.Elapsed.TotalMilliseconds;
                                 bool redraw=false;
                                 string newSize,newHdr;
@@ -325,7 +334,7 @@ internal static class Player
                                     if(renderer.Captured==0) throw new IOException("The Direct session closed before the first video frame.");
                                     break;
                                 }
-                                if(changeRequested || wasComparing!=compare) {
+                                if(changeRequested || previousView!=comparisonView) {
                                     if(requestedMode!=null) {
                                         try {
                                             renderer.SetPictureMode(requestedMode);
@@ -334,7 +343,8 @@ internal static class Player
                                     }
                                     multiplier=requestedMultiplier; vendor=mode=="dlss" || mode=="dlaa" || mode=="rtxvideo";
                                     renderer.ResetFrameHistory(); if(controls!=null) controls.Sync(mode,multiplier);
-                                    step=0; previousTime=0; wasComparing=compare;
+                                    renderer.SetSideBySide(comparisonView=="side-by-side");
+                                    step=0; previousTime=0; previousView=comparisonView;
                                     if(renderer.Captured>0) renderer.Show(compare ? "original":mode,1,testing);
                                     requestedMode=null; changeRequested=false;
                                 }
@@ -350,7 +360,7 @@ internal static class Player
                                         (renderer.Presented-snapshotPresented)*perSecond,(renderer.Generated-snapshotGenerated)*perSecond)
                                         +",\"mode\":"+JsonString(mode)+",\"multiplier\":"+multiplier+",\"effectivePictureMode\":"+JsonString(renderer.EffectivePictureMode)
                                         +",\"effectNotice\":"+JsonString(settingsNotice ?? (string.IsNullOrEmpty(renderer.EffectNotice) ? renderer.OutputNotice : renderer.EffectNotice))+",\"compare\":"+(compare ? "true":"false")
-                                        +",\"sampleId\":"+(++sampleId)+",\"elapsedMs\":"+Number(now)+",\"display\":"+JsonString(renderer.DisplayName)
+                                        +",\"comparisonView\":"+JsonString(comparisonView)+",\"sampleId\":"+(++sampleId)+",\"elapsedMs\":"+Number(now)+",\"display\":"+JsonString(renderer.DisplayName)
                                         +",\"hdrEnabled\":"+(renderer.HdrEnabled ? "true":"false")+",\"outputWidth\":"+renderer.OutputSize.Width+",\"outputHeight\":"+renderer.OutputSize.Height
                                         +",\"resolution\":"+JsonString(resolution)+",\"hdrMode\":"+JsonString(hdr)
                                         +",\"renderWidth\":"+renderer.RenderSize.Width+",\"renderHeight\":"+renderer.RenderSize.Height
@@ -438,7 +448,7 @@ internal static class Player
                             +",\"embedded\":"+(host!=null ? "true":"false")+",\"fullscreen\":"+(window!=null && window.Fullscreen ? "true":"false")+",\"hdrEnabled\":"+(renderer.HdrEnabled ? "true":"false")
                             +",\"outputWidth\":"+renderer.OutputSize.Width+",\"outputHeight\":"+renderer.OutputSize.Height
                             +",\"renderWidth\":"+renderer.RenderSize.Width+",\"renderHeight\":"+renderer.RenderSize.Height
-                            +",\"outputStatus\":"+JsonString(renderer.OutputStatus)+",\"effectivePictureMode\":"+JsonString(renderer.EffectivePictureMode)
+                            +",\"comparisonView\":"+JsonString(comparisonView)+",\"outputStatus\":"+JsonString(renderer.OutputStatus)+",\"effectivePictureMode\":"+JsonString(renderer.EffectivePictureMode)
                             +",\"effectNotice\":"+JsonString(renderer.EffectNotice)
                             +",\"medianPcSubmitMs\":"+Number(liveFrameAges.Count==0 ? -1:liveFrameAges[median])
                             +Telemetry(renderer,decoded,targetFps,compare ? 1:multiplier,lastRealAge,demo)+"}";

@@ -10,7 +10,7 @@ namespace Cadrivect
     {
         readonly Dictionary<string,string> stopChoices=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
         string playingMac,playingPipe;
-        bool updatingStopChoice,requestingRest;
+        bool updatingStopChoice,requestingRest,closeAfterStop;
 
         void InitStopChoices(Dictionary<string,object> saved)
         {
@@ -47,22 +47,55 @@ namespace Cadrivect
                 picker.IsEnabled=c!=null;
             } finally {updatingStopChoice=false;}
         }
-        void OpenStopPrompt()
+        void SetStopAction(bool exit)
+        {
+            closeAfterStop=exit;
+            UI<TextBlock>("StopTitle").Text=exit?"Disconnect and close P5Cast?":"Stop playing?";
+            UI<Button>("ConfirmStop").Content=exit?"Disconnect and close":"Stop session";
+        }
+        void OpenStopPrompt(bool exit)
         {
             if(fullscreen) ToggleFullscreen();
             SetPage("Play"); UI<StackPanel>("PlayPage").Visibility=Visibility.Collapsed;
-            UI<CheckBox>("RestOnStop").IsChecked=false;
+            SetStopAction(exit);
+            UI<CheckBox>("RestOnStop").IsChecked=true;
             UI<CheckBox>("RememberStop").IsChecked=false;
             UI<StackPanel>("StopPanel").Visibility=Visibility.Visible;
             UI<Button>("CancelStop").Focus();
         }
-        async Task UserStop()
+        Task UserStop()
         {
-            if(stopping || requestingRest) return;
+            return RequestDisconnect(false);
+        }
+        async Task RequestDisconnect(bool exit)
+        {
+            if(requestingRest) {if(exit) closeAfterStop=true; return;}
+            if(stopping) return;
             if(directCore==null || !firstFrame || playingMac==null) {StopPlayback(); return;}
+            if(UI<StackPanel>("StopPanel").Visibility==Visibility.Visible) {
+                if(fullscreen) ToggleFullscreen();
+                SetSettingsDrawer(true);
+                if(exit) SetStopAction(true);
+                return;
+            }
+            closeAfterStop=exit;
             string rule;
             if(stopChoices.TryGetValue(playingMac,out rule)) await StopDirect(rule=="rest",false);
-            else if(!settingsOpen || UI<StackPanel>("StopPanel").Visibility!=Visibility.Visible) OpenStopPrompt();
+            else OpenStopPrompt(exit);
+        }
+        async void OnDashboardClosing(object sender,System.ComponentModel.CancelEventArgs e)
+        {
+            if(!closing && (requestingRest || (!stopping && directCore!=null && firstFrame && playingMac!=null))) {
+                e.Cancel=true;
+                await RequestDisconnect(true);
+                return;
+            }
+            if(!closing) {SaveSettings(); closing=true; StopPlayback();}
+            if(rendering!=null || preparing) e.Cancel=true;
+        }
+        void QueueWindowClose()
+        {
+            window.Dispatcher.BeginInvoke(new Action(window.Close));
         }
         async Task StopDirect(bool rest,bool remember)
         {
@@ -75,11 +108,17 @@ namespace Cadrivect
                     await DirectConsole.RequestRestAsync(playingPipe,core);
                 }
                 if(remember) {stopChoices[mac]=rest?"rest":"keep"; RefreshStopChoice(); SaveSettings();}
-                if(!closing && directCore==core) {SetPage("Play"); StopPlayback();}
+                if(closeAfterStop && (directCore==core || directCore==null)) {
+                    SaveSettings(); closing=true; closeAfterStop=false; StopPlayback();
+                    if(rendering==null && !preparing) QueueWindowClose();
+                } else if(!closing && directCore==core) {SetPage("Play"); StopPlayback();}
             } catch(Exception ex) {
                 if(!closing && core==directCore) {
-                    OpenStopPrompt();
-                    Show("Rest mode could not be confirmed. "+ex.GetBaseException().Message,true);
+                    OpenStopPrompt(closeAfterStop);
+                    Show("Rest mode could not be confirmed. "+ex.GetBaseException().Message+" Clear the rest mode option to disconnect.",true);
+                } else if(closeAfterStop && directCore==null) {
+                    closeAfterStop=false;
+                    QueueWindowClose();
                 }
             } finally {
                 requestingRest=false; UI<StackPanel>("StopPanel").IsEnabled=true; UpdateTransport();

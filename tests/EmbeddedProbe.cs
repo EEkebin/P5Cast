@@ -16,7 +16,7 @@ using System.Windows.Interop;
 using Forms=System.Windows.Forms;
 using System.Windows.Threading;
 
-internal static class EmbeddedProbe
+internal static partial class EmbeddedProbe
 {
     [DllImport("user32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
     static extern IntPtr CreateWindowEx(int ex,string cls,string title,int style,int x,int y,int width,int height,IntPtr parent,IntPtr menu,IntPtr instance,IntPtr data);
@@ -206,6 +206,10 @@ internal static class EmbeddedProbe
                 throw new Exception("Expected "+mode+" (HDR "+hdr+") on "+screen.DeviceName+". "+api.GetProperty("Error").GetValue(null,null)+" "+api.GetMethod("Snapshot").Invoke(null,null));
             };
             verify(hdrScreen,"hdr10",true);
+            api.GetMethod("SetComparison").Invoke(null,new object[]{"side-by-side"});
+            var split=WaitSnapshot(api,s=>(string)s["comparisonView"]=="side-by-side" && (bool)s["presenterHdr10"] &&
+                Convert.ToInt32(s["presented"])>lastPresented+5,"HDR10 side-by-side");
+            CheckRenderer(split,renderer);
             window.Width+=37; window.UpdateLayout();
             api.GetMethod("ConfigureOutput").Invoke(null,new object[]{null,"off"});
             verify(hdrScreen,"off",false);
@@ -248,7 +252,12 @@ internal static class EmbeddedProbe
     {
         string id="CadrivectEmbedded"+Guid.NewGuid().ToString("N");
         bool hdrProbe=args.Length>=7 && args[6].StartsWith("--hdr-display=",StringComparison.Ordinal);
-        if(args.Length==6 || (args.Length==7 && hdrProbe)) return RunOnDesktop(args,id);
+        bool compareProbe=args.Length>=7 && args[6]=="--comparison";
+        if(args.Length==6 || (args.Length==7 && (hdrProbe || compareProbe))) return RunOnDesktop(args,id);
+        if(args.Length==8 && compareProbe && args[7]=="--inactive-desktop") {
+            var compareApi=Assembly.LoadFrom(Path.GetFullPath(args[0])).GetType("Cadrivect.Engine.EmbeddedPlayback",true);
+            return CheckComparison(compareApi,args);
+        }
         if(args.Length==8 && hdrProbe && args[7]=="--inactive-desktop") {
             var hdrApi=Assembly.LoadFrom(Path.GetFullPath(args[0])).GetType("Cadrivect.Engine.EmbeddedPlayback",true);
             return CheckDirectHdr(hdrApi,args,args[6].Substring("--hdr-display=".Length));

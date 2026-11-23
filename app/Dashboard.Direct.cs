@@ -93,6 +93,9 @@ namespace Cadrivect
             if(!string.IsNullOrEmpty(raw) && raw!="{}") {
                 var snapshot=json.Deserialize<Dictionary<string,object>>(raw);
                 if(source=="Direct") snapshot["requestedVideoKbps"]=sessionVideoKbps;
+                // A selection made while the engine worker starts may precede its session.
+                if(!firstFrame && Field(snapshot,"comparisonView")!=meter.ComparisonView)
+                    engine.SetComparison(meter.ComparisonView);
                 meter.Update(snapshot);
                 if(!firstFrame && Field(snapshot,"presented")!="0" && Field(snapshot,"presented")!="") {
                     string label=source=="Demo"?"Offline demo":source=="Direct"?"PS5 connected":"Sony Remote Play";
@@ -111,15 +114,15 @@ namespace Cadrivect
         }
         void Finish()
         {
-            preparing=stopping=comparing=false;
+            preparing=stopping=false;
             playingMac=playingPipe=null; EndDiscordSession();
             if(UI<StackPanel>("StopPanel").Visibility==Visibility.Visible) SetPage("Play");
             meter.Reset(mode,factor); meter.SetRequestedVideoKbps(source=="Direct"?DirectKbps():0); surface.Clear(); UpdateTransport();
-            if(closing) window.Dispatcher.BeginInvoke(new Action(window.Close));
+            if(closing) QueueWindowClose();
         }
         async Task StartPlayback()
         {
-            if(preparing || Active) return;
+            if(preparing || Active || requestingRest) return;
             preparing=true; firstFrame=false; stopRequested=false; failure=""; UpdateTransport();
             try {
                 if(engine==null) engine=new EngineSession();
@@ -156,6 +159,7 @@ namespace Cadrivect
                     }
                     Show("Capturing your Sony Remote Play session…");
                 }
+                args.AddRange(new[]{"--comparison",meter.ComparisonView});
                 rendering=engine.Start(args.ToArray()); preparing=false; UpdateTransport();
                 int code=await rendering;
                 if(!stopping && directCore!=null && directCore.HasExited && directCore.ExitCode!=0) failure=CoreError(directCore.ExitCode);
@@ -178,7 +182,7 @@ namespace Cadrivect
         }
         async Task StartNetwork(bool pair)
         {
-            if(Active || preparing) {Show("Stop the current session first."); return;}
+            if(Active || preparing || requestingRest) {Show("Stop the current session first."); return;}
             string address=ClientAddress();
             var args=new List<string>{"-Action",pair?"PreparePair":"PreparePlay","-Address",address};
             int preset=UI<ComboBox>("Quality").SelectedIndex;

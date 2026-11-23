@@ -11,7 +11,7 @@ namespace Cadrivect
         readonly Func<string[],int> run;
         internal readonly Action Stop, InvalidateDisplay;
         internal readonly Action<int,int> Configure;
-        internal readonly Action<bool> Compare;
+        internal readonly Action<string> SetComparison;
         internal readonly Action<string,string> ConfigureOutput;
         internal readonly Func<string> Snapshot, Error;
         static T Method<T>(Type engine,string name) where T:class
@@ -23,7 +23,7 @@ namespace Cadrivect
             var assembly=Assembly.LoadFrom(Path.Combine(Program.Root,"engine","bin","CadrivectPlayer.exe"));
             var engine=assembly.GetType("Cadrivect.Engine.EmbeddedPlayback",true);
             run=Method<Func<string[],int>>(engine,"Run"); Stop=Method<Action>(engine,"Stop");
-            Configure=Method<Action<int,int>>(engine,"Configure"); Compare=Method<Action<bool>>(engine,"Compare");
+            Configure=Method<Action<int,int>>(engine,"Configure"); SetComparison=Method<Action<string>>(engine,"SetComparison");
             ConfigureOutput=Method<Action<string,string>>(engine,"ConfigureOutput");
             Snapshot=Method<Func<string>>(engine,"Snapshot"); Error=Method<Func<string>>(engine,"get_Error");
             InvalidateDisplay=Method<Action>(engine,"InvalidateDisplay");

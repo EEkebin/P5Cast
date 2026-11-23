@@ -188,6 +188,8 @@ internal static partial class WindowChromeProbe
         var twice=(RadioButton)FindVisual(meter,"RadioButton",e=>Equals(((RadioButton)e).Content,"2×"));
         Require(twice!=null && twice.IsVisible && twice.IsEnabled,"Cannot select 2× interpolation for the demo screenshot.");
         twice.IsChecked=true;
+        var sharp=(RadioButton)FindVisual(meter,"RadioButton",e=>Equals(((RadioButton)e).Content,"Sharpen"));
+        sharp.IsChecked=true; ViewButton("ViewSideBySide").IsChecked=true;
         var dial=FindVisual(meter,"FrameRateDial");
         await Until(delegate {
             var match=System.Text.RegularExpressions.Regex.Match(AutomationProperties.GetHelpText(dial),@"Generated (\d+)");

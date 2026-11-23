@@ -155,6 +155,24 @@ internal static partial class WindowChromeProbe
         Require(video==Video() && Fits(videoRect,ScreenRect(Find<Border>("VideoHost")),2) && videoRect.Width>0 && videoRect.Height>0,
             "Native video surface does not match its scaled WPF allocation: "+Geometry(videoRect)+" / "+Geometry(ScreenRect(Find<Border>("VideoHost"))));
     }
+    static RadioButton ViewButton(string id) {
+        return (RadioButton)FindVisual(Find<Border>("MeterHost"),"RadioButton",e=>AutomationProperties.GetAutomationId(e)==id);
+    }
+    static async Task CheckComparisonViews() {
+        var api=AppDomain.CurrentDomain.GetAssemblies().Select(a=>a.GetType("Cadrivect.Engine.EmbeddedPlayback")).First(t=>t!=null);
+        var snapshot=api.GetMethod("Snapshot");
+        string[] buttons={"ViewSideBySide","ViewOriginal","ViewEnhanced"};
+        string[] views={"side-by-side","original","enhanced"};
+        for(int i=0;i<buttons.Length;i++) {
+            var button=ViewButton(buttons[i]);
+            Require(button!=null && button.IsEnabled,"Missing comparison control "+buttons[i]);
+            ((ISelectionItemProvider)Peer(button).GetPattern(PatternInterface.SelectionItem)).Select();
+            string expected="\"comparisonView\":\""+views[i]+"\"";
+            await Until(delegate{return button.IsChecked==true && ((string)snapshot.Invoke(null,null)).Contains(expected);},
+                        "Dashboard selection did not reach the running engine: "+views[i]);
+        }
+        Note("The three comparison views switched on the running offline demo.");
+    }
     static async Task CheckScaling() {
         Click("InterfaceGroup");
         var scale=Find<ComboBox>("InterfaceScale"); var displays=Find<ComboBox>("PlaybackDisplay");
@@ -289,6 +307,7 @@ internal static partial class WindowChromeProbe
             Require(Find<ComboBox>("SourceChoice").SelectedItem.ToString()=="Offline demo","Refusing to start a network source.");
             Click("OpenSource");
             await Until(delegate{return status.Text=="Offline demo";},"The offline demo did not present its first frame.");
+            await CheckComparisonViews();
             var peer=Peer(toggle);
             var provider=peer.GetPattern(PatternInterface.Toggle) as IToggleProvider;
             Require(provider!=null && peer.GetName().Length>0 && toggle.Focusable,"Sidebar toggle lacks its keyboard or accessibility contract.");

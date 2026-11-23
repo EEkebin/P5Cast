@@ -34,6 +34,8 @@ namespace Cadrivect.Engine
                     if(Array.IndexOf(args,"--self-test")>=0 || Array.IndexOf(args,"--capabilities")>=0)
                         throw new ArgumentException("Use Direct video or window capture when rendering into a dashboard surface.");
                     session=new HostedSurface(new IntPtr(long.Parse(args[index+1],CultureInfo.InvariantCulture)));
+                    int view=Array.IndexOf(args,"--comparison");
+                    if(view>=0) session.ComparisonView=ValidateComparison(view+1<args.Length ? args[view+1] : null);
                     current=session;
                 } catch(Exception ex) { error=ex.Message; return 1; }
             }
@@ -55,7 +57,18 @@ namespace Cadrivect.Engine
             }
             lock(Gate) if(current!=null) current.SetOutput(resolution,hdr);
         }
-        public static void Compare(bool enabled) { lock(Gate) if(current!=null) current.Comparing=enabled; }
+        internal static string ValidateComparison(string view)
+        {
+            if(view!="enhanced" && view!="original" && view!="side-by-side")
+                throw new ArgumentException("Choose enhanced, original, or side-by-side.","view");
+            return view;
+        }
+        public static void SetComparison(string view)
+        {
+            ValidateComparison(view);
+            lock(Gate) if(current!=null) current.ComparisonView=view;
+        }
+        public static void Compare(bool enabled) { SetComparison(enabled ? "original" : "enhanced"); }
         public static void Stop() { lock(Gate) if(current!=null) current.Stopped=true; }
         public static void InvalidateDisplay() { lock(Gate) if(current!=null) current.Invalidate(); }
     }
@@ -72,7 +85,8 @@ namespace Cadrivect.Engine
         int mode=-1,factor=-1,displayChanged;
         string resolution,hdr;
         public readonly IntPtr Handle;
-        public volatile bool Stopped,Comparing;
+        public volatile bool Stopped;
+        public volatile string ComparisonView="enhanced";
         public HostedSurface(IntPtr hwnd) {
             uint pid;
             using(var process=Process.GetCurrentProcess())

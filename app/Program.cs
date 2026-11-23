@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.8.0.0")]
+[assembly: AssemblyVersion("0.9.0.0")]
 
 namespace Cadrivect
 {
@@ -99,7 +99,7 @@ namespace Cadrivect
         EngineSession engine;
         Process directCore;
         Task<int> rendering;
-        bool closing, preparing, stopping, fullscreen, stats=true, comparing;
+        bool closing, preparing, stopping, fullscreen, stats=true;
         int mode, factor=1;
         WindowState previousWindowState;
         string failure="";
@@ -118,7 +118,7 @@ namespace Cadrivect
             meter=new PlaybackMeter(delegate(int selectedMode,int multiplier) {
                 mode=selectedMode; factor=multiplier;
                 if(rendering!=null) engine.Configure(mode,factor);
-            },delegate(bool enabled){comparing=enabled; if(rendering!=null) engine.Compare(enabled);});
+            },delegate(string view){if(rendering!=null) engine.SetComparison(view);});
             UI<Border>("MeterHost").Child=meter;
             var saved = ReadSettings();
             InitDrawers(saved);
@@ -218,7 +218,7 @@ namespace Cadrivect
                 if(key==Key.F11 || (chord && key==Key.Enter)) ToggleFullscreen();
                 else if(chord && key==Key.O) ToggleStats();
                 else if(chord && key==Key.Q) {e.Handled=true; await UserStop(); return;}
-                else if(chord && key==Key.B && rendering!=null) {comparing=!comparing; engine.Compare(comparing);}
+                else if(chord && key==Key.B && rendering!=null) meter.ToggleOriginal();
                 else if(key==Key.Escape && UI<StackPanel>("StopPanel").IsVisible && !requestingRest) SetPage("Play");
                 else if(key==Key.Escape && UI<StackPanel>("PairPanel").IsVisible) SetPage("Play");
                 else if(key==Key.Escape && fullscreen) ToggleFullscreen();
@@ -265,10 +265,7 @@ namespace Cadrivect
                 await Relay("ApprovePin","-Pin",pin);
                 UI<TextBox>("Pin").Clear();
             });
-            window.Closing+=delegate(object sender,System.ComponentModel.CancelEventArgs e) {
-                if(!closing) {SaveSettings(); closing=true; StopPlayback();}
-                if(rendering!=null || preparing) e.Cancel=true;
-            };
+            window.Closing+=OnDashboardClosing;
             window.Closed+=delegate {timer.Stop(); if(discord!=null) discord.Dispose();};
         }
         static void StopOwned(Process p)
@@ -392,6 +389,7 @@ namespace Cadrivect
 
         void SetPage(string value,bool reveal=true)
         {
+            if(!requestingRest) closeAfterStop=false;
             if(reveal) SetSettingsDrawer(true);
             page = value;
             UI<StackPanel>("StopPanel").Visibility=Visibility.Collapsed;

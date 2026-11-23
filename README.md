@@ -9,8 +9,14 @@ Extract the entire Windows x64 ZIP and open `P5Cast.exe`. To install it for your
 The installer places the app in `%LOCALAPPDATA%\Programs\P5Cast` and adds **P5Cast** and **P5Cast Client** under **Start → P5Cast**. Existing console registrations, preferences and network pairings carry over when upgrading from Cadrivect.
 
 1. Open **Play**, choose **Offline demo**, then **Play demo**. A 960×540 scene runs inside the dashboard. Use the arrow keys or A/D to steer and Space to accelerate. The demo runs without a console, network connection, decoder download or controller.
-2. The two-line title bar button toggles the performance drawer. The **Settings** button beside **Fullscreen** toggles the bottom drawer. Drag the left edge of the performance drawer or the top edge of the settings drawer to resize it. You can also Tab to a handle and use the arrow keys. P5Cast remembers the sizes and open state of both drawers. Begin with **Original** and interpolation **Off**. Try **Sharpen**, **AMD FSR 1** or an available NVIDIA mode, then compare with **Compare original**. Pick **2×**, **3×** or **4×** to test interpolation.
+2. The two-line title bar button toggles the performance drawer. The **Settings** button beside **Fullscreen** toggles the bottom drawer. Drag the left edge of the performance drawer or the top edge of the settings drawer to resize it. You can also Tab to a handle and use the arrow keys. P5Cast remembers the sizes and open state of both drawers. Begin with **Original** and interpolation **Off**. Try **Sharpen**, **AMD FSR 1** or an available NVIDIA mode. Pick **2×**, **3×** or **4×** to test interpolation.
 3. Use **Fullscreen** or F11 for edge-to-edge video. Press Escape or double-click the picture to return. **Stop** turns the same video area black and clears the live measurements. With the dashboard focused, Ctrl+Alt+O toggles the sidebar, Ctrl+Alt+B toggles comparison, and Ctrl+Alt+Q stops playback.
+
+## Compare the picture
+
+In the performance drawer, open **Picture → Comparison view**. Choose **Side by side** for the full original on the left and the full enhanced picture on the right. The left follows the source frame rate. The right uses your selected effects and interpolation. Both views share the same stream, audio and controls.
+
+Choose **Original** or **Enhanced** to give either picture the whole window. During playback, **Ctrl+Alt+B** switches to the original and back to your previous view, including side by side. You can try this with **Offline demo** and **Sharpen** before connecting.
 
 ## Connect to a PS5
 
@@ -27,7 +33,7 @@ Choose **Play → Graphics & display → Graphics API** while playback is stoppe
 
 Direct defaults to a **100 Mbps video request**, the top setting offered by the pinned chiaki-ng client. Choose a lower target for slower links. The PS5 varies its compressed output with the scene and connection. It also chooses the Opus audio bitrate. In **Stream diagnostics**, compare requested and received video rates and inspect received audio bitrate, sample rate, channels and queue duration. [Upstream PS5 bitrate settings](https://github.com/streetpea/chiaki-ng/blob/v1.10.1/gui/src/qml/SettingsDialog.qml#L1400-L1420)
 
-Press **Stop** in an active Direct session to choose whether to put the PS5 into rest mode. Both checkboxes start unchecked. **Remember my choice** applies to the selected console. To change it, open **Console → When I press Stop**. Closing the app or losing the connection simply disconnects. Rest mode requires a running Direct session and the dashboard reports a command failure if it cannot submit the request.
+Press **Stop** or close P5Cast during Direct playback to open the disconnect prompt. **Put PS5 into rest mode** starts checked. Clear it to leave the console awake for this disconnect. Select **Remember my choice for this console** to skip the prompt in future sessions. You can change a saved choice under **Play → Console → When I disconnect**. Losing the network connection or cancelling before the first picture leaves the console's power state alone.
 
 **Pair a console for Direct.** On the PS5, enable **Settings → System → Remote Play → Enable Remote Play**. In P5Cast, choose **Direct to PS5 → Add console**. Enter the console’s address and the Base64 PSN Account ID for the profile you play on. On the console, select **Link Device** and enter its eight-digit code in P5Cast. The app prefills the account ID when it can identify a single account from previous registrations. Select **Pair console**, choose the saved console, and **Connect**. The Account ID represents eight bytes and differs from your online display name. The upstream registration guide describes how to obtain it. [Registration and Account ID guide](https://chiaki-ng.github.io/chiaki-ng/setup/configuration/#registering-your-playstation)
 

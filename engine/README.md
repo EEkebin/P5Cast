@@ -25,6 +25,7 @@ Choose a renderer before starting a session with `--renderer auto`, `d3d11`, `d3
 | `--mode fsr` | FidelityFX Super Resolution 1 EASU for enlargement and RCAS sharpening. Native-size input goes directly to RCAS. |
 | `--mode rtxvideo` | NVIDIA RTX Video Super Resolution at High quality on SDR. |
 | `--mode dlss` or `dlaa` | Experimental NVIDIA NGX processing in SDR or floating-point HDR. The player estimates motion, uses a constant depth plane and supplies zero camera jitter. DLSS uses DLAA when the input already fills or exceeds the processing dimensions. |
+| `--comparison enhanced`, `original`, `side-by-side` | Changes the view independently of picture settings. Split view shows the unprocessed source on the left and the selected effect on the right. Both panes fit the full image. |
 | `--multiplier 1`, `2`, `3`, `4` | 1 presents captured frames. Higher values request intermediate frames. Achieved rates depend on source cadence, rendering time and display refresh. |
 | `--resolution native`, `720`, `1080`, `1440`, `4k` | Caps the processing raster and preserves aspect ratio within the presentation viewport. |
 | `--hdr auto`, `off`, `hdr10` | Auto follows the active Windows display. D3D12 and Vulkan use SDR when the driver cannot create an HDR10 swap chain. Explicit HDR10 requires D3D11, D3D12 or Vulkan with an active HDR display and supported PQ/BT.2020 output. OpenGL and RTX Video SR use SDR on Windows. |

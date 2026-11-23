@@ -49,9 +49,8 @@ internal sealed partial class Renderer
         PrepareMotion(hdrGuideCurrent,hdrGuidePrevious);
     }
 
-    int ShowHdr(string mode,float phase,bool samplePixel,bool finishPrevious)
+    void DrawHdr(string mode,float phase,bool finishPrevious,Rectangle area)
     {
-        if (curr==null) return 0;
         var srcArea=new Rectangle(Point.Empty,srcSize);
         var outputArea=new Rectangle(Point.Empty,outSize);
         ShaderResourceView source=finishPrevious ? prev.Read : curr.Read;
@@ -63,10 +62,10 @@ internal sealed partial class Renderer
             source=hdrMixed.Read;
             Generated++;
         }
-        bool separateOutput=outSize!=viewport.Size;
+        bool separateOutput=outSize!=area.Size;
         if (separateOutput) HdrScratch(ref hdrProcessed,outSize,HdrFloatFormat);
         var target=separateOutput ? hdrProcessed.Write : display;
-        var targetArea=separateOutput ? outputArea : viewport;
+        var targetArea=separateOutput ? outputArea : area;
         if (mode=="fsr")
         {
             // EASU/RCAS require a bounded perceptual signal. Store PQ BT.2020 in FP16 throughout both passes.
@@ -86,7 +85,6 @@ internal sealed partial class Renderer
             if (mode!="original" && mode!="sharp") throw new ArgumentException("The selected enhancement needs its own HDR rendering path.");
             Draw(mode=="sharp" ? "HdrSharpToPq" : "HdrToPq",target,targetArea,source,1);
         }
-        if (separateOutput) Draw("Original",display,viewport,hdrProcessed.Read,1);
-        return Present(samplePixel);
+        if (separateOutput) Draw("Original",display,area,hdrProcessed.Read,1);
     }
 }

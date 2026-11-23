@@ -26,6 +26,13 @@ try {
     function Require($test,$message){if(!$test){throw $message}}
     function State($name,$value){$type.GetField($name,'Instance,NonPublic').SetValue($dash,$value)}
     function Call($name){$type.GetMethod($name,[Reflection.BindingFlags]'Instance,NonPublic').Invoke($dash,@())}
+    function TryClose {
+        $observed=[ComponentModel.CancelEventArgs]::new()
+        $handler=[ComponentModel.CancelEventHandler]{param($sender,$eventArgs) $observed.Cancel=$eventArgs.Cancel}
+        $window.add_Closing($handler)
+        try {$window.Close()} finally {$window.remove_Closing($handler)}
+        $observed.Cancel
+    }
     function IsShown($name){(Widget $name).Visibility -eq 'Visible'}
     # The arc counts submitted frames. Input and output can diverge while the stream is running.
     $meter=$type.GetField('meter','Instance,NonPublic').GetValue($dash)
@@ -102,21 +109,30 @@ try {
     Require (!(IsShown SettingsDrawer)) 'The settings drawer can be closed before stop'
 
     $null=(Call UserStop).GetAwaiter().GetResult()
-    Require ((IsShown StopPanel) -and (IsShown SettingsDrawer) -and (Widget ShowSettings).IsChecked -and !(Widget RestOnStop).IsChecked -and !(Widget RememberStop).IsChecked) 'Stop reopens the drawer with safe default choices'
+    Require ((IsShown StopPanel) -and (IsShown SettingsDrawer) -and (Widget ShowSettings).IsChecked -and (Widget RestOnStop).IsChecked -and !(Widget RememberStop).IsChecked) 'Stop reopens the drawer with rest selected and remember unchecked'
+    (Widget RestOnStop).IsChecked=$false
+    Require ((TryClose) -and !(Widget RestOnStop).IsChecked -and (Widget ConfirmStop).Content -eq 'Disconnect and close') 'Close keeps an unconfirmed leave-awake choice'
     Click CancelStop
     Require (!(IsShown StopPanel) -and (IsShown PlayPage)) 'Keep playing'
+    Require ((TryClose) -and (IsShown StopPanel) -and (Widget RestOnStop).IsChecked -and !(Widget RememberStop).IsChecked) 'Closing an active Direct session offers rest by default'
+    Click CancelStop
     $null=(Call UserStop).GetAwaiter().GetResult()
-    (Widget RestOnStop).IsChecked=$true; (Widget RememberStop).IsChecked=$true; Click ConfirmStop
-    Require ((IsShown StopPanel) -and (Widget Status).Text -like 'Rest mode could not be confirmed*' -and (Widget StopBehavior).SelectedIndex -eq 0) 'Unacknowledged fixture rest stays cancellable'
+    Require ((Widget ConfirmStop).Content -eq 'Stop session') 'Canceling close leaves subsequent Stop actions in the dashboard'
     (Widget RememberStop).IsChecked=$true; Click ConfirmStop
+    Require ((IsShown StopPanel) -and (Widget Status).Text -like 'Rest mode could not be confirmed*' -and (Widget StopBehavior).SelectedIndex -eq 0) 'Unacknowledged fixture rest stays cancellable'
+    (Widget RestOnStop).IsChecked=$false; (Widget RememberStop).IsChecked=$true; Click ConfirmStop
     Require ((Widget StopBehavior).SelectedIndex -eq 1 -and !(IsShown StopPanel)) 'Remember leave-on choice'
     (Widget StopBehavior).SelectedIndex=2
+    Require ((TryClose) -and (IsShown StopPanel) -and (Widget Status).Text -like 'Rest mode could not be confirmed*' -and (Widget ConfirmStop).Content -eq 'Disconnect and close') 'Closing with saved rest sends the request and allows recovery on failure'
+    Click CancelStop
     $saved=Get-Content (Join-Path $tmp 'LumaRelay\dashboard.json') -Raw | ConvertFrom-Json
     Require ($saved.stopChoices.($row.Mac) -eq 'rest' -and $saved.directMbps -eq 100) 'Saved console preference and quality'
     (Widget StopBehavior).SelectedIndex=0
     $saved=Get-Content (Join-Path $tmp 'LumaRelay\dashboard.json') -Raw | ConvertFrom-Json
     Require (!$saved.stopChoices.($row.Mac)) 'Reset to ask every time'
-    'Passed grouped controls, bitrate defaults, Stop prompt, cancel and per-console preference persistence. No console session opened.'
+    (Widget StopBehavior).SelectedIndex=1
+    Require ((TryClose) -and !(IsShown StopPanel) -and $type.GetField('closing','Instance,NonPublic').GetValue($dash)) 'A saved leave-awake rule closes without a rest request or prompt'
+    'Passed grouped controls, bitrate defaults, Stop and close prompts, rest default and per-console preference persistence. No console session opened.'
 } finally {
     $env:LOCALAPPDATA=$oldLocal
     if([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($tmp)) -eq [IO.Path]::GetTempPath().TrimEnd('\') -and (Split-Path $tmp -Leaf) -eq $id -and (Test-Path -LiteralPath $tmp)) {

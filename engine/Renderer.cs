@@ -56,7 +56,8 @@ internal sealed partial class Renderer : IDisposable
     RenderTargetView display;
     GpuImage curr,prev,incoming,motion,mixed,scaled;
     Size srcSize,outSize,screenSize;
-    Rectangle viewport;
+    Rectangle viewport,originalViewport;
+    bool sideBySide;
     readonly IntPtr hwnd;
     readonly bool clearOnDispose;
     Size renderLimit;
@@ -246,12 +247,30 @@ internal sealed partial class Renderer : IDisposable
             throw new InvalidOperationException("HDR10 needs an active Windows HDR display. Select SDR or enable HDR on "+(output.FriendlyName ?? output.DeviceName)+".");
         return output.WindowsHdrActive;
     }
+    public void SetSideBySide(bool enabled)
+    {
+        if(sideBySide==enabled) return;
+        sideBySide=enabled;
+        SetViewport();
+    }
     void SetViewport()
     {
         if(srcSize.IsEmpty || screenSize.IsEmpty) return;
         double ratio=Math.Min((double)screenSize.Width/srcSize.Width,(double)screenSize.Height/srcSize.Height);
         var next=new Size(Math.Max(1,(int)Math.Round(srcSize.Width*ratio)),Math.Max(1,(int)Math.Round(srcSize.Height*ratio)));
         viewport=new Rectangle((screenSize.Width-next.Width)/2,(screenSize.Height-next.Height)/2,next.Width,next.Height);
+        originalViewport=Rectangle.Empty;
+        if(sideBySide && screenSize.Width>=2)
+        {
+            // Keep the single-view processing resolution. Shrinking the effect target here
+            // could change an upscaler's operating mode in the middle of the comparison.
+            int half=screenSize.Width/2;
+            double fit=Math.Min((double)half/srcSize.Width,(double)screenSize.Height/srcSize.Height);
+            var pane=new Size(Math.Max(1,(int)Math.Round(srcSize.Width*fit)),Math.Max(1,(int)Math.Round(srcSize.Height*fit)));
+            originalViewport=new Rectangle((half-pane.Width)/2,(screenSize.Height-pane.Height)/2,pane.Width,pane.Height);
+            viewport=originalViewport;
+            viewport.Offset(screenSize.Width-half,0);
+        }
         if(!renderLimit.IsEmpty)
         {
             double limit=Math.Min(ratio,Math.Min((double)renderLimit.Width/srcSize.Width,(double)renderLimit.Height/srcSize.Height));
@@ -380,13 +399,24 @@ internal sealed partial class Renderer : IDisposable
         }
         EffectivePictureMode=vendor ? neuralMode : mode;
         context.ClearRenderTargetView(display,new RawColor4(0,0,0,1));
-        if(HdrEnabled && !vendor) return ShowHdr(mode,phase,samplePixel,finishPrevious);
+        if(!originalViewport.IsEmpty)
+        {
+            // Hold the last real frame while the enhanced pane shows the in-between frames.
+            bool holdPrevious=(finishPrevious || (phase<1 && HasPrevious)) && (!vendor || havePriorEnhanced);
+            if(HdrEnabled) DrawHdr("original",1,holdPrevious,originalViewport);
+            else DrawFinal("Original",holdPrevious ? prev.Read : curr.Read,1,originalViewport);
+        }
+        if(HdrEnabled && !vendor)
+        {
+            DrawHdr(mode,phase,finishPrevious,viewport);
+            return Present(samplePixel);
+        }
         if(phase<1 && HasPrevious)
         {
             if(HdrEnabled) PrepareHdrMotion(); else PrepareMotion();
             if(vendor && havePriorEnhanced)
             {
-                DrawFinal("Interpolate",neuralCurrent.Read,phase,neuralPrevious.Read,motion.Read,HdrEnabled);
+                DrawFinal("Interpolate",neuralCurrent.Read,phase,viewport,neuralPrevious.Read,motion.Read,HdrEnabled);
                 Generated++;
                 return Present(samplePixel);
             }
@@ -405,14 +435,14 @@ internal sealed partial class Renderer : IDisposable
                 Draw(outSize.Width>srcSize.Width ? "Easu" : "Original",scaled.Write,new Rectangle(System.Drawing.Point.Empty,outSize),source,phase);
                 source=scaled.Read;
             }
-            DrawFinal("Rcas",source,phase);
+            DrawFinal("Rcas",source,phase,viewport);
         }
-        else DrawFinal(mode=="sharp" ? "Sharp":"Original",source,phase,null,null,HdrEnabled && vendor);
+        else DrawFinal(mode=="sharp" ? "Sharp":"Original",source,phase,viewport,null,null,HdrEnabled && vendor);
         return Present(samplePixel);
     }
-    void DrawFinal(string shader,ShaderResourceView source,float phase,ShaderResourceView previous=null,ShaderResourceView flow=null,bool linear2020=false)
+    void DrawFinal(string shader,ShaderResourceView source,float phase,Rectangle area,ShaderResourceView previous=null,ShaderResourceView flow=null,bool linear2020=false)
     {
-        if(!linear2020 && outSize==viewport.Size) { Draw(shader,display,viewport,source,phase,previous,flow); return; }
+        if(!linear2020 && outSize==area.Size) { Draw(shader,display,area,source,phase,previous,flow); return; }
         var format=linear2020 ? Format.R16G16B16A16_Float : Format.B8G8R8A8_UNorm;
         if(raster==null || raster.Texture.Description.Format!=format)
         {
@@ -420,7 +450,7 @@ internal sealed partial class Renderer : IDisposable
             raster=new GpuImage(Device,outSize.Width,outSize.Height,format,true);
         }
         Draw(shader,raster.Write,new Rectangle(System.Drawing.Point.Empty,outSize),source,phase,previous,flow);
-        Draw(linear2020 ? "HdrLinear2020ToPq" : "Original",display,viewport,raster.Read,1);
+        Draw(linear2020 ? "HdrLinear2020ToPq" : "Original",display,area,raster.Read,1);
     }
     int Present(bool samplePixel)
     {
@@ -470,7 +500,7 @@ internal sealed partial class Renderer : IDisposable
         var desc=backBuffer.Description;
         desc.Width=desc.Height=1; desc.BindFlags=BindFlags.None; desc.Usage=ResourceUsage.Staging;
         desc.CpuAccessFlags=CpuAccessFlags.Read; desc.OptionFlags=ResourceOptionFlags.None;
-        int x=screenSize.Width/2, y=screenSize.Height/2;
+        int x=viewport.Left+viewport.Width/2, y=viewport.Top+viewport.Height/2;
         using(var readback=new Texture2D(Device,desc))
         {
             context.CopySubresourceRegion(backBuffer,0,new ResourceRegion(x,y,0,x+1,y+1,1),readback,0);

@@ -23,21 +23,25 @@ namespace Cadrivect
         static readonly ControlTemplate ChipTemplate=MakeChipTemplate();
         static readonly ControlTemplate GroupTemplate=MakeGroupTemplate();
         readonly Action<int,int> change;
-        readonly Action<bool> compare;
+        static readonly string[] ViewIds={"enhanced","original","side-by-side"};
+        readonly Action<string> compare;
+        readonly RadioButton[] views=new RadioButton[3];
+        int selectedView,previousView;
+        readonly TextBlock comparisonGuide;
+        public string ComparisonView {get {return ViewIds[selectedView];}}
         readonly RadioButton[] modes=new RadioButton[6], factors=new RadioButton[4];
         readonly TextBlock sourceValue,generatedValue,targetValue;
         readonly Dictionary<string,TextBlock> values=new Dictionary<string,TextBlock>();
         readonly TextBlock submitLabel,notice;
-        readonly ToggleButton compareButton;
         readonly FrameRateDial dial=new FrameRateDial();
         Dictionary<string,object> gpu;
         int selectedMode,selectedFactor=1;
         bool syncing,hdr,directSelected;
         int requestedVideoKbps;
         long lastSample=-1;
-        DateTime pendingSettings,pendingCompare;
+        DateTime pendingSettings;
 
-        public PlaybackMeter(Action<int,int> change,Action<bool> compare)
+        public PlaybackMeter(Action<int,int> change,Action<string> compare)
         {
             this.change=change; this.compare=compare;
             UseLayoutRounding=true; SnapsToDevicePixels=true; Background=Brushes.Transparent;
@@ -84,13 +88,29 @@ namespace Cadrivect
                 button.Checked+=delegate {if(syncing) return; selectedFactor=factor; SendSettings();};
                 factorGrid.Children.Add(button);
             }
-            compareButton=new ToggleButton {Content="Compare original",Template=ChipTemplate,
-                ToolTip="Temporarily show the original picture with interpolation off."};
-            StyleChip(compareButton); compareButton.Margin=new Thickness(0,8,0,0); picture.Children.Add(compareButton);
-            compareButton.Click+=delegate {
-                if(syncing) return;
-                pendingCompare=DateTime.UtcNow.AddSeconds(2); if(compare!=null) compare(compareButton.IsChecked==true);
-            };
+            var viewLabel=Label("Comparison view",Muted,11,FontWeights.Normal);
+            viewLabel.Margin=new Thickness(0,9,0,2); picture.Children.Add(viewLabel);
+            var viewGrid=new UniformGrid {Rows=1,Columns=3,Margin=new Thickness(-2,0,-2,0)};
+            picture.Children.Add(viewGrid);
+            string[] viewLabels={"Enhanced","Original","Side by side"};
+            string[] viewControlIds={"ViewEnhanced","ViewOriginal","ViewSideBySide"};
+            string[] viewTips={"Show your selected picture and interpolation settings.",
+                "Show the source picture at its original frame rate.","Show the full original on the left and the enhanced picture on the right."};
+            comparisonGuide=Label("Left: Original    ·    Right: Enhanced",Muted,11,FontWeights.Normal);
+            comparisonGuide.Margin=new Thickness(0,4,0,0); picture.Children.Add(comparisonGuide);
+            for(int i=0;i<views.Length;i++) {
+                int index=i;
+                var button=new RadioButton {GroupName="View"+group,Content=viewLabels[i],Template=ChipTemplate,ToolTip=viewTips[i]};
+                StyleChip(button); views[i]=button;
+                AutomationProperties.SetName(button,viewLabels[i]+" view");
+                AutomationProperties.SetAutomationId(button,viewControlIds[i]);
+                button.Checked+=delegate {
+                    if(syncing) return;
+                    SelectView(index);
+                    if(compare!=null) compare(ComparisonView);
+                };
+                viewGrid.Children.Add(button);
+            }
             notice=Label("",Amber,11,FontWeights.Normal); notice.TextWrapping=TextWrapping.Wrap; notice.Margin=new Thickness(0,5,0,0);
             notice.Visibility=Visibility.Collapsed; picture.Children.Add(notice);
             Separator(sections);
@@ -241,13 +261,23 @@ namespace Cadrivect
             pendingSettings=DateTime.UtcNow.AddSeconds(2);
             if(change!=null) change(selectedMode,selectedFactor);
         }
+        void SelectView(int index)
+        {
+            if(index==1 && selectedView!=1) previousView=selectedView;
+            selectedView=index; views[index].IsChecked=true;
+            comparisonGuide.Visibility=index==2 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        public void ToggleOriginal()
+        {
+            views[selectedView==1 ? previousView : 1].IsChecked=true;
+        }
         public void Reset(int modeIndex,int multiplier)
         {
             selectedMode=Math.Max(0,Math.Min(5,modeIndex)); selectedFactor=Math.Max(1,Math.Min(4,multiplier));
             syncing=true;
-            try {modes[selectedMode].IsChecked=true; factors[selectedFactor-1].IsChecked=true; compareButton.IsChecked=false;}
+            try {modes[selectedMode].IsChecked=true; factors[selectedFactor-1].IsChecked=true; SelectView(selectedView);}
             finally {syncing=false;}
-            hdr=false; lastSample=-1; pendingSettings=pendingCompare=DateTime.MinValue; dial.SetRates(double.NaN,double.NaN,double.NaN,double.NaN);
+            hdr=false; lastSample=-1; pendingSettings=DateTime.MinValue; dial.SetRates(double.NaN,double.NaN,double.NaN,double.NaN);
             sourceValue.Text=generatedValue.Text="—"; targetValue.Text="Target —";
             foreach(var label in values.Values) label.Text="—";
             values["format"].ToolTip=null;
@@ -351,9 +381,6 @@ namespace Cadrivect
                     if(mode>=0) {selectedMode=mode; modes[mode].IsChecked=true;}
                     if(factor>=1 && factor<=4) {selectedFactor=(int)factor; factors[selectedFactor-1].IsChecked=true;}
                     pendingSettings=DateTime.MinValue;
-                }
-                if(comparing.HasValue && (DateTime.UtcNow>=pendingCompare || comparing==compareButton.IsChecked)) {
-                    compareButton.IsChecked=comparing; pendingCompare=DateTime.MinValue;
                 }
             } finally {syncing=false;}
             string message=Text(snapshot,"effectNotice");

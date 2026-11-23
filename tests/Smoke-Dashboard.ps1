@@ -3,13 +3,13 @@
 param([string]$AppRoot = (Split-Path $PSScriptRoot -Parent))
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing
-if (-not ('LumaRelay.DashboardSnapshot' -as [type])) {
+if (-not ('Cadrivect.DashboardSnapshot' -as [type])) {
     Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
 using System;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
-namespace LumaRelay {
+namespace Cadrivect {
     public static class DashboardSnapshot {
         [StructLayout(LayoutKind.Sequential)] struct Rect { public int left, top, right, bottom; }
         [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr window, out Rect rect);
@@ -20,7 +20,7 @@ namespace LumaRelay {
         [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
         public static IntPtr PlayerWindow(int processId) {
             IntPtr cursor = IntPtr.Zero;
-            while ((cursor = FindWindowEx(IntPtr.Zero,cursor,null,"LumaRelay Player")) != IntPtr.Zero) {
+            while ((cursor = FindWindowEx(IntPtr.Zero,cursor,null,"Cadrivect Player")) != IntPtr.Zero) {
                 uint pid;
                 GetWindowThreadProcessId(cursor,out pid);
                 if (pid == processId) return cursor;
@@ -83,10 +83,10 @@ function Wait-Text([string]$Id, [string]$Match) {
     } "$Id to match $Match"
 }
 
-$app = Get-Item -LiteralPath (Join-Path $AppRoot 'LumaRelay.exe')
+$app = Get-Item -LiteralPath (Join-Path $AppRoot 'Cadrivect.exe')
 $runId = [Guid]::NewGuid().ToString('N')
-$stage = Join-Path ([IO.Path]::GetTempPath()) "LumaRelay-smoke-$runId"
-$snapshot = Join-Path ([IO.Path]::GetTempPath()) "LumaRelay-dashboard-$runId.png"
+$stage = Join-Path ([IO.Path]::GetTempPath()) "Cadrivect-smoke-$runId"
+$snapshot = Join-Path ([IO.Path]::GetTempPath()) "Cadrivect-dashboard-$runId.png"
 [IO.Directory]::CreateDirectory($stage) | Out-Null
 $process = $null
 try {
@@ -100,7 +100,7 @@ try {
     Click-Control 'PlayNav'
     Click-Control 'Demo'
     $null = Wait-Text 'HeroTitle' '^Arcade demo$'
-    [LumaRelay.DashboardSnapshot]::Save($handle, $snapshot)
+    [Cadrivect.DashboardSnapshot]::Save($handle, $snapshot)
     Click-Control 'OpenSource'
     $demoStatus = Wait-Text 'Status' '^Opened Arcade demo'
     $demo = Wait-For {
@@ -111,12 +111,12 @@ try {
     Click-Control 'Enhance'
     $viewStatus = Wait-Text 'Status' '^Enhanced view opened'
     $playerWindow = Wait-For {
-        Get-CimInstance Win32_Process -Filter "Name='LumaPlayer.exe' AND ParentProcessId=$($process.Id)" |
-            ForEach-Object { [LumaRelay.DashboardSnapshot]::PlayerWindow($_.ProcessId) } |
+        Get-CimInstance Win32_Process -Filter "Name='CadrivectPlayer.exe' AND ParentProcessId=$($process.Id)" |
+            ForEach-Object { [Cadrivect.DashboardSnapshot]::PlayerWindow($_.ProcessId) } |
             Where-Object { $_ -ne [IntPtr]::Zero } | Select-Object -First 1
     } 'the GPU player launched by this dashboard'
     Start-Sleep -Seconds 2
-    [void][LumaRelay.DashboardSnapshot]::PostMessage($playerWindow,0x0312,[IntPtr]1,[IntPtr]::Zero)
+    [void][Cadrivect.DashboardSnapshot]::PostMessage($playerWindow,0x0312,[IntPtr]1,[IntPtr]::Zero)
     $viewSummary = Wait-Text 'Status' '^Session ended'
     $reportFile = Get-ChildItem (Join-Path $stage 'LumaRelay\sessions') -Filter '*.json' | Select-Object -First 1
     $report = Get-Content $reportFile.FullName -Raw | ConvertFrom-Json
@@ -143,7 +143,7 @@ try {
     }
     $resolved = [IO.Path]::GetFullPath($stage)
     if ([IO.Path]::GetDirectoryName($resolved) -eq [IO.Path]::GetTempPath().TrimEnd('\') -and
-        [IO.Path]::GetFileName($resolved) -eq "LumaRelay-smoke-$runId") {
+        [IO.Path]::GetFileName($resolved) -eq "Cadrivect-smoke-$runId") {
         Remove-Item -LiteralPath $resolved -Recurse -Force
     }
 }

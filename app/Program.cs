@@ -18,11 +18,11 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Ellipse = System.Windows.Shapes.Ellipse;
 
-[assembly: AssemblyTitle("LumaRelay")]
+[assembly: AssemblyTitle("Cadrivect")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.1.0.0")]
+[assembly: AssemblyVersion("0.2.0.0")]
 
-namespace LumaRelay
+namespace Cadrivect
 {
     internal static class Program
     {
@@ -42,7 +42,7 @@ namespace LumaRelay
             }
             catch (Exception e)
             {
-                MessageBox.Show(e.GetBaseException().Message, "LumaRelay", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(e.GetBaseException().Message, "Cadrivect", MessageBoxButton.OK, MessageBoxImage.Error);
                 return 1;
             }
         }
@@ -57,7 +57,10 @@ namespace LumaRelay
         readonly string[] titles = { "PS Remote Play", "Direct to PS5", "Arcade demo" };
         readonly string[] subtitles = { "Play through your existing Sony connection.", "Pair once and play through chiaki-ng.", "Try video, audio, and controls on this PC." };
         readonly string[] actions = { "Open Remote Play", "Open direct client", "Play demo" };
-        readonly string[] modeIds = { "original", "sharp", "fsr" };
+        readonly string[] modeIds = { "original", "sharp", "fsr", "rtxvideo", "dlss", "dlaa" };
+        readonly string[] hdrIds = { "auto","off","hdr10" };
+        readonly string[] resolutionIds = { "native","720","1080","1440","4k" };
+        bool refreshingDisplays;
         readonly Brush mint = new SolidColorBrush(Color.FromRgb(143,230,208));
         readonly Brush dark = new SolidColorBrush(Color.FromRgb(16,39,37));
         readonly Brush grey = new SolidColorBrush(Color.FromRgb(38,53,60));
@@ -72,13 +75,40 @@ namespace LumaRelay
         internal Dashboard(Window w, bool client)
         {
             window = w;
+            window.Icon = new BitmapImage(new Uri(Path.Combine(Program.Root,"app","assets","mark.ico")));
             UI<ImageBrush>("HeroBrush").ImageSource = new BitmapImage(new Uri(Path.Combine(Program.Root,"app","assets","aurora.jpg")));
-            UI<ComboBox>("Mode").ItemsSource = new[] { "Original", "Sharpen", "AMD FSR 1" };
+            UI<ComboBox>("Mode").ItemsSource = new[] { "Original", "Sharpen", "AMD FSR 1", "NVIDIA RTX Video SR", "NVIDIA DLSS · experimental", "NVIDIA DLAA · experimental" };
+            UI<ComboBox>("Mode").SelectionChanged += delegate {
+                int i=UI<ComboBox>("Mode").SelectedIndex;
+                UI<TextBlock>("PictureHint").Text=i>=4
+                    ? "Experimental video reconstruction uses estimated motion and flat depth. Ctrl+Alt+B compares the picture. Ctrl+Alt+Q exits."
+                    : "Open the view after your game is visible. Ctrl+Alt+B compares the picture. Ctrl+Alt+Q exits.";
+            };
             UI<ComboBox>("Multiplier").ItemsSource = new[] { "Off", "2×", "3×", "4×" };
             var saved = ReadSettings();
+            var output=UI<ComboBox>("PlaybackDisplay");
+            RefreshDisplays(Field(saved,"display"));
+            var hostScreen=UI<ComboBox>("HostDisplay");
+            var displays=DisplayTarget.Enumerate();
+            hostScreen.ItemsSource=displays;
+            hostScreen.SelectedItem=displays.FirstOrDefault(d=>d.DeviceName==Field(saved,"hostDisplay")) ?? displays.FirstOrDefault(d=>d.Primary) ?? displays.FirstOrDefault();
+            UI<CheckBox>("ClientHdr").IsChecked=string.Equals(Field(saved,"clientHdr"),"True",StringComparison.OrdinalIgnoreCase);
+            output.DropDownOpened += delegate { RefreshDisplays(SelectedDisplayName()); };
+            output.SelectionChanged += delegate {
+                if(refreshingDisplays || player==null || player.HasExited) return;
+                try {
+                    if(DisplayTarget.MovePlayer(player.Id,SelectedDisplayName()))
+                        Show("Moved playback to "+SelectedDisplayName()+".");
+                } catch(Exception ex) { Show(ex.Message,true); }
+            };
+            UI<ComboBox>("HdrOutput").ItemsSource=new[]{"Auto","SDR","HDR10"};
+            UI<ComboBox>("HdrOutput").SelectedIndex=ParseIndex(saved,"hdr",0,hdrIds.Length);
+            UI<ComboBox>("RenderResolution").ItemsSource=new[]{"Native","720p","1080p","1440p","4K"};
+            UI<ComboBox>("RenderResolution").SelectedIndex=ParseIndex(saved,"resolution",0,resolutionIds.Length);
+            UI<CheckBox>("Fullscreen").IsChecked=!string.Equals(Field(saved,"fullscreen"),"False",StringComparison.OrdinalIgnoreCase);
             UI<ComboBox>("Quality").ItemsSource = new[] { "Use Moonlight settings", "1080p · 60 FPS · 35 Mbps", "1440p · 120 FPS · 65 Mbps", "4K · 60 FPS · 80 Mbps", "4K · 120 FPS · 120 Mbps" };
             UI<ComboBox>("Quality").SelectedIndex = ParseIndex(saved,"quality",0,5);
-            UI<ComboBox>("Mode").SelectedIndex = ParseIndex(saved, "mode", 2, 3);
+            UI<ComboBox>("Mode").SelectedIndex = ParseIndex(saved, "mode", 2, modeIds.Length);
             UI<ComboBox>("Multiplier").SelectedIndex = ParseIndex(saved, "multiplier", 0, 4);
             UI<TextBox>("HostAddress").Text = Field(saved, "address");
             var addresses = BindAddresses().ToList();
@@ -96,7 +126,10 @@ namespace LumaRelay
 
             Bind("OpenSource", () => Open(false));
             Bind("Enhance", () => Open(true));
-            Bind("StartHost", () => Relay("StartHost", "-Address", SelectedIP()));
+            Bind("StartHost", () => {
+                var hostTarget=hostScreen.SelectedItem as DisplayTarget;
+                return hostTarget==null ? Relay("StartHost","-Address",SelectedIP()) : Relay("StartHost","-Address",SelectedIP(),"-DisplayDevice",hostTarget.DeviceName);
+            });
             Bind("StopHost", () => Relay("StopHost"));
             Bind("HostStatus", () => Relay("Status"));
             Bind("LoadPeers", LoadPeers);
@@ -127,6 +160,21 @@ namespace LumaRelay
         }
 
         string SelectedIP() { return Convert.ToString(UI<ComboBox>("BindIP").SelectedItem); }
+        string SelectedDisplayName()
+        {
+            var d=UI<ComboBox>("PlaybackDisplay").SelectedItem as DisplayTarget;
+            return d==null ? "source" : d.DeviceName;
+        }
+        void RefreshDisplays(string requested)
+        {
+            refreshingDisplays=true;
+            try {
+                var targets=DisplayTarget.Enumerate();
+                var picker=UI<ComboBox>("PlaybackDisplay");
+                picker.ItemsSource=targets;
+                picker.SelectedItem=targets.FirstOrDefault(d=>d.DeviceName==requested) ?? targets.FirstOrDefault(d=>d.Primary) ?? targets.FirstOrDefault();
+            } finally { refreshingDisplays=false; }
+        }
         public sealed class Peer
         {
             public string Name { get; set; }
@@ -236,24 +284,27 @@ namespace LumaRelay
                 throw new InvalidOperationException("Close the running enhanced view before opening another.");
             Show(source == "Direct" ? "Opening chiaki-ng. The first launch downloads and verifies the direct client…" : "Opening " + titles[Array.IndexOf(names,source)] + "…");
             var r = await Script("sources/Start-Source.ps1", "-Source",source);
+            long handle;
+            if (!long.TryParse(Field(r,"windowHandle"),out handle) || handle==0)
+                throw new InvalidOperationException("Open the source and connect to a game, then try the enhanced view again.");
+            var target=UI<ComboBox>("PlaybackDisplay").SelectedItem as DisplayTarget;
+            if(target!=null) target.MoveSourceWindow(new IntPtr(handle));
             if (!enhance)
             {
                 Show("Opened " + titles[Array.IndexOf(names,source)] + ". The enhanced view is available when your game is visible.");
                 return;
             }
-            string hwnd = Field(r,"windowHandle");
-            long handle;
-            if (!long.TryParse(hwnd,out handle) || handle==0)
-                throw new InvalidOperationException("Open the source and connect to a game, then try the enhanced view again.");
             string mode = modeIds[UI<ComboBox>("Mode").SelectedIndex];
             string mult = (UI<ComboBox>("Multiplier").SelectedIndex+1).ToString(CultureInfo.InvariantCulture);
-            string exe = Path.Combine(Program.Root,"engine","bin","LumaPlayer.exe");
-            if (!File.Exists(exe)) throw new FileNotFoundException("LumaPlayer is missing. Use the complete Windows release ZIP.");
+            string exe = Path.Combine(Program.Root,"engine","bin","CadrivectPlayer.exe");
+            if (!File.Exists(exe)) throw new FileNotFoundException("CadrivectPlayer is missing. Use the complete Windows release ZIP.");
             string reportDir = Path.Combine(Path.GetDirectoryName(preferences),"sessions");
             Directory.CreateDirectory(reportDir);
             string report = Path.Combine(reportDir,Guid.NewGuid().ToString("N")+".json");
             var p = new Process();
-            p.StartInfo = new ProcessStartInfo(exe, "--hwnd "+handle.ToString(CultureInfo.InvariantCulture)+" --mode "+mode+" --multiplier "+mult+" --report "+Quote(report)) { UseShellExecute=false, WorkingDirectory=Path.GetDirectoryName(exe) };
+            string options=" --display "+Quote(SelectedDisplayName())+" --resolution "+resolutionIds[UI<ComboBox>("RenderResolution").SelectedIndex]
+                +" --hdr "+hdrIds[UI<ComboBox>("HdrOutput").SelectedIndex]+(UI<CheckBox>("Fullscreen").IsChecked==true ? "" : " --windowed");
+            p.StartInfo = new ProcessStartInfo(exe, "--hwnd "+handle.ToString(CultureInfo.InvariantCulture)+" --mode "+mode+" --multiplier "+mult+options+" --report "+Quote(report)) { UseShellExecute=false, WorkingDirectory=Path.GetDirectoryName(exe) };
             p.EnableRaisingEvents = true;
             p.Exited += delegate {
                 if (!window.Dispatcher.HasShutdownStarted)
@@ -272,8 +323,10 @@ namespace LumaRelay
         {
             try {
                 var result = json.Deserialize<Dictionary<string,object>>(File.ReadAllText(file));
-                return string.Format(CultureInfo.CurrentCulture, "Session ended. {0} source FPS · {1} submitted FPS · {2} interpolated frames.",
-                    Field(result,"sourceFps"),Field(result,"submittedFps"),Field(result,"generated"));
+                string effect=Field(result,"activeNvidiaEffect");
+                string label=effect=="rtxvideo" ? "RTX Video SR" : effect.ToUpperInvariant();
+                return string.Format(CultureInfo.CurrentCulture, "Session ended. {0}{1} source FPS · {2} submitted FPS · {3} interpolated frames.",
+                    label.Length==0 ? "" : label+" · ",Field(result,"sourceFps"),Field(result,"submittedFps"),Field(result,"generated"));
             } catch (IOException) {} catch (UnauthorizedAccessException) {} catch (ArgumentException) {} catch (InvalidOperationException) {}
             return "Enhanced view closed.";
         }
@@ -284,6 +337,7 @@ namespace LumaRelay
                 ? "Opening streaming tools. First use downloads and verifies the required component…" : "Checking the streaming host…");
             var arguments = new List<string> { "-Action", action };
             arguments.AddRange(args);
+            if(action=="Play" && UI<CheckBox>("ClientHdr").IsChecked==true) arguments.Add("-Hdr");
             var r = await Script("streaming/Relay.ps1", arguments.ToArray());
             string message = Field(r,"message");
             if (action=="Status" && string.Equals(Field(r,"controllerDriver"),"False",StringComparison.OrdinalIgnoreCase))
@@ -346,7 +400,10 @@ namespace LumaRelay
         {
             try {
                 Directory.CreateDirectory(Path.GetDirectoryName(preferences));
+                var hostTarget=UI<ComboBox>("HostDisplay").SelectedItem as DisplayTarget;
                 var settings = new { mode=UI<ComboBox>("Mode").SelectedIndex, multiplier=UI<ComboBox>("Multiplier").SelectedIndex,
+                    display=SelectedDisplayName(), resolution=UI<ComboBox>("RenderResolution").SelectedIndex,hdr=UI<ComboBox>("HdrOutput").SelectedIndex, fullscreen=UI<CheckBox>("Fullscreen").IsChecked==true,
+                    clientHdr=UI<CheckBox>("ClientHdr").IsChecked==true,hostDisplay=hostTarget==null ? "" : hostTarget.DeviceName,
                     address=UI<TextBox>("HostAddress").Text.Trim(), bind=SelectedIP(), source=source, page=page, quality=UI<ComboBox>("Quality").SelectedIndex };
                 string temp = preferences+"."+Guid.NewGuid().ToString("N")+".tmp";
                 File.WriteAllText(temp,json.Serialize(settings));

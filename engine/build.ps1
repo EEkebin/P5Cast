@@ -39,7 +39,12 @@ $refs = @('/r:System.Windows.Forms.dll','/r:System.Drawing.dll',"/r:$framework\S
 $refs += Get-ChildItem (Join-Path $env:WINDIR 'System32\WinMetadata') -Filter '*.winmd' | ForEach-Object { "/r:$($_.FullName)" }
 $refs += 'SharpDX','SharpDX.DXGI','SharpDX.Direct3D11' | ForEach-Object { "/r:$intermediate\$_.dll" }
 $resources = Get-ChildItem $intermediate -Filter '*.cso' | ForEach-Object { "/resource:$($_.FullName),$($_.Name)" }
-& $csc /nologo /target:winexe /platform:x64 /optimize+ @refs @resources "/out:$OutDir\LumaPlayer.exe" "$PSScriptRoot\Player.cs" "$PSScriptRoot\Renderer.cs" "$PSScriptRoot\Capture.cs"
+$playerFiles=@('Player.cs','Renderer.cs','Capture.cs','Renderer.Nvidia.cs','HdrPipeline.cs','DisplayHdr.cs','DisplayTarget.cs',
+    'optical\NvidiaOpticalFlow.cs','nvidia\NgxVideo.cs','rtxvideo\RtxVideo.cs') | ForEach-Object { Join-Path $PSScriptRoot $_ }
+& $csc /nologo /target:winexe /platform:x64 /optimize+ "/win32icon:$PSScriptRoot\..\app\assets\mark.ico" @refs @resources "/out:$OutDir\CadrivectPlayer.exe" @playerFiles
 if ($LASTEXITCODE) { throw 'Player compilation failed.' }
 Copy-Item "$PSScriptRoot\third_party\SharpDX-LICENSE.txt","$PSScriptRoot\third_party\FSR-LICENSE.txt" -Destination $OutDir -Force
-Write-Output (Join-Path $OutDir 'LumaPlayer.exe')
+Copy-Item "$PSScriptRoot\optical\NVIDIA-OPTICAL-FLOW-LICENSE.txt" -Destination $OutDir -Force
+& "$PSScriptRoot\nvidia\Build.ps1" -OutDir $OutDir
+& "$PSScriptRoot\rtxvideo\Build.ps1" -OutDir $OutDir
+Write-Output (Join-Path $OutDir 'CadrivectPlayer.exe')

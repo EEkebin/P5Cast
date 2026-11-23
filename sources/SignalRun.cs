@@ -8,7 +8,7 @@ using System.Media;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
-namespace LumaRelay
+namespace Cadrivect
 {
     // A self-contained endless runner doubles as a moving source for a streaming test.
     sealed class SignalRun : Form
@@ -56,7 +56,7 @@ namespace LumaRelay
 
         SignalRun()
         {
-            Text = "Signal Run | LumaRelay";
+            Text = "Signal Run | Cadrivect";
             ClientSize = new Size(960, 540);
             MinimumSize = new Size(500, 310);
             StartPosition = FormStartPosition.CenterScreen;

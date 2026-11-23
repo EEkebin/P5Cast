@@ -4,42 +4,128 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
 
 internal sealed class PlayerWindow : Form
 {
-    readonly bool overlay;
+    const int Style=-16, ExtendedStyle=-20;
+    const int OverlappedWindow=0x00cf0000, Popup=unchecked((int)0x80000000);
+    const int OverlayStyles=0x08000000 | 0x20 | 0x80, AppWindow=0x40000;
+    const int NoActivateAndFrameChanged=0x30;
+    [DllImport("user32.dll",EntryPoint="GetWindowLongW")] static extern int GetStyle(IntPtr hwnd,int index);
+    [DllImport("user32.dll",EntryPoint="SetWindowLongW")] static extern int SetStyle(IntPtr hwnd,int index,int value);
+    [DllImport("user32.dll",SetLastError=true)] static extern bool SetWindowPos(IntPtr hwnd,IntPtr after,int x,int y,int w,int h,int flags);
+    bool fullscreen, quitRegistered, displayChanged;
+    readonly IntPtr source;
+    readonly bool moveSource;
+    readonly Size chosenSize;
+    DisplayTarget target;
+    Rectangle restored;
     public bool Compare;
+    public bool Fullscreen { get { return fullscreen; } }
     public bool Ended { get; private set; }
-    public PlayerWindow(IntPtr source,bool windowed)
+    public PlayerWindow(IntPtr source,DisplayTarget target,Size chosenSize,bool windowed)
     {
-        overlay=!windowed;
-        Text="LumaRelay Player"; BackColor=Color.Black;
+        this.source=source; this.target=target; this.chosenSize=chosenSize;
+        moveSource=DisplayTarget.IsPlaybackSource(source);
+        Text="Cadrivect Player"; BackColor=Color.Black; KeyPreview=true;
+        AutoScaleMode=AutoScaleMode.None;
         StartPosition=FormStartPosition.Manual;
-        var monitor=Screen.FromHandle(source);
-        if(overlay)
-        {
-            FormBorderStyle=FormBorderStyle.None;
-            Bounds=monitor.Bounds; TopMost=true; ShowInTaskbar=false;
-        }
-        else
-        {
-            Size=new Size(Math.Min(960,monitor.WorkingArea.Width),Math.Min(570,monitor.WorkingArea.Height));
-            Location=new Point(monitor.WorkingArea.Left+(monitor.WorkingArea.Width-Width)/2,monitor.WorkingArea.Top+(monitor.WorkingArea.Height-Height)/2);
-            MinimumSize=new Size(260,180);
-        }
+        MinimumSize=new Size(240,150);
+        restored=InitialWindow(target);
+        fullscreen=!windowed;
+        Bounds=fullscreen ? target.Bounds : restored;
+        if(moveSource) target.MoveSourceWindow(source);
+    }
+    Rectangle InitialWindow(DisplayTarget display)
+    {
+        var area=display.WorkingArea;
+        var client=chosenSize.IsEmpty ? new Size(960,540):chosenSize;
+        Size border=SizeFromClientSize(new Size(0,0));
+        double fit=Math.Min(1,Math.Min((double)Math.Max(1,area.Width-border.Width)/client.Width,
+                                      (double)Math.Max(1,area.Height-border.Height)/client.Height));
+        var outer=new Size(Math.Min(area.Width,(int)(client.Width*fit)+border.Width),
+                           Math.Min(area.Height,(int)(client.Height*fit)+border.Height));
+        return Centered(outer,area);
+    }
+    static Rectangle Centered(Size size,Rectangle area)
+    {
+        int w=Math.Min(size.Width,area.Width), h=Math.Min(size.Height,area.Height);
+        return new Rectangle(area.Left+(area.Width-w)/2,area.Top+(area.Height-h)/2,w,h);
+    }
+    void ApplyBounds(Rectangle rect)
+    {
+        if(!SetWindowPos(Handle,new IntPtr(fullscreen ? -1 : -2),rect.X,rect.Y,rect.Width,rect.Height,NoActivateAndFrameChanged))
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
     }
     public void EnableShortcuts()
     {
-        if(overlay && !WindowsApi.RegisterHotKey(Handle,1,0x4003,(int)Keys.Q))
+        DisplayTarget.MarkPlayer(Handle,true);
+        quitRegistered=WindowsApi.RegisterHotKey(Handle,1,0x4003,(int)Keys.Q);
+        if(fullscreen && !quitRegistered)
             throw new InvalidOperationException("Ctrl+Alt+Q is already assigned. Close the other player or start in windowed mode.");
         WindowsApi.RegisterHotKey(Handle,2,0x4003,(int)Keys.B);
+        WindowsApi.RegisterHotKey(Handle,3,0x4003,(int)Keys.Enter);
+        WindowsApi.RegisterHotKey(Handle,4,0x4003,(int)Keys.Right);
+        ApplyBounds(fullscreen ? target.Bounds : restored);
     }
-    protected override bool ShowWithoutActivation { get { return overlay; } }
+    public void ToggleFullscreen()
+    {
+        if(!fullscreen && !quitRegistered) return;
+        target=DisplayTarget.Select(DisplayTarget.DeviceForWindow(Handle),source);
+        if(!fullscreen) {
+            restored=WindowState==FormWindowState.Normal ? Bounds : RestoreBounds;
+            if(WindowState!=FormWindowState.Normal) WindowState=FormWindowState.Normal;
+        }
+        fullscreen=!fullscreen;
+        var style=GetStyle(Handle,Style);
+        var extended=GetStyle(Handle,ExtendedStyle);
+        SetStyle(Handle,Style,fullscreen ? (style & ~OverlappedWindow)|Popup : (style & ~Popup)|OverlappedWindow);
+        SetStyle(Handle,ExtendedStyle,fullscreen ? (extended & ~AppWindow)|OverlayStyles : (extended & ~OverlayStyles)|AppWindow);
+        ApplyBounds(fullscreen ? target.Bounds : FitRestored(target));
+        if(moveSource && fullscreen) WindowsApi.SetForegroundWindow(source);
+    }
+    Rectangle FitRestored(DisplayTarget destination)
+    {
+        return destination.WorkingArea.Contains(restored) ? restored : Centered(restored.Size,destination.WorkingArea);
+    }
+    void MoveTo(DisplayTarget destination)
+    {
+        target=destination;
+        if(!fullscreen) {
+            var size=WindowState==FormWindowState.Normal ? Bounds.Size : RestoreBounds.Size;
+            if(WindowState!=FormWindowState.Normal) WindowState=FormWindowState.Normal;
+            restored=Centered(size,target.WorkingArea);
+        }
+        if(moveSource) target.MoveSourceWindow(source);
+        ApplyBounds(fullscreen ? target.Bounds : restored);
+    }
+    void CycleDisplay()
+    {
+        var displays=DisplayTarget.Enumerate();
+        string current=DisplayTarget.DeviceForWindow(Handle);
+        for(int i=0;i<displays.Length;i++) if(displays[i].DeviceName==current) {
+            if(displays.Length>1) MoveTo(displays[(i+1)%displays.Length]);
+            return;
+        }
+    }
+    public bool ConsumeDisplayChange()
+    {
+        if(!displayChanged) return false;
+        displayChanged=false;
+        target=DisplayTarget.Select(DisplayTarget.DeviceForWindow(Handle),source);
+        if(fullscreen) ApplyBounds(target.Bounds);
+        return true;
+    }
+    protected override bool ShowWithoutActivation { get { return fullscreen; } }
     protected override CreateParams CreateParams
     {
-        get { var cp=base.CreateParams; if(overlay) cp.ExStyle |= 0x08000000 | 0x00000020; return cp; }
+        get { var cp=base.CreateParams;
+            if(fullscreen) { cp.Style=(cp.Style & ~OverlappedWindow)|Popup; cp.ExStyle=(cp.ExStyle & ~AppWindow)|OverlayStyles; }
+            return cp;
+        }
     }
     protected override void OnKeyDown(KeyEventArgs e)
     {
@@ -52,14 +138,28 @@ internal sealed class PlayerWindow : Form
         {
             if(message.WParam.ToInt32()==1) Close();
             if(message.WParam.ToInt32()==2) Compare=!Compare;
+            if(message.WParam.ToInt32()==3) ToggleFullscreen();
+            if(message.WParam.ToInt32()==4) CycleDisplay();
             return;
         }
-        if(overlay && message.Msg==0x0084) { message.Result=new IntPtr(-1); return; }
+        if(message.Msg==DisplayTarget.MoveMessage) {
+            var next=DisplayTarget.FromMonitor(message.WParam);
+            if(next!=null) { MoveTo(next); message.Result=new IntPtr(1); }
+            return;
+        }
+        if(message.Msg==0x007e) displayChanged=true; // WM_DISPLAYCHANGE
+        if(message.Msg==0x02e0) displayChanged=true; // WM_DPICHANGED
+        if(message.Msg==0x0232 && !fullscreen && moveSource) { // after a finished title-bar drag
+            target=DisplayTarget.Select(DisplayTarget.DeviceForWindow(Handle),source);
+            target.MoveSourceWindow(source);
+        }
+        if(fullscreen && message.Msg==0x0084) { message.Result=new IntPtr(-1); return; }
         base.WndProc(ref message);
     }
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
-        Ended=true; WindowsApi.UnregisterHotKey(Handle,1); WindowsApi.UnregisterHotKey(Handle,2);
+        Ended=true; DisplayTarget.MarkPlayer(Handle,false);
+        for(int id=1;id<=4;id++) WindowsApi.UnregisterHotKey(Handle,id);
         base.OnFormClosed(e);
     }
 }
@@ -69,7 +169,7 @@ internal sealed class SampleWindow : Form
     public int Tick;
     public SampleWindow()
     {
-        Text="LumaRelay capture test source"; ClientSize=new Size(480,270);
+        Text="Cadrivect capture test source"; ClientSize=new Size(480,270);
         StartPosition=FormStartPosition.Manual; Location=new Point(50,60);
         DoubleBuffered=true;
     }
@@ -98,11 +198,17 @@ internal static class Player
         {
             WindowsApi.SetProcessDpiAwarenessContext(new IntPtr(-4));
             Application.EnableVisualStyles();
-            bool windowed=testing || Array.IndexOf(args,"--windowed")>=0;
+            bool windowed=Array.IndexOf(args,"--windowed")>=0 || (testing && Array.IndexOf(args,"--fullscreen")<0);
+            string displayName=Option(args,"--display","primary");
+            string resolution=Option(args,"--resolution","native").ToLowerInvariant();
+            Size raster=DisplayTarget.ResolutionLimit(resolution);
+            string hdr=Option(args,"--hdr","auto").ToLowerInvariant();
+            if(hdr!="auto" && hdr!="off" && hdr!="hdr10") throw new ArgumentException("Choose auto, off, or hdr10 for --hdr.");
             string mode=Option(args,"--mode","fsr").ToLowerInvariant();
             string filename=Option(args,"--report",null);
             int multiplier=int.Parse(Option(args,"--multiplier",testing ? "3":"1"),CultureInfo.InvariantCulture);
-            if(mode!="fsr" && mode!="sharp" && mode!="original") throw new ArgumentException("Mode must be fsr, sharp, or original.");
+            bool vendor=mode=="dlss" || mode=="dlaa" || mode=="rtxvideo";
+            if(!vendor && mode!="fsr" && mode!="sharp" && mode!="original") throw new ArgumentException("Unknown picture mode: "+mode);
             if(multiplier<1 || multiplier>4) throw new ArgumentException("Multiplier must be between 1 and 4.");
             int seconds=int.Parse(Option(args,"--seconds",testing ? "4":"0"),CultureInfo.InvariantCulture);
             using(var sample=testing ? new SampleWindow():null)
@@ -110,12 +216,13 @@ internal static class Player
                 IntPtr source;
                 if(testing) { sample.Show(); sample.Update(); source=sample.Handle; }
                 else source=FindSource(args);
-                using(var window=new PlayerWindow(source,windowed))
+                var destination=DisplayTarget.Select(displayName,source);
+                using(var window=new PlayerWindow(source,destination,raster,windowed))
                 {
                     window.Show(); window.EnableShortcuts();
                     if(!testing) WindowsApi.SetForegroundWindow(source);
-                    using(var renderer=new Renderer(window.Handle,window.ClientSize))
-                    using(var capture=new WindowCapture(source,renderer.Device))
+                    using(var renderer=new Renderer(window.Handle,window.ClientSize,raster,hdr,mode))
+                    using(var capture=new WindowCapture(source,renderer.Device,renderer.HdrEnabled))
                     {
                         var clock=Stopwatch.StartNew();
                         double nextSample=0, previousTime=0, period=16.667, due=0, pairStart=0, lastSubmit=-1000;
@@ -143,10 +250,14 @@ internal static class Player
                                 {
                                     Thread.Sleep(30); step=0; previousTime=0; continue;
                                 }
+                                if(window.ConsumeDisplayChange()) renderer.InvalidateDisplay();
                                 renderer.Resize(window.ClientSize);
                                 double timestamp;
-                                if(capture.Read(renderer,multiplier>1 || testing,out timestamp))
+                                if(capture.Read(renderer,multiplier>1 || testing || vendor,out timestamp))
                                 {
+                                    double elapsed=timestamp-previousTime;
+                                    bool continuous=renderer.HasPrevious && elapsed>0 && elapsed<120;
+                                    renderer.SetFrameTiming(elapsed,continuous);
                                     // Real images always take priority if the next capture arrived early.
                                     if(step>0 && renderer.HasPrevious)
                                     {
@@ -155,8 +266,6 @@ internal static class Player
                                         lastSubmit=clock.Elapsed.TotalMilliseconds;
                                         RecordAge(liveFrameAges,previousTime,testing || filename!=null);
                                     }
-                                    double elapsed=timestamp-previousTime;
-                                    bool continuous=renderer.HasPrevious && elapsed>0 && elapsed<120;
                                     if(continuous) period=period*.66 + Math.Max(4,Math.Min(100,elapsed))*.34;
                                     previousTime=timestamp;
                                     if(firstInput==0) firstInput=timestamp;
@@ -193,11 +302,18 @@ internal static class Player
                             "\"sampledFrames\":{10},\"sampleMinLuma\":{11},\"sampleMaxLuma\":{12}",
                             renderer.Captured,renderer.Presented,renderer.Generated,samples.Count,mode,multiplier,renderer.Duplicates,
                             inputFps,renderer.Presented/testSeconds,liveFrameAges.Count==0 ? 0:liveFrameAges[median],renderer.SampledFrames,
-                            renderer.SampledFrames==0 ? 0:renderer.SampleMinLuma,renderer.SampleMaxLuma)+"}";
+                            renderer.SampledFrames==0 ? 0:renderer.SampleMinLuma,renderer.SampleMaxLuma)
+                            +",\"activeNvidiaEffect\":\""+renderer.ActiveEffect+"\",\"nvidiaEvaluations\":"+renderer.VendorEvaluations
+                            +",\"hardwareMotionPairs\":"+renderer.HardwareMotionPairs
+                            +",\"display\":"+JsonString(renderer.DisplayName)+",\"resolution\":"+JsonString(resolution)
+                            +",\"fullscreen\":"+(window.Fullscreen ? "true":"false")+",\"hdrEnabled\":"+(renderer.HdrEnabled ? "true":"false")
+                            +",\"outputWidth\":"+renderer.OutputSize.Width+",\"outputHeight\":"+renderer.OutputSize.Height
+                            +",\"renderWidth\":"+renderer.RenderSize.Width+",\"renderHeight\":"+renderer.RenderSize.Height
+                            +",\"outputStatus\":"+JsonString(renderer.OutputStatus)+"}";
                         if(filename!=null) File.WriteAllText(filename,report);
                         Console.WriteLine(report);
                         if(testing && (renderer.Captured<8 || renderer.Presented<8 || samples.Count<5 ||
-                            (multiplier>1 && renderer.Generated<1))) throw new InvalidOperationException("GPU capture self-test failed. "+report);
+                            (multiplier>1 && renderer.Generated<1) || (vendor && renderer.VendorEvaluations<5))) throw new InvalidOperationException("GPU capture self-test failed. "+report);
                     }
                 }
             }
@@ -208,7 +324,7 @@ internal static class Player
             string log=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"LumaRelay","player-error.log");
             Directory.CreateDirectory(Path.GetDirectoryName(log)); File.WriteAllText(log,DateTime.Now+Environment.NewLine+ex);
             Console.Error.WriteLine(ex.Message);
-            if(!testing && Array.IndexOf(args,"--quiet")<0) MessageBox.Show(ex.Message,"LumaRelay Player",MessageBoxButtons.OK,MessageBoxIcon.Error);
+            if(!testing && Array.IndexOf(args,"--quiet")<0) MessageBox.Show(ex.Message,"Cadrivect Player",MessageBoxButtons.OK,MessageBoxIcon.Error);
             return 1;
         }
     }
@@ -218,6 +334,16 @@ internal static class Player
         if(index<0) return fallback;
         if(index+1>=args.Length) throw new ArgumentException("Missing value for "+key);
         return args[index+1];
+    }
+    static string JsonString(string value)
+    {
+        var text=new System.Text.StringBuilder("\"");
+        foreach(char c in value ?? "") {
+            if(c=='\\' || c=='"') text.Append('\\').Append(c);
+            else if(c<32) text.Append("\\u").Append(((int)c).ToString("X4",CultureInfo.InvariantCulture));
+            else text.Append(c);
+        }
+        return text.Append('"').ToString();
     }
     static void RecordAge(List<double> samples,double timestamp,bool measuring)
     {

@@ -80,15 +80,17 @@ internal sealed class WindowCapture : IDisposable
     readonly Direct3D11CaptureFramePool pool;
     readonly GraphicsCaptureSession session;
     Windows.Graphics.SizeInt32 size;
-    const DirectXPixelFormat Format=DirectXPixelFormat.B8G8R8A8UIntNormalized;
-    public WindowCapture(IntPtr source, Device renderDevice)
+    DirectXPixelFormat format;
+    static DirectXPixelFormat CaptureFormat(bool hdr) { return hdr ? DirectXPixelFormat.R16G16B16A16Float : DirectXPixelFormat.B8G8R8A8UIntNormalized; }
+    public WindowCapture(IntPtr source, Device renderDevice,bool hdr)
     {
         if (!GraphicsCaptureSession.IsSupported()) throw new InvalidOperationException("This Windows session does not support window capture.");
         window=source;
         device=WindowsApi.WinRTDevice(renderDevice);
         item=WindowsApi.CaptureItem(window);
         size=item.Size;
-        pool=Direct3D11CaptureFramePool.CreateFreeThreaded(device,Format,2,size);
+        format=CaptureFormat(hdr);
+        pool=Direct3D11CaptureFramePool.CreateFreeThreaded(device,format,2,size);
         session=pool.CreateCaptureSession(item);
         session.IsCursorCaptureEnabled=false;
         session.StartCapture();
@@ -96,6 +98,12 @@ internal sealed class WindowCapture : IDisposable
     public bool Read(Renderer renderer, bool deduplicate, out double timestamp)
     {
         timestamp=0;
+        if(format!=CaptureFormat(renderer.HdrEnabled))
+        {
+            format=CaptureFormat(renderer.HdrEnabled);
+            pool.Recreate(device,format,2,size);
+            return false;
+        }
         using(var frame=pool.TryGetNextFrame())
         {
             if(frame==null) return false;
@@ -104,13 +112,18 @@ internal sealed class WindowCapture : IDisposable
             {
                 bool fresh;
                 using(var texture=WindowsApi.Texture(frame.Surface))
+                {
+                    // WGC may deliver queued surfaces from before Recreate. Their DXGI format
+                    // must match the new pool before the renderer allocates its history textures.
+                    if ((int)texture.Description.Format!=(int)format) return false;
                     fresh=renderer.Receive(texture,WindowsApi.ClientCrop(window,size.Width,size.Height),deduplicate);
+                }
                 timestamp=frame.SystemRelativeTime.TotalMilliseconds;
                 return fresh;
             }
             size=frame.ContentSize;
         }
-        pool.Recreate(device,Format,2,size);
+        pool.Recreate(device,format,2,size);
         return false;
     }
     public void Dispose() { session.Dispose(); pool.Dispose(); device.Dispose(); }

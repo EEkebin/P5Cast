@@ -5,7 +5,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Runtime.InteropServices;
 
-namespace LumaRelay.Streaming {
+namespace Cadrivect.Streaming {
     public static class HostApi {
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         private static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string className, string title);

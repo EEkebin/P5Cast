@@ -1,23 +1,26 @@
 [CmdletBinding()]
-param([string]$Version = '0.1.0')
+param([string]$Version = '0.2.0')
 $ErrorActionPreference = 'Stop'
 if ($Version -notmatch '^\d+\.\d+\.\d+(-[a-z0-9.-]+)?$') { throw 'Invalid version.' }
 $dist = Join-Path $PSScriptRoot 'dist'
 $stage = Join-Path $dist ('stage-' + [Guid]::NewGuid().ToString('N'))
-$bundle = Join-Path $stage 'LumaRelay'
-$package = Join-Path $dist "LumaRelay-$Version-windows-x64.zip"
+$bundle = Join-Path $stage 'Cadrivect'
+$package = Join-Path $dist "Cadrivect-$Version-windows-x64.zip"
 [IO.Directory]::CreateDirectory($bundle) | Out-Null
 try {
     foreach ($folder in 'app\assets','sources','streaming','engine\bin') {
         [IO.Directory]::CreateDirectory((Join-Path $bundle $folder)) | Out-Null
     }
-    foreach ($file in 'LumaRelay.exe','Install.ps1','Install.cmd','README.md','app\Main.xaml','app\assets\aurora.jpg') {
+    foreach ($file in 'Cadrivect.exe','Install.ps1','Install.cmd','README.md','app\Main.xaml','app\assets\aurora.jpg','app\assets\mark.ico') {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination (Join-Path $bundle $file)
     }
     foreach ($folder in 'sources','streaming') {
         Get-ChildItem -File -LiteralPath (Join-Path $PSScriptRoot $folder) | Copy-Item -Destination (Join-Path $bundle $folder)
     }
-    foreach ($file in 'LumaPlayer.exe','SharpDX.dll','SharpDX.Direct3D11.dll','SharpDX.DXGI.dll','SharpDX-LICENSE.txt','FSR-LICENSE.txt') {
+    $runtimeFiles = @('CadrivectPlayer.exe','SharpDX.dll','SharpDX.Direct3D11.dll','SharpDX.DXGI.dll','SharpDX-LICENSE.txt','FSR-LICENSE.txt',
+        'Cadrivect.Ngx.dll','nvngx_dlss.dll','NVIDIA-RTX-LICENSE.txt','Cadrivect.RtxVideo.dll','nvngx_vsr.dll',
+        'NVIDIA_RTX_Video_SDK_License.pdf','NVIDIA-OPTICAL-FLOW-LICENSE.txt')
+    foreach ($file in $runtimeFiles) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot "engine\bin\$file") -Destination (Join-Path $bundle "engine\bin\$file")
     }
     Add-Type -AssemblyName System.IO.Compression.FileSystem

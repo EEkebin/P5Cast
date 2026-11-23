@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('StartHost','StopHost','Status','OpenClient','PairClient','Play','ApprovePin','InstallClient','InstallHost','ListClients','RevokeClient')]
+    [ValidateSet('StartHost','StopHost','Status','ResolveDisplay','OpenClient','PairClient','Play','ApprovePin','InstallClient','InstallHost','ListClients','RevokeClient')]
     [string] $Action = 'Status',
     [string] $Address,
     [ValidatePattern('^[0-9]{4}$')][string] $Pin,
@@ -9,6 +9,8 @@ param(
     [ValidateRange(10,240)][int] $Fps,
     [ValidateRange(1,250)][int] $Mbps,
     [ValidateSet('auto','H.264','HEVC','AV1')][string] $Codec,
+    [ValidatePattern('^\\\\\.\\DISPLAY[1-9][0-9]*$')][string] $DisplayDevice,
+    [switch] $Hdr,
     [switch] $Windowed
 )
 $ErrorActionPreference = 'Stop'
@@ -102,14 +104,34 @@ function New-HostCredential {
     Write-Text $secretFile (ConvertFrom-SecureString (ConvertTo-SecureString $password -AsPlainText -Force))
 }
 function Invoke-HostApi($Session, $Route, $Body) {
-    if (!('LumaRelay.Streaming.HostApi' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'HostApi.cs') }
+    if (!('Cadrivect.Streaming.HostApi' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'HostApi.cs') }
     $protectedPassword = Get-Content -Raw -LiteralPath $secretFile | ConvertTo-SecureString
     $cred = New-Object Net.NetworkCredential('lumarelay', $protectedPassword)
     $url = 'https://{0}:{1}/api/{2}' -f $Session.address,($port+1),$Route
-    $method = [LumaRelay.Streaming.HostApi]
+    $method = [Cadrivect.Streaming.HostApi]
     if ($null -eq $Body) { $raw = $method::Request($url,$certificate,$cred.Password,[System.Management.Automation.Language.NullString]::Value) }
     else { $raw = $method::Request($url,$certificate,$cred.Password,($Body | ConvertTo-Json -Compress)) }
     return ($raw | ConvertFrom-Json)
+}
+function Resolve-HostDisplay([string]$Device) {
+    if (!$Device) { throw 'Choose a Windows display to resolve.' }
+    if (!('Cadrivect.Streaming.SunshineDisplay' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'SunshineDisplay.cs') }
+    return [Cadrivect.Streaming.SunshineDisplay]::Resolve($Device)
+}
+function Confirm-HostDisplay($Log,$Device,$Id) {
+    # Check the current binary's own documented startup inventory before announcing readiness.
+    $stream = [IO.File]::Open($Log,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+    try {
+        $reader = New-Object IO.StreamReader($stream)
+        try { $text = $reader.ReadToEnd() } finally { $reader.Dispose() }
+    } finally { $stream.Dispose() }
+    $marker = 'Currently available display devices:'
+    $start = $text.LastIndexOf($marker,[StringComparison]::Ordinal)
+    if ($start -lt 0) { throw 'Sunshine has not reported its active displays yet.' }
+    $json = [regex]::Match($text.Substring($start+$marker.Length),'(?ms)^\s*(\[.*?^\])')
+    if (!$json.Success) { throw 'Sunshine has not finished reporting its active displays.' }
+    $selectedOutputs = @(($json.Groups[1].Value | ConvertFrom-Json) | Where-Object { $_.display_name -eq $Device })
+    if ($selectedOutputs.Count -ne 1 -or $selectedOutputs[0].device_id -ne $Id) { throw 'Sunshine could not confirm the requested display. Refresh the display selection and restart the host.' }
 }
 function Start-RelayHost {
     $chosen = $Address
@@ -118,19 +140,21 @@ function Start-RelayHost {
     if (!$chosen) { $chosen = '127.0.0.1' }
     if (!(Test-PrivateAddress $chosen) -or ($chosen -ne '127.0.0.1' -and $available.address -notcontains $chosen)) { throw 'Choose a private IPv4 address assigned to an active LAN or VPN adapter on this host.' }
     $current = Get-Session
+    $displayId = if ($DisplayDevice) { Resolve-HostDisplay $DisplayDevice } else { '' }
     if ($current) {
         if ($current.address -ne $chosen) { throw "Already hosting on $($current.address). Stop hosting before changing the address." }
-        return @{ok=$true; message="Already hosting on $chosen."; address=$chosen}
+        if ([string]$current.displayId -ne $displayId) { throw 'Stop the host before changing the shared display.' }
+        return @{ok=$true; message="Already hosting on $chosen."; address=$chosen; displayDevice=$current.displayDevice; displayId=$current.displayId}
     }
     $binary = Install-Binary sunshine
     [IO.Directory]::CreateDirectory($private) | Out-Null
     New-HostCredential
     $apps = Join-Path $private 'apps.json'
-    Write-Text $apps '{"env":{},"apps":[{"name":"LumaRelay","image-path":"desktop.png"}]}'
+    Write-Text $apps '{"env":{},"apps":[{"name":"Cadrivect","image-path":"desktop.png"}]}'
     $configPath = Join-Path $private 'sunshine.conf'
     $log = Join-Path $private 'sunshine.log'
     $config = @(
-        'sunshine_name = LumaRelay', "port = $port", "bind_address = $chosen", 'address_family = ipv4',
+        'sunshine_name = Cadrivect', "port = $port", "bind_address = $chosen", 'address_family = ipv4',
         "external_ip = $chosen", 'upnp = disabled', 'origin_web_ui_allowed = lan',
         'lan_encryption_mode = 2', 'wan_encryption_mode = 2', 'system_tray = disabled',
         'install_steam_audio_drivers = disabled', 'nvenc_opengl_vulkan_on_dxgi = disabled', 'nvenc_latency_over_power = disabled',
@@ -138,19 +162,22 @@ function Start-RelayHost {
         "pkey = $private\host.key", "cert = $certificate", "credentials_file = $private\credentials.json",
         "file_state = $private\paired.json", "file_apps = $apps", "log_path = $log"
     ) -join [Environment]::NewLine
+    if ($displayId) { $config += [Environment]::NewLine + "output_name = $displayId" }
     Write-Text $configPath $config
     $proc = Start-Process -FilePath $binary -ArgumentList ('"{0}"' -f $configPath) -WorkingDirectory (Split-Path $binary) -WindowStyle Hidden -PassThru
     try {
-        $session = @{processId=$proc.Id; startTicks=$proc.StartTime.ToUniversalTime().Ticks.ToString(); address=$chosen}
+        $session = @{processId=$proc.Id; startTicks=$proc.StartTime.ToUniversalTime().Ticks.ToString(); address=$chosen; displayDevice=$DisplayDevice; displayId=$displayId}
         $deadline = [DateTime]::UtcNow.AddSeconds(75)
         do {
             if ($proc.HasExited) { throw "Sunshine exited ($($proc.ExitCode)). Check $log for an occupied port or encoder error." }
-            try {
-                if ((Test-Path -LiteralPath $certificate) -and $null -ne (Invoke-HostApi $session 'pin' $null)) {
-                    Write-Text $sessionFile ($session | ConvertTo-Json -Compress)
-                    return @{ok=$true; message="Hosting on $chosen. Pair a client, then open your game on this display."; address=$chosen; log=$log}
-                }
-            } catch { $lastFailure = $_.Exception.GetBaseException().Message }
+            $ready = $false
+            try { $ready = (Test-Path -LiteralPath $certificate) -and $null -ne (Invoke-HostApi $session 'pin' $null) }
+            catch { $lastFailure = $_.Exception.GetBaseException().Message }
+            if ($ready) {
+                if ($displayId) { Confirm-HostDisplay $log $DisplayDevice $displayId }
+                Write-Text $sessionFile ($session | ConvertTo-Json -Compress)
+                return @{ok=$true; message="Hosting on $chosen. Pair a client, then open your game on the shared display."; address=$chosen; log=$log; displayDevice=$DisplayDevice; displayId=$displayId}
+            }
             Start-Sleep -Milliseconds 250
         } while ([DateTime]::UtcNow -lt $deadline)
         throw "Host management did not become ready. $lastFailure See $log."
@@ -160,8 +187,8 @@ function Start-RelayHost {
     }
 }
 function Stop-OwnedHost($Process) {
-    if (!('LumaRelay.Streaming.HostApi' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'HostApi.cs') }
-    if ([LumaRelay.Streaming.HostApi]::RequestStop($Process.Id) -and $Process.WaitForExit(12000)) { return }
+    if (!('Cadrivect.Streaming.HostApi' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'HostApi.cs') }
+    if ([Cadrivect.Streaming.HostApi]::RequestStop($Process.Id) -and $Process.WaitForExit(12000)) { return }
     $Process.Refresh()
     if (!$Process.HasExited) { $Process.Kill() }
     if (!$Process.WaitForExit(3000)) { throw 'Sunshine is still shutting down.' }
@@ -171,13 +198,65 @@ function Get-Status {
     $addresses = @(Get-LocalAddresses | Sort-Object hasGateway -Descending)
     $vigem = Get-Service -Name ViGEmBus -ErrorAction SilentlyContinue
     return @{ok=$true; message=$(if ($session) {"Hosting on $($session.address)."} else {'Host is stopped.'});
-        running=[bool]$session; address=$session.address; addresses=$addresses;
+        running=[bool]$session; address=$session.address; addresses=$addresses; displayDevice=$session.displayDevice; displayId=$session.displayId;
         controllerDriver=[bool]$vigem; controllerDriverName='ViGEmBus';
         hostInstalled=(Test-Path -LiteralPath (Get-BinaryPath sunshine)); clientInstalled=(Test-Path -LiteralPath (Get-BinaryPath moonlight))}
 }
+function Test-SamePcTarget([string]$Target) {
+    $name = $Target.TrimEnd('.')
+    if ($name -eq 'localhost' -or $name.EndsWith('.localhost',[StringComparison]::OrdinalIgnoreCase) -or $name -eq [Environment]::MachineName) { return $true }
+    $literal = [Net.IPAddress]::None
+    if ([Net.IPAddress]::TryParse($Target,[ref]$literal)) { $resolved = @($literal) }
+    else {
+        try { $resolved = [Net.Dns]::GetHostAddresses($Target) }
+        catch { throw 'Could not resolve the host name. Enter its LAN or VPN address to connect.' }
+        if (!$resolved.Count) { throw 'Could not resolve the host name. Enter its LAN or VPN address to connect.' }
+    }
+    $local = @(
+        foreach ($nic in [Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()) {
+            foreach ($entry in $nic.GetIPProperties().UnicastAddresses) { $entry.Address.ToString() }
+        }
+    )
+    foreach ($ip in $resolved) {
+        if ($ip.IsIPv4MappedToIPv6) { $ip = $ip.MapToIPv4() }
+        if ([Net.IPAddress]::IsLoopback($ip) -or $ip.Equals([Net.IPAddress]::Any) -or $ip.Equals([Net.IPAddress]::IPv6Any) -or $local -contains $ip.ToString()) { return $true }
+    }
+    return $false
+}
+function Confirm-QuietPreviewRuntime([string]$Binary) {
+    # Verified entries in the pinned Moonlight 6.2.0 portable archive. Recheck SDL's
+    # dummy selection before updating these hashes to support a new runtime.
+    $expected = @{
+        'Moonlight.exe'='2F2536A5670A9C3F2A2A9C5E9FB46DFD684CCD9721BE8F2D5AC590B81B7CB0DB'
+        'SDL2.dll'='1DF1B9A1E7C13B2429135DBEB9DECFA4617CD31A1A674A43DDDB8C013CEB211D'
+        'SDL3.dll'='AF1671D2A250EBC4606423E34886ADBF3E709D7820CF74E3FD43A25273996D87'
+    }
+    foreach ($name in $expected.Keys) {
+        $file = Join-Path (Split-Path $Binary) $name
+        if (!(Test-Path -LiteralPath $file -PathType Leaf) -or (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash -ne $expected[$name]) {
+            throw 'The silent preview could not verify its audio runtime. Use the Play page on this PC.'
+        }
+    }
+}
+function Start-QuietPreview($Launch) {
+    # Relay runs as a dedicated child of the dashboard. Keep Start-Process's
+    # detached launch so the dashboard can finish reading the relay's stdout.
+    $settings = @{ML_AUDIO='sdl'; SDL_AUDIODRIVER='dummy'; SDL_AUDIO_DRIVER='dummy'}
+    $prior = @{}
+    foreach ($key in $settings.Keys) { $prior[$key] = [Environment]::GetEnvironmentVariable($key,'Process') }
+    try {
+        foreach ($key in $settings.Keys) { [Environment]::SetEnvironmentVariable($key,$settings[$key],'Process') }
+        return Start-Process @Launch
+    } finally {
+        foreach ($key in $settings.Keys) { [Environment]::SetEnvironmentVariable($key,$prior[$key],'Process') }
+    }
+}
 function Start-RelayClient {
     if ($Action -ne 'OpenClient' -and (!$Address -or $Address -notmatch '^(?=.{1,253}$)[a-zA-Z0-9][a-zA-Z0-9.-]*$')) { throw 'Enter the host IPv4 address or DNS name.' }
+    if ($Action -eq 'Play' -and $Hdr -and $Codec -eq 'H.264') { throw 'Choose Auto, HEVC, or AV1 for HDR streaming.' }
+    $samePc = $Action -eq 'Play' -and (Test-SamePcTarget $Address)
     $binary = Install-Binary moonlight
+    if ($samePc) { Confirm-QuietPreviewRuntime $binary }
     $prefsDir = Join-Path (Split-Path $binary) 'Moonlight Game Streaming Project'
     $prefs = Join-Path $prefsDir 'Moonlight.ini'
     if (!(Test-Path -LiteralPath $prefs)) {
@@ -189,15 +268,20 @@ function Start-RelayClient {
         $arguments = @('pair',$Address)
         if ($Pin) { $arguments += @('--pin',$Pin) }
     } elseif ($Action -eq 'Play') {
-        $arguments = @('stream',$Address,'LumaRelay','--audio-on-host')
+        $arguments = @('stream',$Address,'Cadrivect','--audio-on-host')
         if ($Resolution) { $arguments += "--$Resolution" }
         if ($Fps) { $arguments += @('--fps',"$Fps") }
         if ($Mbps) { $arguments += @('--bitrate',([string]($Mbps*1000))) }
         if ($Codec) { $arguments += @('--video-codec',$Codec) }
+        if ($Hdr) { $arguments += '--hdr' }
         if ($Windowed) { $arguments += @('--display-mode','windowed') }
     }
     $launch = @{FilePath=$binary; WorkingDirectory=(Split-Path $binary); PassThru=$true}
     if ($arguments.Count) { $launch.ArgumentList = $arguments }
+    if ($samePc) {
+        $proc = Start-QuietPreview $launch
+        return @{ok=$true; message='Same-PC video preview. Client audio is muted to prevent feedback.'; clientAudio='muted'; processId=$proc.Id}
+    }
     $proc = Start-Process @launch
     return @{ok=$true; message=$(if ($Action -eq 'PairClient') {'Enter the PIN shown by Moonlight on the host.'} elseif ($Action -eq 'Play') {'Connecting in Moonlight.'} else {'Moonlight opened.'}); processId=$proc.Id}
 }
@@ -217,8 +301,8 @@ function Approve-Pin {
 $mutex = $null
 $locked = $false
 try {
-    if ($Action -ne 'Status') {
-        $mutex = New-Object Threading.Mutex($false,'Local\LumaRelayStreaming')
+    if ($Action -notin 'Status','ResolveDisplay') {
+        $mutex = New-Object Threading.Mutex($false,'Local\CadrivectStreaming')
         try { $locked = $mutex.WaitOne(310000) } catch [Threading.AbandonedMutexException] { $locked = $true }
         if (!$locked) { throw 'Another streaming action is still running.' }
     }
@@ -233,6 +317,7 @@ try {
             @{ok=$true; message='Host stopped.'}
         }
         'Status' { Get-Status }
+        'ResolveDisplay' { @{ok=$true; displayDevice=$DisplayDevice; displayId=(Resolve-HostDisplay $DisplayDevice); message='Shared display resolved.'} }
         'InstallHost' { @{ok=$true; path=(Install-Binary sunshine); message='Sunshine is ready.'} }
         'InstallClient' { @{ok=$true; path=(Install-Binary moonlight); message='Moonlight is ready.'} }
         'ApprovePin' { Approve-Pin }

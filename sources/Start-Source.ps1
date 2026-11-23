@@ -29,17 +29,17 @@ try {
         } until ($window -or $timeout.Elapsed.TotalSeconds -gt 30)
         if (-not $window) { throw "$Source did not open a capture window within 30 seconds." }
     }
-    if (-not ('LumaRelay.SourceFocus' -as [type])) {
-        Add-Type -Namespace LumaRelay -Name SourceFocus -MemberDefinition @'
+    if (-not ('Cadrivect.SourceFocus' -as [type])) {
+        Add-Type -Namespace Cadrivect -Name SourceFocus -MemberDefinition @'
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool IsIconic(System.IntPtr window);
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool ShowWindowAsync(System.IntPtr window, int command);
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr window);
 '@
     }
-    if ([LumaRelay.SourceFocus]::IsIconic($window.MainWindowHandle)) {
-        [void][LumaRelay.SourceFocus]::ShowWindowAsync($window.MainWindowHandle, 9)
+    if ([Cadrivect.SourceFocus]::IsIconic($window.MainWindowHandle)) {
+        [void][Cadrivect.SourceFocus]::ShowWindowAsync($window.MainWindowHandle, 9)
     }
-    [void][LumaRelay.SourceFocus]::SetForegroundWindow($window.MainWindowHandle)
+    [void][Cadrivect.SourceFocus]::SetForegroundWindow($window.MainWindowHandle)
     [pscustomobject]@{
         source = $Source
         processId = $window.Id

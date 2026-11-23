@@ -9,6 +9,7 @@ Texture2D<float4> image : register(t0);
 Texture2D<float4> previous : register(t1);
 Texture2D<float4> flow : register(t2);
 SamplerState linearClamp : register(s0);
+Texture2D<int2> hardwareMotion : register(t3);
 
 struct Vertex { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
 Vertex Fullscreen(uint vertexID : SV_VertexID) {
@@ -66,6 +67,16 @@ float4 Sharp(Vertex v) : SV_Target {
     return float4(saturate(c + (4*c-a-b-e-f)*0.12),1);
 }
 float luma(float3 rgb) { return dot(rgb,float3(.2126,.7152,.0722)); }
+float4 OpticalField(Vertex v) : SV_Target {
+    // S10.5 input is current-to-previous. Our interpolation field uses previous-to-current.
+    float2 backward=float2(hardwareMotion.Load(int3(int2(v.pos.xy),0)))/32.0;
+    float currentLuma=luma(image.SampleLevel(linearClamp,v.uv,0).rgb);
+    float earlierLuma=luma(previous.SampleLevel(linearClamp,v.uv+backward/sourceSize,0).rgb);
+    return float4(-backward,abs(currentLuma-earlierLuma),1);
+}
+float2 NgxVectors(Vertex v) : SV_Target {
+    return -flow.SampleLevel(linearClamp,v.uv,0).xy;
+}
 float patchError(float2 uv,float2 offset) {
     float score=0;
     [unroll] for(int y=-1;y<=1;y++) [unroll] for(int x=-1;x<=1;x++) {

@@ -254,9 +254,9 @@
           </ControlTemplate></Setter.Value></Setter>
         </Style>
       </Grid.Resources>
-      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Name="MeterColumn" Width="312"/></Grid.ColumnDefinitions>
+      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Name="MeterColumn" Width="Auto"/></Grid.ColumnDefinitions>
       <Grid>
-        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Name="TransportRow" Height="52"/><RowDefinition Name="SettingsRow" Height="220"/></Grid.RowDefinitions>
+        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Name="TransportRow" Height="52"/><RowDefinition Name="SettingsRow" Height="Auto"/></Grid.RowDefinitions>
         <Border Name="VideoHost" Background="Black" ClipToBounds="True"/>
         <DockPanel Name="TransportBar" Grid.Row="1" LastChildFill="False" VerticalAlignment="Center">
           <Button DockPanel.Dock="Left" Name="OpenSource" Width="46" Height="34" Padding="0" ToolTipService.ShowOnDisabled="True" Style="{StaticResource Primary}"/>
@@ -272,8 +272,8 @@
             </StackPanel>
           </ToggleButton>
         </DockPanel>
-        <Border Name="SettingsDrawer" Grid.Row="2" ClipToBounds="True">
-        <DockPanel>
+        <Border Name="SettingsDrawer" Grid.Row="2" Height="0" ClipToBounds="True">
+        <DockPanel Name="SettingsBody" VerticalAlignment="Top">
         <Thumb Name="SettingsResize" Style="{StaticResource DrawerGrip}" DockPanel.Dock="Top" Height="12" Cursor="SizeNS"
                AutomationProperties.Name="Resize settings drawer" ToolTip="Drag or use Up and Down to resize. Enter collapses the drawer."/>
         <Border Background="#172127" CornerRadius="8" BorderBrush="#2C3A41" BorderThickness="1">
@@ -388,9 +388,9 @@
         </ScrollViewer></Border>
         </DockPanel></Border>
       </Grid>
-      <Border Grid.Column="1" ClipToBounds="True">
-        <Grid>
-        <Border Name="MeterHost" Background="#172127" CornerRadius="8" BorderBrush="#2C3A41" BorderThickness="1" Margin="12,0,0,0"><Border.RenderTransform><TranslateTransform/></Border.RenderTransform></Border>
+      <Border Name="SidebarDrawer" Grid.Column="1" Width="0" ClipToBounds="True">
+        <Grid Name="SidebarBody" HorizontalAlignment="Left">
+        <Border Name="MeterHost" Background="#172127" CornerRadius="8" BorderBrush="#2C3A41" BorderThickness="1" Margin="12,0,0,0"/>
         <Thumb Name="SidebarResize" Style="{StaticResource DrawerGrip}" Tag="Vertical" Width="12" HorizontalAlignment="Left" Cursor="SizeWE"
                AutomationProperties.Name="Resize performance sidebar" ToolTip="Drag or use Left and Right to resize. Enter collapses the sidebar."/>
         </Grid>

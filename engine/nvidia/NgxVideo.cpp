@@ -19,6 +19,17 @@ struct VideoState {
 };
 
 #define EXPORT extern "C" __declspec(dllexport)
+static NVSDK_NGX_PerfQuality_Value qualityForSize(const VideoState& state, unsigned width, unsigned height, bool dlaa) {
+    if (dlaa) return NVSDK_NGX_PerfQuality_Value_DLAA;
+    // A Remote Play input has a fixed size. Match NGX to the actual reconstruction ratio
+    // so the runtime can use its recommended model for Performance or Ultra Performance.
+    if (width >= 3u * state.inputWidth && height >= 3u * state.inputHeight)
+        return NVSDK_NGX_PerfQuality_Value_UltraPerformance;
+    if (width >= 2u * state.inputWidth && height >= 2u * state.inputHeight)
+        return NVSDK_NGX_PerfQuality_Value_MaxPerf;
+    return NVSDK_NGX_PerfQuality_Value_MaxQuality;
+}
+
 EXPORT unsigned NgxConfigureFeature(VideoState* state, ID3D11DeviceContext* context,
     unsigned outputWidth, unsigned outputHeight, int dlaa, int hdr) {
     if (!state || !context || !outputWidth || !outputHeight) return NVSDK_NGX_Result_FAIL_InvalidParameter;
@@ -32,7 +43,7 @@ EXPORT unsigned NgxConfigureFeature(VideoState* state, ID3D11DeviceContext* cont
     create.Feature.InHeight=state->inputHeight;
     create.Feature.InTargetWidth=outputWidth;
     create.Feature.InTargetHeight=outputHeight;
-    create.Feature.InPerfQualityValue=dlaa ? NVSDK_NGX_PerfQuality_Value_DLAA : NVSDK_NGX_PerfQuality_Value_MaxQuality;
+    create.Feature.InPerfQualityValue=qualityForSize(*state,outputWidth,outputHeight,dlaa!=0);
     create.InFeatureCreateFlags=NVSDK_NGX_DLSS_Feature_Flags_MVLowRes | NVSDK_NGX_DLSS_Feature_Flags_AutoExposure;
     if (hdr) create.InFeatureCreateFlags |= NVSDK_NGX_DLSS_Feature_Flags_IsHDR;
     return NGX_D3D11_CREATE_DLSS_EXT(context,&state->feature,state->parameters,&create);

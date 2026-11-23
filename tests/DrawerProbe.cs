@@ -25,13 +25,119 @@ internal static partial class WindowChromeProbe
 
     static async Task SetDrawer(string name,bool open) {
         var button=Find<ToggleButton>(name);
+        bool side=name=="ShowStats";
+        var drawer=Find<Border>(side?"SidebarDrawer":"SettingsDrawer");
+        var body=(FrameworkElement)drawer.Child;
         if(button.IsChecked!=open) {
             var pattern=(IToggleProvider)Peer(button).GetPattern(PatternInterface.Toggle);
             Require(pattern!=null && button.Focusable,name+" lacks a keyboard-accessible toggle.");
             pattern.Toggle();
         }
-        await Until(delegate{return button.IsChecked==open && ((name=="ShowStats"?SideWidth:BottomHeight)>1)==open;},
-                    name+" did not settle into the requested state.");
+        await Until(delegate {
+            double target=open?(side?body.Width:body.Height):0;
+            return button.IsChecked==open && drawer.IsVisible==open && Math.Abs((side?SideWidth:BottomHeight)-target)<1;
+        },name+" did not settle into the requested state.");
+    }
+
+    static async Task CheckDrawerMotion(bool side) {
+        string name=side?"ShowStats":"ShowSettings";
+        var drawer=Find<Border>(side?"SidebarDrawer":"SettingsDrawer");
+        var grip=Find<Thumb>(side?"SidebarResize":"SettingsResize");
+        var toggle=(IToggleProvider)Peer(Find<ToggleButton>(name)).GetPattern(PatternInterface.Toggle);
+        Func<int> videoEdge=()=>side?Rect(video).Right:Rect(video).Bottom;
+        Func<int> gripEdge=()=>side?ScreenRect(grip).Left:ScreenRect(grip).Top;
+        int openEdge=videoEdge(),gap=gripEdge()-openEdge;
+        var bounds=ScreenRect(drawer);
+        int extent=side?bounds.Width:bounds.Height;
+        int closedEdge=openEdge+extent;
+        Func<string> drawInfo=()=>string.Format("{0}:{1:0.#}/{2:0.#}({3})",videoEdge(),
+            side?drawer.Width:drawer.Height,side?drawer.ActualWidth:drawer.ActualHeight,drawer.Visibility);
+        Require(extent>50,name+" is too small to test its motion.");
+        foreach(bool opening in new[]{false,true}) {
+            int previous=videoEdge(),target=opening?openEdge:closedEdge;
+            int distinctMiddle=0;
+            var timer=Stopwatch.StartNew();
+            var trace=new System.Text.StringBuilder();
+            var nativeTrace=new System.Text.StringBuilder();
+            int nativeMiddle=0; bool nativeReversed=false;
+            var stopTracking=new System.Threading.CancellationTokenSource();
+            var nativeSampler=Task.Run(delegate {
+                int last=videoEdge();
+                while(!stopTracking.IsCancellationRequested) {
+                    int edge=videoEdge();
+                    if(edge!=last) {
+                        nativeTrace.Append(" ").Append(timer.ElapsedMilliseconds).Append("=").Append(edge);
+                        if(edge>openEdge+3 && edge<closedEdge-3) nativeMiddle++;
+                        if(opening?edge>last+2:edge<last-2) nativeReversed=true;
+                        last=edge;
+                    }
+                    System.Threading.Thread.Sleep(3);
+                }
+            });
+            string failure=null;
+            EventHandler observe=delegate {
+                int edge=videoEdge();
+                if(edge==previous) return;
+                if(trace.Length<1200) trace.Append(" ").Append(timer.ElapsedMilliseconds).Append("=").Append(drawInfo());
+                if(opening?edge>previous+2:edge<previous-2) failure="reversed direction";
+                if(edge>openEdge+3 && edge<closedEdge-3) {
+                    distinctMiddle++;
+                    if(!drawer.IsVisible || Math.Abs(gripEdge()-edge-gap)>2) failure="detached from the native video";
+                }
+                previous=edge;
+            };
+            // HwndHost applies the new HWND bounds in its own LayoutUpdated handler.
+            // Compare the two screen rectangles after every handler for the frame has returned.
+            bool measuring=true,queued=false;
+            EventHandler afterLayout=delegate {
+                if(queued) return;
+                queued=true;
+                window.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Render,new Action(delegate {
+                    queued=false;
+                    if(measuring) observe(null,EventArgs.Empty);
+                }));
+            };
+            window.LayoutUpdated+=afterLayout;
+            try {
+                toggle.Toggle(); window.UpdateLayout(); observe(null,EventArgs.Empty);
+                await Until(()=>Math.Abs(videoEdge()-target)<=2 && drawer.IsVisible==opening,name+" failed to reach its endpoint.");
+            } finally {
+                measuring=false; window.LayoutUpdated-=afterLayout;
+                stopTracking.Cancel(); nativeSampler.Wait(); stopTracking.Dispose();
+            }
+            Require(!nativeReversed,name+" reversed the HWND trajectory."+nativeTrace);
+            Require(failure==null,name+" "+failure+" while "+(opening?"opening.":"closing.")+trace);
+            if(SystemParameters.ClientAreaAnimation)
+                Require(Math.Max(distinctMiddle,nativeMiddle)>=2 && distinctMiddle>=1,name+" used "+distinctMiddle+" intermediate layout and "+
+                        nativeMiddle+" native video sizes over "+timer.ElapsedMilliseconds+" ms while "+(opening?"opening.":"closing.")+trace+" HWND:"+nativeTrace);
+            else
+                Require(distinctMiddle==0,name+" animated despite the Windows reduced-motion preference.");
+            Note(name+" "+(opening?"opened":"closed")+" across "+extent+" px with "+Math.Max(distinctMiddle,nativeMiddle)+" distinct intermediate native video positions.");
+        }
+        if(SystemParameters.ClientAreaAnimation) {
+            bool requested=false,reversed=false,snapped=false;
+            EventHandler reverse=delegate {
+                int edge=videoEdge();
+                if(requested || edge<=openEdge+3 || edge>=closedEdge-3) return;
+                requested=true;
+                window.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Send,new Action(delegate {
+                    int before=videoEdge();
+                    toggle.Toggle();
+                    window.UpdateLayout();
+                    snapped=Math.Abs(videoEdge()-before)>=extent/8;
+                    reversed=true;
+                }));
+            };
+            window.LayoutUpdated+=reverse;
+            try {
+                toggle.Toggle();
+                await Until(()=>reversed,name+" did not expose an intermediate edge to reverse.");
+            } finally {window.LayoutUpdated-=reverse;}
+            Require(!snapped,name+" snapped to an endpoint on reversal.");
+            await SetDrawer(name,true);
+            Require(Math.Abs(videoEdge()-openEdge)<=2,name+" did not return to its saved size after reversal.");
+        }
+        Note(name+" and the native video edge stayed aligned while closing and reopening.");
     }
     static void RouteKey(Thumb grip,Key key) {
         grip.Focus();
@@ -76,6 +182,7 @@ internal static partial class WindowChromeProbe
         var sideToggle=Find<ToggleButton>("ShowStats"); var bottomToggle=Find<ToggleButton>("ShowSettings");
         Require(sideToggle.IsChecked==true && bottomToggle.IsChecked==true && settings.IsVisible,"Legacy preferences should open both drawers.");
         CheckGrip(side); CheckGrip(bottom);
+        await CheckDrawerMotion(true); await CheckDrawerMotion(false);
         Note(await TryNativeDrag(side) ? "Private HWND mouse messages resized the performance drawer."
                                       : "Inactive desktop did not route a native pointer drag; grip hit tests and WPF drag events are checked.");
         double initialSide=SideWidth,initialBottom=BottomHeight; var initialVideo=Rect(video);

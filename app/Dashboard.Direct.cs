@@ -118,7 +118,7 @@ namespace Cadrivect
                 meter.Update(snapshot);
                 if(!firstFrame && Field(snapshot,"presented")!="0" && Field(snapshot,"presented")!="") {
                     string label=source=="Demo"?"Offline demo":source=="Direct"?"PS5 connected":"Sony Remote Play";
-                    firstFrame=true; UpdateTransport(); Show(label);
+                    firstFrame=true; surface.HasPresentedVideo=true; UpdateTransport(); Show(label);
                 }
             }
         }

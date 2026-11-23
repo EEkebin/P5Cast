@@ -187,13 +187,11 @@ int p5_present_output_hdr10(void *instance)
     return p && hdr_gpu_output_valid(p->hdr);
 }
 
-int p5_present_frame(void *instance, const void *pixels, int pitch, int width, int height,
-                     int output_width, int output_height, char *error, int error_length)
+int p5_present_resize(void *instance, int output_width, int output_height, char *error, int error_length)
 {
     Presenter *p = instance;
-    if (!p || !pixels || width <= 0 || height <= 0 || width > INT_MAX / 4 || pitch < width * 4 ||
-        output_width <= 0 || output_height <= 0) {
-        return fail(error, error_length, "Invalid video frame, stride or output size.");
+    if (!p || output_width <= 0 || output_height <= 0) {
+        return fail(error, error_length, "Invalid output size.");
     }
 #ifdef _WIN32
     if (p->child && (output_width != p->child_width || output_height != p->child_height)) {
@@ -205,6 +203,17 @@ int p5_present_frame(void *instance, const void *pixels, int pitch, int width, i
         p->child_height = output_height;
     }
 #endif
+    return 1;
+}
+
+int p5_present_frame(void *instance, const void *pixels, int pitch, int width, int height,
+                     int output_width, int output_height, char *error, int error_length)
+{
+    Presenter *p = instance;
+    if (!pixels || width <= 0 || height <= 0 || width > INT_MAX / 4 || pitch < width * 4) {
+        return fail(error, error_length, "Invalid video frame or stride.");
+    }
+    if (!p5_present_resize(p, output_width, output_height, error, error_length)) return 0;
     if (p->hdr) {
         if (!hdr_gpu_frame(p->hdr, pixels, pitch, width, height)) return fail(error, error_length, SDL_GetError());
         return 1;

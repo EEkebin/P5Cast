@@ -245,7 +245,8 @@ internal static partial class EmbeddedProbe {
                                 setLoupe.Invoke(renderer,new object[]{false,0f,0f,0,1f});
                                 Console.WriteLine("{0} {1} loupe preserved exact output pixel values at 5x.",hdr?"HDR":"SDR",mode);
                                 // A display resize changes the DLSS target while DLAA keeps its native input size.
-                                foreach(var size in new[]{new Size(OutputW+160,OutputH+90),new Size(InputW/2,InputH/2),new Size(OutputW,OutputH)}) {
+                                foreach(var size in new[]{new Size(OutputW+160,OutputH+90),new Size(InputW*2,InputH*2),
+                                                         new Size(InputW*3,InputH*3),new Size(InputW/2,InputH/2),new Size(OutputW,OutputH)}) {
                                     var watch=System.Diagnostics.Stopwatch.StartNew();
                                     type.GetMethod("Resize").Invoke(renderer,new object[]{size});
                                     UploadQualityFrame(device,input,9,hdr);
@@ -260,6 +261,15 @@ internal static partial class EmbeddedProbe {
                                           "Resizing lost the selected NVIDIA effect or display format.");
                                     Console.WriteLine("{0} {1} resize to {2}x{3} and frame submission: {4} ms",
                                         hdr?"HDR":"SDR",mode,size.Width,size.Height,watch.ElapsedMilliseconds);
+                                    if(enlarging && size.Width>=2*InputW) {
+                                        var resized=ReadPresentedTexture(device,output);
+                                        for(int p=0;p<5;p++) for(int ch=0;ch<3;ch++) {
+                                            int x=(2*p+1)*size.Width/10,y=size.Height/10;
+                                            int reference=baseline[(OutputH/10)*OutputW+(2*p+1)*OutputW/10];
+                                            Check(Math.Abs(Code(reference,ch,hdr)-Code(resized[y*size.Width+x],ch,hdr))<=.02,
+                                                  "DLSS changed a flat color at "+size.Width+"x"+size.Height+".");
+                                        }
+                                    }
                                 }
                             }
                         }

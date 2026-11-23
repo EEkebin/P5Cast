@@ -163,6 +163,8 @@ internal sealed partial class Renderer : IDisposable
     public bool UpdateWindowSize(Size window,bool coalesce)
     {
         if(window.Width<=0 || window.Height<=0) return false;
+        // Follow the layout immediately, even when GPU buffer reallocation is coalesced.
+        if(presentation!=null) presentation.ResizeWindow(window);
         var target=MonitorFromWindow(hwnd,2);
         if(window==screenSize && target==monitor) { pendingSize=Size.Empty; return false; }
         bool displayChanged=target!=monitor;
@@ -173,7 +175,12 @@ internal sealed partial class Renderer : IDisposable
             if(pendingSize.IsEmpty) resizeStartedAt=now;
             if(window!=pendingSize) { pendingSize=window; sizeChangedAt=now; }
             long frequency=System.Diagnostics.Stopwatch.Frequency;
-            if(now-sizeChangedAt<frequency/60 && now-resizeStartedAt<frequency/15) return false;
+            // DLSS and RTX Video rebuild size-dependent resources. Keep the current
+            // video running through a short drawer animation, then evaluate at its final size.
+            bool resizingUpscaler=pictureMode=="dlss" || pictureMode=="rtxvideo";
+            long settle=frequency/(resizingUpscaler ? 30 : 60);
+            long maximumWait=frequency/(resizingUpscaler ? 5 : 15);
+            if(now-sizeChangedAt<settle && now-resizeStartedAt<maximumWait) return false;
         }
         pendingSize=Size.Empty;
         // Moving an active session onto an SDR-only display keeps the stream running. Switch back

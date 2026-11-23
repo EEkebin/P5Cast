@@ -25,6 +25,9 @@ internal sealed class Presentation : IDisposable
     static extern int p5_present_output_hdr10(IntPtr instance);
     [DefaultDllImportSearchPaths(Search)]
     [DllImport(Library,CallingConvention=CallingConvention.Cdecl,ExactSpelling=true)]
+    static extern int p5_present_resize(IntPtr instance,int width,int height,[Out] byte[] error,int errorLength);
+    [DefaultDllImportSearchPaths(Search)]
+    [DllImport(Library,CallingConvention=CallingConvention.Cdecl,ExactSpelling=true)]
     static extern int p5_present_frame(IntPtr instance,IntPtr bgra,int pitch,int width,int height,
         int outputWidth,int outputHeight,[Out] byte[] error,int errorLength);
     [DefaultDllImportSearchPaths(Search)]
@@ -35,7 +38,7 @@ internal sealed class Presentation : IDisposable
     readonly string backend;
     IntPtr instance;
     Texture2D readback;
-    Size readbackSize;
+    Size readbackSize,windowSize;
     public bool Hdr10 { get; private set; }
 
     public static string Resolve(string requested)
@@ -63,6 +66,7 @@ internal sealed class Presentation : IDisposable
     public Presentation(IntPtr hwnd,string key,Size size,bool hdr10)
     {
         backend=key;
+        windowSize=size;
         string driver=Driver(key);
         if(p5_present_available(driver)==0) throw new InvalidOperationException(key+" presentation is unavailable on this platform.");
         instance=p5_present_create_color(hwnd,driver,size.Width,size.Height,hdr10 ? 1:0,error,error.Length);
@@ -93,8 +97,15 @@ internal sealed class Presentation : IDisposable
         var data=context.MapSubresource(readback,0,MapMode.Read,SharpDX.Direct3D11.MapFlags.None);
         try {
             if(p5_present_frame(instance,data.DataPointer,data.RowPitch,size.Width,size.Height,
-                size.Width,size.Height,error,error.Length)==0) throw Failure("frame delivery");
+                windowSize.Width,windowSize.Height,error,error.Length)==0) throw Failure("frame delivery");
         } finally { context.UnmapSubresource(readback,0); }
+    }
+
+    public void ResizeWindow(Size size)
+    {
+        if(size==windowSize) return;
+        if(p5_present_resize(instance,size.Width,size.Height,error,error.Length)==0) throw Failure("window resize");
+        windowSize=size;
     }
 
     public void Dispose()

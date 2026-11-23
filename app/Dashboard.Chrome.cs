@@ -15,7 +15,6 @@ namespace Cadrivect
     internal partial class Dashboard
     {
         WindowChrome titleChrome;
-        int sidebarTransition;
         [StructLayout(LayoutKind.Sequential)] struct FramePoint {public int X,Y;}
         [StructLayout(LayoutKind.Sequential)] struct FrameRect {public int Left,Top,Right,Bottom;}
         [StructLayout(LayoutKind.Sequential)] struct FrameMonitor {public int Size; public FrameRect Bounds,Work; public uint Flags;}
@@ -125,24 +124,7 @@ namespace Cadrivect
             toggle.ToolTip=(stats?"Hide":"Show")+" performance sidebar (Ctrl+Alt+O)";
             MoveStroke(UI<Line>("MenuTop"),1,stats,animate);
             MoveStroke(UI<Line>("MenuBottom"),-1,stats,animate);
-            var column=UI<ColumnDefinition>("MeterColumn"); var panel=UI<Border>("MeterHost");
-            var slide=(TranslateTransform)panel.RenderTransform;
-            bool visible=stats && !fullscreen;
-            int transition=++sidebarTransition;
-            double x=slide.X,opacity=panel.Opacity;
-            UI<Thumb>("SidebarResize").Visibility=visible?Visibility.Visible:Visibility.Collapsed;
-            if(visible) {RefreshDrawerSizes(); panel.Visibility=Visibility.Visible;}
-            panel.IsHitTestVisible=visible;
-            double endX=visible?0:42,endOpacity=visible?1:0;
-            slide.X=endX; panel.Opacity=endOpacity;
-            slide.BeginAnimation(TranslateTransform.XProperty,animate?Motion(x,endX):null);
-            var fade=animate?Motion(opacity,endOpacity):null;
-            // Resize the D3D child once per toggle. The WPF sidebar handles the animation.
-            if(!visible && animate) fade.Completed+=delegate {
-                if(transition==sidebarTransition) {panel.Visibility=Visibility.Collapsed; column.Width=new GridLength(0);}
-            };
-            panel.BeginAnimation(UIElement.OpacityProperty,fade);
-            if(!visible && !animate) {panel.Visibility=Visibility.Collapsed; column.Width=new GridLength(0);}
+            UpdateDrawer(true,animate);
         }
     }
 }

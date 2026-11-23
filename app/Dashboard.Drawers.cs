@@ -6,6 +6,7 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Media.Animation;
 
 namespace Cadrivect
 {
@@ -16,6 +17,7 @@ namespace Cadrivect
         const double PlaybackMinimumWidth=472, PlaybackMinimumHeight=180;
         double sidebarWidth,settingsHeight;
         bool settingsOpen;
+        int sidebarMotion,settingsMotion;
 
         static double ReadDrawerSize(Dictionary<string,object> saved,string key,double fallback,double minimum,double maximum)
         {
@@ -57,29 +59,61 @@ namespace Cadrivect
 
         void RefreshDrawerSizes()
         {
-            if(stats && !fullscreen) {
-                double width=FitDrawer(true,sidebarWidth);
-                UI<ColumnDefinition>("MeterColumn").Width=new GridLength(width);
-                AutomationProperties.SetItemStatus(UI<Thumb>("SidebarResize"),Math.Round(width)+" wide");
-            }
-            double height=settingsOpen && !fullscreen?FitDrawer(false,settingsHeight):0;
-            UI<RowDefinition>("SettingsRow").Height=new GridLength(height);
-            AutomationProperties.SetItemStatus(UI<Thumb>("SettingsResize"),Math.Round(height)+" high");
+            UpdateDrawer(true,false,true);
+            UpdateDrawer(false,false,true);
         }
 
-        void ApplySettingsDrawer()
+        void UpdateDrawer(bool side,bool animate,bool sizeOnly=false)
+        {
+            var drawer=UI<Border>(side?"SidebarDrawer":"SettingsDrawer");
+            var body=(FrameworkElement)drawer.Child;
+            var extent=side?FrameworkElement.WidthProperty:FrameworkElement.HeightProperty;
+            double fitted=FitDrawer(side,side?sidebarWidth:settingsHeight);
+            if(sizeOnly && (double)body.GetValue(extent)==fitted) return;
+            bool open=!fullscreen && (side?stats:settingsOpen);
+            double target=open?fitted:0;
+            double current=drawer.Visibility==Visibility.Visible?(side?drawer.ActualWidth:drawer.ActualHeight):0;
+            int revision=side?++sidebarMotion:++settingsMotion;
+
+            // The Auto grid track follows the clipped drawer each frame. Its contents
+            // slide in at their final size; the native video gets the remaining space.
+            body.SetValue(extent,fitted);
+            if(open) drawer.Visibility=Visibility.Visible;
+            drawer.IsHitTestVisible=open;
+            AutomationProperties.SetItemStatus(UI<Thumb>(side?"SidebarResize":"SettingsResize"),
+                Math.Round(target)+(side?" wide":" high"));
+            if(animate && window.IsLoaded && !fullscreen && SystemParameters.ClientAreaAnimation && Math.Abs(target-current)>.5) {
+                // A layout pass can precede the first animation tick. Its base extent
+                // must match the currently visible frame, including during reversal.
+                drawer.SetValue(extent,current);
+                var motion=Motion(current,target);
+                motion.FillBehavior=FillBehavior.HoldEnd;
+                motion.Completed+=delegate {
+                    if((side?sidebarMotion:settingsMotion)!=revision) return;
+                    drawer.SetValue(extent,target);
+                    drawer.BeginAnimation(extent,null);
+                    if(!open) drawer.Visibility=Visibility.Collapsed;
+                };
+                drawer.BeginAnimation(extent,motion);
+            } else {
+                drawer.SetValue(extent,target);
+                drawer.BeginAnimation(extent,null);
+                if(!open) drawer.Visibility=Visibility.Collapsed;
+            }
+        }
+
+        void ApplySettingsDrawer(bool animate=false)
         {
             var toggle=UI<ToggleButton>("ShowSettings"); toggle.IsChecked=settingsOpen;
             toggle.ToolTip=settingsOpen?"Hide settings":"Show settings";
-            UI<Border>("SettingsDrawer").Visibility=settingsOpen && !fullscreen?Visibility.Visible:Visibility.Collapsed;
             UI<DockPanel>("TransportBar").Visibility=fullscreen?Visibility.Collapsed:Visibility.Visible;
-            RefreshDrawerSizes();
+            UpdateDrawer(false,animate);
         }
 
         void SetSettingsDrawer(bool open)
         {
             if(settingsOpen==open) return;
-            settingsOpen=open; ApplySettingsDrawer();
+            settingsOpen=open; ApplySettingsDrawer(true);
             if(window.IsLoaded) SaveSettings();
         }
 

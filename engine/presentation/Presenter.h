@@ -35,6 +35,9 @@ P5_API void *p5_present_create_sdl_color(struct SDL_Window *window, const char *
                                           int hdr10, char *error, int error_length);
 /* Returns 1 for an HDR10_ST2084 swapchain with a negotiated R10G10B10A2 format. */
 P5_API int p5_present_output_hdr10(void *instance);
+/* Update an embedded Windows child's size between frames on the SDL video thread.
+   Portable hosts continue to size their own window. */
+P5_API int p5_present_resize(void *instance, int output_width, int output_height, char *error, int error_length);
 /* SDR uses BGRA8; HDR10 uses packed R10G10B10A2 UNORM (R in the low 10 bits)
    containing PQ-encoded BT.2020 RGB. Rows are top-to-bottom. Output dimensions specify the size
    of a Windows embedded child. Portable hosts resize their own window.

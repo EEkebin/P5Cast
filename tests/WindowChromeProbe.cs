@@ -477,6 +477,9 @@ internal static partial class WindowChromeProbe
         var desktopName=new StringBuilder(256); int needed;
         Require(GetUserObjectInformation(GetThreadDesktop(GetCurrentThreadId()),2,desktopName,512,out needed) && desktopName.ToString()==name,
             "Refusing to open WPF anywhere except the disposable private desktop.");
+        // An inactive desktop can block WPF's hardware composition channel for hundreds of
+        // milliseconds. Measure layout here with software WPF; the native video stays on its GPU.
+        if(CheckDrawerOption) RenderOptions.ProcessRenderMode=RenderMode.SoftwareOnly;
         string local=Path.Combine(stage,"local");
         Environment.SetEnvironmentVariable("LOCALAPPDATA",local);
         string prefs=Path.Combine(local,"LumaRelay");

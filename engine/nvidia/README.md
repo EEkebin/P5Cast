@@ -1,6 +1,6 @@
 # NVIDIA DLSS and DLAA for captured video
 
-`NgxVideo` creates an NVIDIA NGX D3D11 feature for the selected mode and checks the result of each evaluation. DLSS uses the SDK's MaxQuality mode at the requested output resolution. DLAA uses its DLAA mode at the captured resolution. The renderer supplies color, pixel-space motion toward the previous frame, normalized depth, a history-reset signal and the output texture. For capture sources, the host estimates motion from video and uses flat depth. Real game-engine vectors, per-object depth and the original camera jitter are unavailable.
+`NgxVideo` creates an NVIDIA NGX D3D11 feature for the selected mode and checks the result of each evaluation. At native resolution it requests DLAA. For enlargement it requests Quality below 2× per dimension, Performance from 2×, and Ultra Performance from 3×. NGX and the driver choose the model for that request. The renderer supplies color, pixel-space motion toward the previous frame, normalized depth, a history-reset signal and the output texture. For capture sources, the host estimates motion from video and uses flat depth. Real game-engine vectors, per-object depth and the original camera jitter are unavailable.
 
 The renderer checks stationary edges before assigning a block motion vector to text. A source-resolution mask identifies narrow, nearly neutral strokes. After the NGX evaluation, a GPU pass uses the source RGB around those strokes to limit changes in local contrast. The mask and the corrected frames stay on the GPU.
 

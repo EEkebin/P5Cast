@@ -90,7 +90,7 @@ namespace Cadrivect
                 int factor=i+1;
                 var button=new RadioButton {GroupName="Rate"+group,Content=i==0 ? "Off" : factor+"×",Template=ChipTemplate};
                 StyleChip(button); factors[i]=button;
-                button.ToolTip=i==0 ? "Present captured frames only." : "Present up to "+factor+" frames per source frame, including interpolated frames.";
+                button.ToolTip=i==0 ? "Present captured frames only." : "P5Cast uses motion estimated from the video to present up to "+factor+" frames per source frame.";
                 button.Checked+=delegate {if(syncing) return; selectedFactor=factor; SendSettings();};
                 factorGrid.Children.Add(button);
             }

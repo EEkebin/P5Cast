@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.14.2.0")]
+[assembly: AssemblyVersion("0.15.0.0")]
 
 namespace Cadrivect
 {
@@ -116,6 +116,7 @@ namespace Cadrivect
             window.Icon = new BitmapImage(new Uri(Path.Combine(Program.Root,"app","assets","mark.ico")));
             UI<Border>("VideoHost").Child=surface;
             surface.DoubleClicked+=ToggleFullscreen;
+            surface.ClientResized+=delegate {if(network!=null) network.FitAttachedWindows();};
             surface.LoupeChanged+=delegate(bool active,float x,float y,int level,float scale) {
                 if(rendering!=null) engine.SetLoupe(active,x,y,level,scale);
             };

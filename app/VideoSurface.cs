@@ -9,6 +9,8 @@ namespace Cadrivect
     internal sealed class VideoSurface : HwndHost
     {
         internal event Action DoubleClicked;
+        internal event Action ClientResized;
+        internal bool HasPresentedVideo {get;set;}
         internal event Action<double> WipePositionChanged;
         internal event Action<int,float> WipeGripChanged;
         internal event Action<bool,float,float,int,float> LoupeChanged;
@@ -192,6 +194,7 @@ namespace Cadrivect
         {
             const int MouseMove=0x200, ButtonDown=0x201, ButtonUp=0x202, DoubleClick=0x203;
             const int Cursor=0x20, CancelMode=0x1F, CaptureChanged=0x215;
+            if(msg==0x0005 && ClientResized!=null) ClientResized(); // WM_SIZE
             if(msg==MouseMove || msg==ButtonDown || msg==ButtonUp || msg==DoubleClick) {
                 int x=unchecked((short)(lp.ToInt64() & 0xffff));
                 int y=unchecked((short)((lp.ToInt64() >> 16) & 0xffff));
@@ -228,12 +231,14 @@ namespace Cadrivect
             if(msg==0x203 && DoubleClicked!=null) {DoubleClicked(); handled=true; return IntPtr.Zero;}
             if(msg==15 || msg==20) {
                 Paint paint=new Paint(); IntPtr dc=msg==15?BeginPaint(hwnd,out paint):wp;
-                Rect area; GetClientRect(hwnd,out area); FillRect(dc,ref area,GetStockObject(4));
+                if(!HasPresentedVideo) {
+                    Rect area; GetClientRect(hwnd,out area); FillRect(dc,ref area,GetStockObject(4));
+                }
                 if(msg==15) EndPaint(hwnd,ref paint);
                 handled=true; return new IntPtr(1);
             }
             return base.WndProc(hwnd,msg,wp,lp,ref handled);
         }
-        internal void Clear() { if(Handle!=IntPtr.Zero) RedrawWindow(Handle,IntPtr.Zero,IntPtr.Zero,0x105); }
+        internal void Clear() { HasPresentedVideo=false; if(Handle!=IntPtr.Zero) RedrawWindow(Handle,IntPtr.Zero,IntPtr.Zero,0x105); }
     }
 }

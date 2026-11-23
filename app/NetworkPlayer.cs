@@ -190,6 +190,13 @@ namespace Cadrivect
             SetWindowPos(window,IntPtr.Zero,0,0,area.Right,area.Bottom,flags);
         }
 
+        internal void FitAttachedWindows()
+        {
+            if(disposed) return;
+            if(panel!=IntPtr.Zero && GetParent(panel)==host) Fit(panel,false);
+            if(stream!=IntPtr.Zero && GetParent(stream)==host) Fit(stream,false);
+        }
+
         void Tick(object sender, EventArgs args)
         {
             if (disposed) return;

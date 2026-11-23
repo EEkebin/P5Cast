@@ -11,7 +11,7 @@ internal sealed partial class Renderer
     bool triedOptical;
     RtxVideo video;
     NgxVideo ngx;
-    GpuImage neuralCurrent, neuralPrevious, rgba, vectors, depth;
+    GpuImage neuralCurrent, neuralPrevious, rgba, vectors, depth, strokeMask, ngxOutput;
     Size neuralSize;
     string neuralMode;
     int evaluatedFrame = -1;
@@ -72,6 +72,8 @@ internal sealed partial class Renderer
             if(mode=="rtxvideo") video=new RtxVideo(Device.NativePointer);
             else
             {
+                strokeMask=new GpuImage(Device,srcSize.Width,srcSize.Height,Format.R8_UNorm,true);
+                ngxOutput=new GpuImage(Device,target.Width,target.Height,format,true,true);
                 vectors=new GpuImage(Device,srcSize.Width,srcSize.Height,Format.R16G16_Float,true);
                 depth=new GpuImage(Device,srcSize.Width,srcSize.Height,Format.R32_Float,true);
                 // Remote Play supplies no scene geometry. Model the finished video as one plane.
@@ -91,15 +93,17 @@ internal sealed partial class Renderer
                 if(havePriorEnhanced)
                 {
                     if(HdrEnabled) PrepareHdrMotion(); else PrepareMotion();
-                    Draw("NgxVectors",vectors.Write,area,curr.Read,1,null,motion.Read);
                 }
-                else context.ClearRenderTargetView(vectors.Write,new RawColor4(0,0,0,0));
+                Draw("NgxVectors",vectors.Write,area,curr.Read,havePriorEnhanced ? 1 : 0,
+                     havePriorEnhanced ? prev.Read : curr.Read,havePriorEnhanced ? motion.Read : null,auxiliary:strokeMask.Write);
                 // The console's camera jitter is unknown. Do not invent offsets for captured pixels.
-                ngx.Evaluate(context,rgba.Texture,vectors.Texture,depth.Texture,neuralCurrent.Texture,0,0,frameMilliseconds,!havePriorEnhanced);
+                ngx.Evaluate(context,rgba.Texture,vectors.Texture,depth.Texture,ngxOutput.Texture,0,0,frameMilliseconds,!havePriorEnhanced);
             }
             else video.Evaluate(context.NativePointer,rgba.Texture.NativePointer,neuralCurrent.Texture.NativePointer,
                                 srcSize.Width,srcSize.Height,target.Width,target.Height);
             RestoreDrawState();
+            if(ngx!=null) Draw("PreserveNgxStrokes",neuralCurrent.Write,new Rectangle(Point.Empty,neuralSize),
+                ngxOutput.Read,HdrEnabled ? 1 : 0,rgba.Read,strokeMask.Read);
             VendorEvaluations++;
             evaluatedFrame=Captured;
             resetHistory=false;
@@ -119,8 +123,8 @@ internal sealed partial class Renderer
     {
         if(ngx!=null) { ngx.Dispose(); ngx=null; }
         if(video!=null) { video.Dispose(); video=null; }
-        foreach(var image in new[]{neuralCurrent,neuralPrevious,rgba,vectors,depth}) if(image!=null) image.Dispose();
-        neuralCurrent=neuralPrevious=rgba=vectors=depth=null;
+        foreach(var image in new[]{neuralCurrent,neuralPrevious,rgba,vectors,depth,strokeMask,ngxOutput}) if(image!=null) image.Dispose();
+        neuralCurrent=neuralPrevious=rgba=vectors=depth=strokeMask=ngxOutput=null;
         havePriorEnhanced=false; evaluatedFrame=-1; neuralMode=null;
     }
     void ReleaseNvidia()

@@ -90,6 +90,7 @@ class VerifyHdr
         const int w=48,h=24;
         using(var text=new Image(d,w,h,Format.R8G8B8A8_UNorm))
         using(var motion=new Image(d,1,1,Format.R16G16B16A16_Float))
+        using(var prior=new Image(d,w,h,Format.R8G8B8A8_UNorm))
         using(var native=new Image(d,w,h,Format.R8G8B8A8_UNorm))
         using(var large=new Image(d,w*2,h*2,Format.R8G8B8A8_UNorm))
         using(var small=new Image(d,w/4,h/4,Format.R8G8B8A8_UNorm)) {
@@ -102,6 +103,7 @@ class VerifyHdr
             finally { pin.Free(); }
             // Force an incorrect two-pixel vector across static foreground strokes.
             c.ClearRenderTargetView(motion.write,new RawColor4(2,0,0,0));
+            ShaderResourceView previous=text.read;
             Func<string,Image,byte[]> draw=(name,target)=>{
                 var desc=target.texture.Description;
                 var frame=new Frame{sw=w,sh=h,ow=desc.Width,oh=desc.Height,phase=.5f,targetW=desc.Width,targetH=desc.Height,
@@ -109,7 +111,7 @@ class VerifyHdr
                 c.UpdateSubresource(ref frame,cb);
                 using(var ps=new PixelShader(d,Shader(compiled,name))) {
                     c.OutputMerger.SetRenderTargets(target.write); c.Rasterizer.SetViewport(0,0,desc.Width,desc.Height);
-                    c.PixelShader.SetShaderResources(0,new[]{text.read,text.read,motion.read});
+                    c.PixelShader.SetShaderResources(0,new[]{text.read,previous,motion.read});
                     c.PixelShader.Set(ps); c.Draw(3,0);
                     c.PixelShader.SetShaderResources(0,new ShaderResourceView[3]); c.OutputMerger.ResetTargets();
                 }
@@ -129,6 +131,19 @@ class VerifyHdr
                 if(original[x]!=(pattern[x]&255)) throw new InvalidDataException("Native-scale pixel mismatch.");
                 if(x%4!=2 && generated[x]!=original[x]) throw new InvalidDataException("Intermediated stationary text edge moved.");
             }
+            // Positive backward flow can be read through this fixture's UNorm output.
+            c.ClearRenderTargetView(motion.write,new RawColor4(-2,0,0,0));
+            var staticVectors=draw("NgxVectors",native);
+            int[] translated=new int[w*h];
+            for(int y=0;y<h;y++) for(int x=0;x<w;x++) translated[y*w+x]=pattern[y*w+(x+2)%w];
+            c.UpdateSubresource(translated,prior.texture,0,w*4,0);
+            previous=prior.read;
+            var movingVectors=draw("NgxVectors",native);
+            for(int x=2;x<w-2;x++) {
+                if(staticVectors[x]!=(x%4==2 ? 255:0)) throw new InvalidDataException("Unexpected NGX vector on stationary glyph fixture.");
+                if(movingVectors[x]!=255) throw new InvalidDataException("Motion was suppressed on a moving glyph.");
+            }
+            previous=text.read;
             var reduced=draw("Original",small);
             foreach(byte value in reduced) if(Math.Abs(value-64)>1) throw new InvalidDataException("Downsampling skipped a one-pixel stroke.");
             var linear=draw("Original",large); var sharp=draw("Sharp",large);

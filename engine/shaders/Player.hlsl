@@ -112,8 +112,71 @@ float4 OpticalField(Vertex v) : SV_Target {
     float earlierLuma=luma(previous.SampleLevel(linearClamp,v.uv+backward/sourceSize,0).rgb);
     return float4(-backward,abs(currentLuma-earlierLuma),1);
 }
-float2 NgxVectors(Vertex v) : SV_Target {
-    return -flow.SampleLevel(linearClamp,v.uv,0).xy;
+// A block estimate can belong to scenery behind a stationary overlay. Check a
+// local edge and its zero-displacement match before accepting that estimate.
+bool stationaryEdge(float2 uv,float3 now,float3 before) {
+    if(any(abs(now-before)>=0.006)) return false;
+    float2 d=1.0/sourceSize;
+    float edge=0,delta=0;
+    [unroll] for(int i=0;i<4;i++) {
+        float2 offset=i==0 ? float2(d.x,0) : i==1 ? float2(0,d.y) : i==2 ? float2(-d.x,0) : float2(0,-d.y);
+        float3 nearNow=image.SampleLevel(linearClamp,uv+offset,0).rgb;
+        float3 nearBefore=previous.SampleLevel(linearClamp,uv+offset,0).rgb;
+        float3 gradient=abs(now-nearNow),change=abs(nearNow-nearBefore);
+        edge=max(edge,max(gradient.x,max(gradient.y,gradient.z)));
+        delta=max(delta,max(change.x,max(change.y,change.z)));
+    }
+    return edge>0.08 && delta<0.012;
+}
+// Opposite flanks distinguish narrow ink from a single long silhouette.
+float inkContrast(float center,float2 flank) {
+    float2 d=center-flank;
+    return max(min(d.x,d.y),min(-d.x,-d.y));
+}
+float strokeContrast(float2 uv,float center) {
+    float2 d=2.0/sourceSize;
+    float2 horizontal=float2(luma(image.SampleLevel(linearClamp,uv-float2(d.x,0),0).rgb),
+                             luma(image.SampleLevel(linearClamp,uv+float2(d.x,0),0).rgb));
+    float2 vertical=float2(luma(image.SampleLevel(linearClamp,uv-float2(0,d.y),0).rgb),
+                           luma(image.SampleLevel(linearClamp,uv+float2(0,d.y),0).rgb));
+    return max(inkContrast(center,horizontal),inkContrast(center,vertical));
+}
+struct NgxGuidance { float2 motion : SV_Target0; float ink : SV_Target1; };
+NgxGuidance NgxVectors(Vertex v) {
+    NgxGuidance guide;
+    float3 now=image.Load(int3(int2(v.pos.xy),0)).rgb;
+    float3 before=previous.Load(int3(int2(v.pos.xy),0)).rgb;
+    guide.motion=phase>0 ? -flow.SampleLevel(linearClamp,v.uv,0).xy : 0;
+    if(any(abs(guide.motion)>0.5) && stationaryEdge(v.uv,now,before)) guide.motion=0;
+
+    float hi=max(now.r,max(now.g,now.b)),lo=min(now.r,min(now.g,now.b));
+    float3 delta=abs(now-before);
+    bool stable=phase==0 || max(delta.r,max(delta.g,delta.b))<0.012*max(1.0,hi);
+    // Test the ink's neutrality only; colored backgrounds and antialiased fringes
+    // retain their own source RGB. Confidence is independent of output resolution.
+    guide.ink=0;
+    if(stable && hi-lo<0.04+0.12*hi) {
+        float contrast=strokeContrast(v.uv,luma(now))/max(1.0,hi);
+        guide.ink=smoothstep(0.16,0.35,contrast);
+    }
+    return guide;
+}
+float max4(float4 values) {return max(max(values.x,values.y),max(values.z,values.w));}
+float4 PreserveNgxStrokes(Vertex v) : SV_Target {
+    float3 enhanced=image.Load(int3(int2(v.pos.xy),0)).rgb;
+    // Include the neighboring source texels that contribute antialiased coverage
+    // and the small dark gaps around them, without altering the rest of the scene.
+    float2 halfTexel=0.5/sourceSize;
+    float ink=max(max4(flow.GatherRed(linearClamp,v.uv-halfTexel)),max4(flow.GatherRed(linearClamp,v.uv+halfTexel)));
+    ink=max(ink,max(max4(flow.GatherRed(linearClamp,v.uv+float2(halfTexel.x,-halfTexel.y))),
+                    max4(flow.GatherRed(linearClamp,v.uv+float2(-halfTexel.x,halfTexel.y)))));
+    if(ink==0) return float4(enhanced,1);
+    float3 reference=previous.SampleLevel(linearClamp,v.uv,0).rgb;
+    float floorValue=phase>0 ? 0.00001 : 1.0/255.0;
+    float3 error=abs(enhanced-reference)/max(floorValue,0.025*abs(reference));
+    float excess=max(error.r,max(error.g,error.b));
+    float correction=1.0-rcp(max(1.0,excess));
+    return float4(lerp(enhanced,reference,ink*correction),1);
 }
 float patchError(float2 uv,float2 offset) {
     float score=0;
@@ -146,21 +209,7 @@ float4 Interpolate(Vertex v) : SV_Target {
     float2 shift=motion.xy/sourceSize;
     float3 now=image.SampleLevel(linearClamp,v.uv,0).rgb;
     float3 before=previous.SampleLevel(linearClamp,v.uv,0).rgb;
-    // Block motion from a nearby object must not pull unchanged UI strokes out of position.
-    // Check the surrounding pattern so coincident flat background colors can still receive moving objects.
-    if(any(abs(motion.xy)>0.5) && all(abs(now-before)<0.006)) {
-        float2 d=1.0/sourceSize;
-        float edge=0,delta=0;
-        [unroll] for(int i=0;i<4;i++) {
-            float2 offset=i==0 ? float2(d.x,0) : i==1 ? float2(0,d.y) : i==2 ? float2(-d.x,0) : float2(0,-d.y);
-            float3 nearNow=image.SampleLevel(linearClamp,v.uv+offset,0).rgb;
-            float3 nearBefore=previous.SampleLevel(linearClamp,v.uv+offset,0).rgb;
-            float3 gradient=abs(now-nearNow), change=abs(nearNow-nearBefore);
-            edge=max(edge,max(gradient.x,max(gradient.y,gradient.z)));
-            delta=max(delta,max(change.x,max(change.y,change.z)));
-        }
-        if(edge>0.08 && delta<0.012) return float4(now,1);
-    }
+    if(any(abs(motion.xy)>0.5) && stationaryEdge(v.uv,now,before)) return float4(now,1);
     float3 a=previous.SampleLevel(linearClamp,v.uv-phase*shift,0).rgb;
     float3 b=image.SampleLevel(linearClamp,v.uv+(1-phase)*shift,0).rgb;
     // Poor matches and abrupt cuts favor the nearest real frame.

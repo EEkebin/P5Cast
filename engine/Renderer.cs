@@ -129,7 +129,7 @@ internal sealed partial class Renderer : IDisposable
             clipped.IsScissorEnabled=true;
             scissor=new RasterizerState(Device,clipped);
             vertex=new VertexShader(Device,Shader("Fullscreen"));
-            foreach(string name in new [] {"Original","Sharp","Easu","Rcas","Motion","Interpolate","OpticalField","NgxVectors","WipeDivider"})
+            foreach(string name in new [] {"Original","Sharp","Easu","Rcas","Motion","Interpolate","OpticalField","NgxVectors","PreserveNgxStrokes","WipeDivider"})
                 shaders.Add(name,new PixelShader(Device,Shader(name)));
             InitHdrShaders();
             context.InputAssembler.PrimitiveTopology=PrimitiveTopology.TriangleList;
@@ -342,12 +342,13 @@ internal sealed partial class Renderer : IDisposable
         curr=prev=incoming=motion=mixed=null;
     }
     void Draw(string name, RenderTargetView target, Rectangle area, ShaderResourceView input, float phase,
-              ShaderResourceView previous=null, ShaderResourceView flow=null,Rectangle? clip=null)
+              ShaderResourceView previous=null, ShaderResourceView flow=null,Rectangle? clip=null,RenderTargetView auxiliary=null)
     {
         var info=new FrameInfo { SourceX=srcSize.Width,SourceY=srcSize.Height,OutputX=outSize.Width,OutputY=outSize.Height,
                                  Phase=phase,OriginX=area.X,OriginY=area.Y,TargetX=area.Width,TargetY=area.Height };
         context.UpdateSubresource(ref info,constants);
-        context.OutputMerger.SetRenderTargets(target);
+        if(auxiliary==null) context.OutputMerger.SetRenderTargets(target);
+        else context.OutputMerger.SetTargets(target,auxiliary);
         context.Rasterizer.SetViewport(area.X,area.Y,area.Width,area.Height);
         context.PixelShader.SetShaderResource(0,input);
         context.PixelShader.SetShaderResource(1,previous);

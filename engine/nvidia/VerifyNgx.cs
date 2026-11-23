@@ -86,6 +86,27 @@ internal static class VerifyNgx
                     }
                     finally { ctx.UnmapSubresource(read,0); }
                 }
+                byte[] levels={0,32,128,224,255};
+                for(int y=0;y<h;y++) for(int x=0;x<w;x++) {
+                    int i=(y*w+x)*4;
+                    picture[i]=picture[i+1]=picture[i+2]=levels[x*levels.Length/w];
+                }
+                ctx.UpdateSubresource(picture,color,0,w*4,0);
+                for(int frame=0;frame<8;frame++)
+                    ngx.Evaluate(ctx,color,motion,depth,output,0,0,16.67f,frame==0);
+                ctx.CopyResource(output,read);
+                var neutral=ctx.MapSubresource(read,0,MapMode.Read,SharpDX.Direct3D11.MapFlags.None);
+                try {
+                    int worst=0;
+                    for(int band=0;band<levels.Length;band++) {
+                        int center=ow*(2*band+1)/(2*levels.Length);
+                        for(int y=oh/4;y<3*oh/4;y+=37) for(int x=center-4;x<=center+4;x+=4)
+                            for(int c=0;c<3;c++)
+                                worst=Math.Max(worst,Math.Abs(Marshal.ReadByte(neutral.DataPointer,y*neutral.RowPitch+x*4+c)-levels[band]));
+                    }
+                    Console.WriteLine("{0} SDR flat-field test: black to reference white, worst channel error {1}/255.",dlaa ? "DLAA":"DLSS",worst);
+                    if(worst>4) throw new InvalidOperationException("NGX changed the neutral SDR transfer beyond four code values.");
+                } finally {ctx.UnmapSubresource(read,0);}
             }
             if (max-min<32 || changed<4) throw new InvalidOperationException("NGX produced an empty or static image.");
             if (changedFromBaseline==0) throw new InvalidOperationException("The NGX output matched the baseline within the two-level tolerance.");

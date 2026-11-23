@@ -15,6 +15,7 @@ namespace LumaRelay {
         [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr window, out Rect rect);
         [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
         [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr mode);
+        [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
         public static void Save(IntPtr window, string path) {
             var previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
             try {
@@ -96,6 +97,19 @@ try {
             $_.Path -and $_.Path.StartsWith($stage + '\', [StringComparison]::OrdinalIgnoreCase) -and $_.MainWindowHandle -ne 0
         } | Select-Object -First 1
     } 'a playable demo window under the isolated profile'
+    Click-Control 'Enhance'
+    $viewStatus = Wait-Text 'Status' '^Enhanced view opened'
+    $player = Wait-For {
+        Get-CimInstance Win32_Process -Filter "Name='LumaPlayer.exe' AND ParentProcessId=$($process.Id)" |
+            ForEach-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue } |
+            Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+    } 'the GPU player launched by this dashboard'
+    Start-Sleep -Seconds 2
+    [void][LumaRelay.DashboardSnapshot]::PostMessage($player.MainWindowHandle,0x0312,[IntPtr]1,[IntPtr]::Zero)
+    $viewSummary = Wait-Text 'Status' '^Session ended'
+    $reportFile = Get-ChildItem (Join-Path $stage 'LumaRelay\sessions') -Filter '*.json' | Select-Object -First 1
+    $report = Get-Content $reportFile.FullName -Raw | ConvertFrom-Json
+    if ($report.captured -lt 5 -or $report.presented -lt 5) { throw 'Demo capture or presentation did not advance.' }
     Click-Control 'HostNav'
     Click-Control 'HostStatus'
     $hostStatus = Wait-Text 'HostState' '^Host is stopped'
@@ -103,7 +117,7 @@ try {
     (Get-Control 'HostAddress').GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).SetValue('invalid host!')
     Click-Control 'ClientPlay'
     $clientStatus = Wait-Text 'Status' '^Enter the host PC'
-    [pscustomobject]@{demo=$demoStatus; host=$hostStatus; client=$clientStatus; screenshot=$snapshot} | ConvertTo-Json
+    [pscustomobject]@{demo=$demoStatus; view=$viewSummary; frames=$report.presented; host=$hostStatus; client=$clientStatus; screenshot=$snapshot} | ConvertTo-Json
 } finally {
     # Only processes whose executable was built in this run's random directory belong to the test.
     Get-Process -Name SignalRun -ErrorAction SilentlyContinue | Where-Object {

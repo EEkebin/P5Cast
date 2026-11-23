@@ -249,18 +249,33 @@ namespace LumaRelay
             string mult = (UI<ComboBox>("Multiplier").SelectedIndex+1).ToString(CultureInfo.InvariantCulture);
             string exe = Path.Combine(Program.Root,"engine","bin","LumaPlayer.exe");
             if (!File.Exists(exe)) throw new FileNotFoundException("LumaPlayer is missing. Use the complete Windows release ZIP.");
+            string reportDir = Path.Combine(Path.GetDirectoryName(preferences),"sessions");
+            Directory.CreateDirectory(reportDir);
+            string report = Path.Combine(reportDir,Guid.NewGuid().ToString("N")+".json");
             var p = new Process();
-            p.StartInfo = new ProcessStartInfo(exe, "--hwnd "+handle.ToString(CultureInfo.InvariantCulture)+" --mode "+mode+" --multiplier "+mult) { UseShellExecute=false, WorkingDirectory=Path.GetDirectoryName(exe) };
+            p.StartInfo = new ProcessStartInfo(exe, "--hwnd "+handle.ToString(CultureInfo.InvariantCulture)+" --mode "+mode+" --multiplier "+mult+" --report "+Quote(report)) { UseShellExecute=false, WorkingDirectory=Path.GetDirectoryName(exe) };
             p.EnableRaisingEvents = true;
             p.Exited += delegate {
                 if (!window.Dispatcher.HasShutdownStarted)
                     window.Dispatcher.BeginInvoke(new Action(() => {
-                        if (p == player) Show(p.ExitCode==0 ? "Enhanced view closed." : "Enhanced view stopped. Check that the source window is visible and try again.", p.ExitCode!=0);
+                        if (p != player) return;
+                        if (p.ExitCode==0) Show(SessionSummary(report));
+                        else Show("Enhanced view stopped. Check that the source window is visible and try again.", true);
                     }));
             };
             p.Start();
             player = p;
             Show("Enhanced view opened. Audio and input stay with the source.");
+        }
+
+        string SessionSummary(string file)
+        {
+            try {
+                var result = json.Deserialize<Dictionary<string,object>>(File.ReadAllText(file));
+                return string.Format(CultureInfo.CurrentCulture, "Session ended. {0} source FPS · {1} submitted FPS · {2} interpolated frames.",
+                    Field(result,"sourceFps"),Field(result,"submittedFps"),Field(result,"generated"));
+            } catch (IOException) {} catch (UnauthorizedAccessException) {} catch (ArgumentException) {} catch (InvalidOperationException) {}
+            return "Enhanced view closed.";
         }
 
         async Task Relay(string action, params string[] args)

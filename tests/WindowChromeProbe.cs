@@ -84,6 +84,11 @@ internal static class WindowChromeProbe
         var p=element.PointToScreen(new Point(element.ActualWidth/2,element.ActualHeight/2));
         return Hit((int)Math.Round(p.X),(int)Math.Round(p.Y));
     }
+    static void RequireButtonPixel(Control button,int x,int y) {
+        var target=window.InputHitTest(window.PointFromScreen(new Point(x,y))) as DependencyObject;
+        Require(Hit(x,y)==1 && target!=null && (target==button || button.IsAncestorOf(target)),
+            button.Name+" does not own screen pixel "+x+","+y+".");
+    }
     static AutomationPeer Peer(UIElement control) {
         var peer=UIElementAutomationPeer.CreatePeerForElement(control);
         Require(peer!=null,"Missing automation peer.");
@@ -140,6 +145,15 @@ internal static class WindowChromeProbe
             var content=ScreenRect((FrameworkElement)window.Content);
             var maximizedHeader=ScreenRect(header);
             Note("Maximized content "+Geometry(content)+", title bar "+Geometry(maximizedHeader)+".");
+            foreach(string id in new[]{"PlayNav","HostNav","ClientNav","ShowStats","MinimizeWindow","MaximizeWindow","CloseWindow"}) {
+                var button=Find<Control>(id); var bounds=ScreenRect(button);
+                int edgeX=(bounds.Left+bounds.Right)/2;
+                RequireButtonPixel(button,edgeX,work.Top);
+            }
+            var close=Find<Button>("CloseWindow");
+            RequireButtonPixel(close,work.Right-1,work.Top);
+            RequireButtonPixel(close,work.Right-1,work.Top+16);
+            Note("The topmost pixel reaches each title-bar action; the upper-right corner and rightmost pixel reach Close.");
             var status=Find<TextBlock>("Status");
             var statusBar=ScreenRect((FrameworkElement)((FrameworkElement)status.Parent).Parent);
             Require(Math.Abs(maximizedHeader.Left-work.Left)<=2 && Math.Abs(maximizedHeader.Top-work.Top)<=2 &&

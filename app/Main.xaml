@@ -10,12 +10,14 @@
   <Window.Resources>
     <Style x:Key="TitleAction" TargetType="ButtonBase">
       <Setter Property="Foreground" Value="#D6E2E2"/><Setter Property="Background" Value="Transparent"/>
-      <Setter Property="Height" Value="34"/><Setter Property="MinWidth" Value="38"/><Setter Property="Padding" Value="9,0"/>
+      <Setter Property="MinWidth" Value="38"/><Setter Property="Padding" Value="9,0"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ButtonBase">
-        <Border Name="ButtonFace" Background="{TemplateBinding Background}" BorderThickness="1" BorderBrush="Transparent" CornerRadius="5" Padding="{TemplateBinding Padding}">
-          <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
-        </Border>
+        <Grid Background="Transparent">
+          <Border Name="ButtonFace" Height="34" VerticalAlignment="Center" Background="{TemplateBinding Background}" BorderThickness="1" BorderBrush="Transparent" CornerRadius="5" Padding="{TemplateBinding Padding}">
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+          </Border>
+        </Grid>
         <ControlTemplate.Triggers>
           <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ButtonFace" Property="Background" Value="#304147"/></Trigger>
           <MultiTrigger><MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="Tag" Value="Close"/></MultiTrigger.Conditions><Setter TargetName="ButtonFace" Property="Background" Value="#A63E47"/></MultiTrigger>
@@ -79,18 +81,24 @@
   </Window.Resources>
   <Grid Name="WindowFrame">
     <Grid.RowDefinitions><RowDefinition Name="HeaderRow" Height="52"/><RowDefinition Height="*"/><RowDefinition Name="StatusRow" Height="Auto"/></Grid.RowDefinitions>
-    <Border Name="HeaderBar" Background="#152026" BorderBrush="#2A393E" BorderThickness="0,0,0,1" Padding="16,0,6,0">
+    <Border Name="HeaderBar" Background="#152026" BorderBrush="#2A393E" BorderThickness="0,0,0,1">
+      <Border.Style><Style TargetType="Border">
+        <Setter Property="Padding" Value="16,6,6,6"/>
+        <Style.Triggers><DataTrigger Binding="{Binding WindowState, RelativeSource={RelativeSource AncestorType=Window}}" Value="Maximized">
+          <Setter Property="Padding" Value="16,0,0,0"/>
+        </DataTrigger></Style.Triggers>
+      </Style></Border.Style>
       <DockPanel LastChildFill="False">
         <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,24,0">
           <Image Width="26" Height="26" Stretch="Uniform" Source="{Binding Icon, RelativeSource={RelativeSource AncestorType=Window}}"/>
           <TextBlock Text="P5Cast" FontWeight="SemiBold" FontSize="19" VerticalAlignment="Center" Margin="8,0,0,0"/>
         </StackPanel>
-        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" shell:WindowChrome.IsHitTestVisibleInChrome="True">
           <Button Name="PlayNav" Content="Play" Style="{StaticResource TitleAction}" MinWidth="58"/>
           <Button Name="HostNav" Content="Host" Style="{StaticResource TitleAction}" MinWidth="58"/>
           <Button Name="ClientNav" Content="Client" Style="{StaticResource TitleAction}" MinWidth="58"/>
         </StackPanel>
-        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" shell:WindowChrome.IsHitTestVisibleInChrome="True">
           <ToggleButton Name="ShowStats" Style="{StaticResource TitleAction}" AutomationProperties.Name="Performance sidebar">
             <Canvas Width="22" Height="22" IsHitTestVisible="False">
               <Line Name="MenuTop" X1="2" X2="20" Y1="11" Y2="11" Stroke="#8FE6D0" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round">

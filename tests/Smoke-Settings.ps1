@@ -24,6 +24,24 @@ try {
     function Widget($name){$window.FindName($name)}
     function Click($name){(Widget $name).RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))}
     function Require($test,$message){if(!$test){throw $message}}
+    $traceType=$asm.GetType('Cadrivect.DirectDiagnostics',$true)
+    $flags=[Reflection.BindingFlags]'Instance,NonPublic'
+    $traceDir=Join-Path $tmp 'direct-stats'
+    $trace=$traceType.GetConstructor($flags,$null,@([string]),$null).Invoke(@([string]$traceDir))
+    $sample=New-Object 'Collections.Generic.Dictionary[string,object]'
+    $sample.Add('sampleId',1); $sample.Add('videoFramesLost',0); $sample.Add('address','private-fixture')
+    $record=$traceType.GetMethod('Record',$flags)
+    $record.Invoke($trace,@($sample.psobject.BaseObject)); $record.Invoke($trace,@($sample.psobject.BaseObject))
+    $sample['sampleId']=2; $sample['audioUnderruns']=3
+    $record.Invoke($trace,@($sample.psobject.BaseObject)); $traceType.GetMethod('Finish',$flags).Invoke($trace,$null)
+    $wait=[Diagnostics.Stopwatch]::StartNew()
+    do {
+        Start-Sleep -Milliseconds 20
+        $file=Get-ChildItem $traceDir -Filter '*.csv' -ErrorAction SilentlyContinue | Select-Object -First 1
+        $rows=if($file){@(Import-Csv $file.FullName)}
+    } while(@($rows).Count -ne 2 -and $wait.ElapsedMilliseconds -lt 3000)
+    Require (@($rows).Count -eq 2 -and $rows[0].videoFramesLost -eq '0' -and $rows[0].audioUnderruns -eq '' -and
+        $rows[1].audioUnderruns -eq '3' -and !((Get-Content $file.FullName -Raw).Contains('private-fixture'))) 'Direct diagnostics retain unique numeric samples, distinguish missing counters, and omit identifiers'
     function State($name,$value){$type.GetField($name,'Instance,NonPublic').SetValue($dash,$value)}
     function Call($name){$type.GetMethod($name,[Reflection.BindingFlags]'Instance,NonPublic').Invoke($dash,@())}
     function TryClose {

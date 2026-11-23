@@ -51,8 +51,9 @@ static bool write_all(Video *video, const void *data, DWORD size)
 
 bool video_header(Video *video)
 {
-    const uint32_t header[] = {video->extended_stats ? 0x32564443u : 0x31564443u, (uint32_t)video->codec};
+    const uint32_t header[] = {0x30564443u + (video->stats_version << 24), (uint32_t)video->codec};
     video->waiting_for_key = true;
+    QueryPerformanceFrequency(&video->performance_frequency);
     return write_all(video, header, sizeof(header));
 }
 
@@ -60,8 +61,12 @@ void video_stats(Video *video, const DirectMetrics *stats)
 {
     if (!TryAcquireSRWLockExclusive(&video->writer)) return;
     const uint32_t packet[] = {0, stats->queued_us, stats->underruns, stats->rtt_us, stats->target_us,
-                               stats->audio_bps, stats->sample_rate, stats->channels};
-    write_all(video, packet, video->extended_stats ? sizeof(packet) : 5 * sizeof(uint32_t));
+                               stats->audio_bps, stats->sample_rate, stats->channels,
+                               (uint32_t)InterlockedCompareExchange(&video->lost_frames, 0, 0),
+                               stats->concealments, stats->queue_trims, video->slow_handoffs,
+                               stats->input_gap_us, stats->callback_gap_us};
+    DWORD words = video->stats_version == 3 ? 14 : (video->stats_version == 2 ? 8 : 5);
+    write_all(video, packet, words * sizeof(uint32_t));
     ReleaseSRWLockExclusive(&video->writer);
 }
 
@@ -90,8 +95,10 @@ static NalInfo inspect(int codec, const uint8_t *data, size_t size)
 
 bool video_sample(uint8_t *data, size_t size, int32_t lost, bool recovered, void *user)
 {
-    (void)lost; (void)recovered;
+    (void)recovered;
     Video *video = user;
+    // libchiaki reports losses accumulated since the previous picture callback.
+    if (lost > 0) InterlockedExchangeAdd(&video->lost_frames, lost);
     if (!size || size > DIRECT_MAX_AU) return false;
     // libchiaki provides the negotiated profile header before pictures, including
     // each adaptive profile change. Join it to the first independently decodable AU.
@@ -118,10 +125,15 @@ bool video_sample(uint8_t *data, size_t size, int32_t lost, bool recovered, void
     }
     if (prefix + size > DIRECT_MAX_AU) return false;
     uint32_t length = (uint32_t)(prefix + size);
+    LARGE_INTEGER start, end;
+    if (video->stats_version == 3) QueryPerformanceCounter(&start);
     AcquireSRWLockExclusive(&video->writer);
     bool ok = write_all(video, &length, sizeof(length))
            && (!prefix || write_all(video, video->config, (DWORD)prefix))
            && write_all(video, data, (DWORD)size);
+    if (video->stats_version == 3 && QueryPerformanceCounter(&end) &&
+        (end.QuadPart - start.QuadPart) * 1000000 >= DIRECT_AUDIO_TARGET_US * video->performance_frequency.QuadPart)
+        video->slow_handoffs++;
     ReleaseSRWLockExclusive(&video->writer);
     if (ok) video->waiting_for_key = false;
     return ok;

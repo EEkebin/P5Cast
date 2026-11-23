@@ -34,6 +34,22 @@ static void begin_ramp(Audio *audio)
     audio->ramp_left = ramp_frames(audio);
 }
 
+static void measure_gap(int64_t *last, int64_t *maximum)
+{
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    if (*last && now.QuadPart - *last > *maximum) *maximum = now.QuadPart - *last;
+    *last = now.QuadPart;
+}
+
+static uint32_t take_gap(int64_t *maximum, int64_t frequency)
+{
+    if (!*maximum || !frequency) return UINT32_MAX;
+    double us = *maximum * (1000000.0 / (double)frequency);
+    *maximum = 0;
+    return us < UINT32_MAX - 1 ? (uint32_t)(us + 0.5) : UINT32_MAX - 1;
+}
+
 static void apply_volume(Audio *audio, int16_t *pcm, size_t frames)
 {
     LONG volume = audio->volume_percent ? __atomic_load_n(audio->volume_percent, __ATOMIC_ACQUIRE) : 100;
@@ -71,6 +87,7 @@ static void opus_frame(uint8_t *packet, size_t bytes, void *user)
     // libchiaki delivers deduplicated Opus frames and uses zero bytes for concealment.
     AcquireSRWLockExclusive(&audio->lock);
     audio->compressed_bytes += bytes;
+    if (!bytes) audio->concealments++;
     ReleaseSRWLockExclusive(&audio->lock);
     audio->decoder_sink.frame_cb(packet, bytes, audio->decoder_sink.user);
 }
@@ -92,6 +109,11 @@ void audio_settings(uint32_t channels, uint32_t rate, void *user)
     audio->device = 0;
     audio->playing = false;
     audio->queued_frames = audio->read_frame = 0;
+    audio->target_us = DIRECT_AUDIO_TARGET_US;
+    audio->stable_frames = audio->device_frames = audio->last_underrun_frame = 0;
+    audio->release_frames = 0;
+    audio->last_input_tick = audio->last_callback_tick = audio->max_input_ticks = audio->max_callback_ticks = 0;
+    QueryPerformanceFrequency(&audio->frequency);
     audio->gain_initialized = false;
     memset(audio->last_output, 0, sizeof(audio->last_output));
     audio->ramp_left = 0;
@@ -119,7 +141,12 @@ void audio_stats(Audio *audio, uint64_t now_ms, DirectMetrics *metrics)
     AcquireSRWLockExclusive(&audio->lock);
     if (audio->device) SDL_LockAudioDevice(audio->device);
     metrics->queued_us = audio->device ? (uint32_t)(audio->queued_frames * 1000000ull / audio->rate) : UINT32_MAX;
+    metrics->target_us = audio->device ? audio->target_us : UINT32_MAX;
+    metrics->input_gap_us = take_gap(&audio->max_input_ticks, audio->frequency.QuadPart);
+    metrics->callback_gap_us = take_gap(&audio->max_callback_ticks, audio->frequency.QuadPart);
     metrics->underruns = audio->underruns;
+    metrics->concealments = audio->concealments;
+    metrics->queue_trims = audio->queue_trims;
     if (audio->device) SDL_UnlockAudioDevice(audio->device);
     metrics->sample_rate = audio->rate ? audio->rate : UINT32_MAX;
     metrics->channels = audio->channels ? audio->channels : UINT32_MAX;
@@ -139,13 +166,18 @@ void audio_frame(int16_t *pcm, size_t samples, void *user)
     AcquireSRWLockExclusive(&audio->lock);
     if (audio->device && samples && samples <= audio->rate / 10) {
         SDL_LockAudioDevice(audio->device);
-        size_t target = (size_t)audio->rate * DIRECT_AUDIO_TARGET_US / 1000000;
-        if (audio->queued_frames + samples > 4 * target && audio->queued_frames) {
-            // A burst accumulated stale audio. Keep the latest target duration,
-            // including the new packet, and crossfade from the last emitted sample.
-            size_t keep = samples < target ? target - samples : 0;
+        measure_gap(&audio->last_input_tick, &audio->max_input_ticks);
+        size_t limit = (size_t)audio->rate * (uint64_t)(audio->target_us + 45000u) / 1000000;
+        if (audio->queued_frames + samples > limit && audio->queued_frames) {
+            // Preserve an extra 15 ms after a late burst so its following gap
+            // does not immediately exhaust a queue just cut down to its target.
+            size_t reserve = (size_t)audio->rate * (uint64_t)(audio->target_us + 15000u) / 1000000;
+            size_t keep = samples < reserve ? reserve - samples : 0;
             audio->read_frame = (audio->read_frame + audio->queued_frames - keep) % DIRECT_AUDIO_CAPACITY;
             audio->queued_frames = keep;
+            audio->queue_trims++;
+            audio->release_frames = 0;
+            audio->stable_frames = 0;
             begin_ramp(audio);
         }
         apply_volume(audio, pcm, samples);
@@ -169,20 +201,37 @@ void SDLCALL audio_render(void *user, Uint8 *stream, int length)
     int16_t *output = (int16_t *)stream;
     size_t frames = (size_t)length / (audio->channels * sizeof(int16_t));
     uint32_t ramp = ramp_frames(audio);
-    if (!audio->playing && audio->queued_frames >= (size_t)audio->rate * DIRECT_AUDIO_TARGET_US / 1000000) {
+    measure_gap(&audio->last_callback_tick, &audio->max_callback_ticks);
+    audio->device_frames += frames;
+    size_t target = (size_t)audio->rate * (uint64_t)audio->target_us / 1000000;
+    if (!audio->playing && audio->queued_frames >= target) {
         audio->playing = true;
         begin_ramp(audio);
     }
     size_t ready = audio->playing ? audio->queued_frames : 0;
     if (ready > frames) ready = frames;
+    // After stable playback, release any surplus by blending one extra input
+    // frame across a whole output callback. Leave the new reserve intact.
+    bool shorten = audio->playing && frames > 1 && audio->release_frames && audio->queued_frames > frames + target;
     for (size_t i = 0; i < frames; ++i) {
         if (i == ready && audio->playing) {
             audio->underruns++;
+            if (audio->last_underrun_frame && audio->device_frames - audio->last_underrun_frame <= 3ull * audio->rate) {
+                audio->target_us += 10000;
+                if (audio->target_us > DIRECT_AUDIO_MAX_TARGET_US) audio->target_us = DIRECT_AUDIO_MAX_TARGET_US;
+            }
+            audio->last_underrun_frame = audio->device_frames;
+            audio->stable_frames = audio->release_frames = 0;
             audio->playing = false;
             begin_ramp(audio);
         }
         for (uint32_t c = 0; c < audio->channels; c++) {
             int sample = i < ready ? audio->pcm[audio->read_frame * audio->channels + c] : 0;
+            if (shorten) {
+                size_t next = (audio->read_frame + 1) % DIRECT_AUDIO_CAPACITY;
+                int other = audio->pcm[next * audio->channels + c];
+                sample += (other - sample) * (int)(i + 1) / (int)frames;
+            }
             if (audio->ramp_left) {
                 uint32_t left = audio->ramp_left - 1;
                 sample = (audio->ramp_start[c] * (int)left + sample * (int)(ramp - left)) / (int)ramp;
@@ -193,4 +242,17 @@ void SDLCALL audio_render(void *user, Uint8 *stream, int length)
         if (i < ready) audio->read_frame = (audio->read_frame + 1) % DIRECT_AUDIO_CAPACITY;
     }
     audio->queued_frames -= ready;
+    if (shorten) {
+        audio->read_frame = (audio->read_frame + 1) % DIRECT_AUDIO_CAPACITY;
+        audio->queued_frames--;
+        audio->release_frames--;
+    }
+    if (audio->playing && audio->target_us > DIRECT_AUDIO_TARGET_US) {
+        audio->stable_frames += frames;
+        if (audio->stable_frames >= 10ull * audio->rate) {
+            audio->stable_frames = 0;
+            audio->target_us -= 5000;
+            audio->release_frames = audio->rate / 200;
+        }
+    }
 }

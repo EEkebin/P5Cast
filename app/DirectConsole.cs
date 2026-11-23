@@ -230,11 +230,12 @@ namespace Cadrivect
                 throw new ArgumentException("Enter the PS5’s LAN address or DNS name.");
             return s;
         }
-        static Process Begin(string args,bool captureOutput)
+        static Process Begin(string args,bool captureOutput,bool streamStats=false)
         {
             if(!File.Exists(CorePath)) throw new FileNotFoundException("The direct streaming engine is missing. Extract the complete P5Cast release.");
             var info=new ProcessStartInfo(CorePath,args) {WorkingDirectory=Path.GetDirectoryName(CorePath),UseShellExecute=false,
                 CreateNoWindow=true,RedirectStandardInput=true,RedirectStandardOutput=captureOutput};
+            if(streamStats) info.EnvironmentVariables["P5CAST_DIRECT_STATS_VERSION"]="3";
             return Process.Start(info);
         }
         static void WriteSecrets(Process p,byte[] secret)
@@ -266,7 +267,7 @@ namespace Cadrivect
             byte[] secret=Keys(); Process p=null;
             try {
                 if(secret.Length!=32 && secret.Length!=36) throw new InvalidDataException("This registration needs to be paired again.");
-                p=Begin(arguments,true);
+                p=Begin(arguments,true,true);
                 var control=new RestControl(pipe,p.Id,volume);
                 try {
                     restControls.Add(p,control);

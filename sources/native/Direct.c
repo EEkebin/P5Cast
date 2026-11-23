@@ -142,7 +142,6 @@ static int run(Direct *core, const char *pipe_name, ChiakiConnectInfo *info)
                 DirectMetrics stats = {0};
                 audio_stats(&core->audio, GetTickCount64(), &stats);
                 stats.rtt_us = (uint32_t)InterlockedCompareExchange(&core->rtt_us, 0, 0);
-                stats.target_us = DIRECT_AUDIO_TARGET_US;
                 video_stats(&core->video, &stats);
                 next_stats = GetTickCount64() + 1000;
             }
@@ -159,7 +158,7 @@ static int run(Direct *core, const char *pipe_name, ChiakiConnectInfo *info)
 #undef main
 int main(int argc, char **argv)
 {
-    if (argc == 2 && !strcmp(argv[1], "--version")) { puts("CadrivectDirect / libchiaki 1.10.1 / CDV1 + CDV2"); return 0; }
+    if (argc == 2 && !strcmp(argv[1], "--version")) { puts("CadrivectDirect / libchiaki 1.10.1 / CDV1 + CDV2 + CDV3"); return 0; }
     if (argc == 3 && !strcmp(argv[1], "--register")) return register_console(argv[2]);
     bool volume_control = argc >= 7 && !strcmp(argv[argc - 1], "--session-control");
     bool rest_control = volume_control || (argc >= 7 && !strcmp(argv[argc - 1], "--rest-control"));
@@ -172,7 +171,8 @@ int main(int argc, char **argv)
     core.rtt_us = -1;
     core.video.pipe = INVALID_HANDLE_VALUE;
     core.video.codec = argv[3][0] - '0';
-    core.video.extended_stats = argc >= 6;
+    const char *version = getenv("P5CAST_DIRECT_STATS_VERSION");
+    core.video.stats_version = version && !strcmp(version, "3") ? 3 : (argc >= 6 ? 2 : 1);
     core.video.stop = CreateEventW(NULL, TRUE, FALSE, NULL);
     if (!core.video.stop) return 22;
     info.host = argv[2];

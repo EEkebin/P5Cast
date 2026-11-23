@@ -599,6 +599,10 @@ internal static class Player
                +",\"audioBitrateKbps\":"+Number(audio==null ? -1:audio.BitrateKbps)+",\"audioSampleRate\":"+Number(audio==null ? -1:audio.SampleRate)
                +",\"audioChannels\":"+Number(audio==null ? -1:audio.Channels)
                +",\"audioUnderruns\":"+Number(audio==null ? -1:audio.Underruns)+",\"handshakeRttMs\":"+Number(audio==null ? -1:audio.RttMs)
+               +",\"videoFramesLost\":"+Number(audio==null ? -1:audio.VideoFramesLost)+",\"audioConcealments\":"+Number(audio==null ? -1:audio.AudioConcealments)
+               +",\"audioQueueTrims\":"+Number(audio==null ? -1:audio.AudioQueueTrims)+",\"slowVideoHandoffs\":"+Number(audio==null ? -1:audio.SlowVideoHandoffs)
+               +",\"audioFrameGapMaxMs\":"+Number(audio==null ? -1:audio.AudioFrameGapMaxMs)+",\"audioCallbackGapMaxMs\":"+Number(audio==null ? -1:audio.AudioCallbackGapMaxMs)
+               +",\"decodedFrames\":"+Number(direct==null ? -1:direct.DecodedFrames)+",\"replacedFrames\":"+Number(direct==null ? -1:direct.ReplacedFrames)
                +",\"decodeMs\":"+Number(direct==null ? -1:direct.DecodeMs)
                +(direct==null ? "" : ",\"codec\":"+JsonString(direct.CodecName)+",\"bitrateMbps\":"+Number(direct.BitrateMbps));
     }

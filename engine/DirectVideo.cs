@@ -19,14 +19,20 @@ internal sealed class DirectVideo : IDisposable
     {
         public readonly double QueueMs=-1, TargetMs=-1, RttMs=-1, BitrateKbps=-1;
         public readonly long Underruns=-1, SampleRate=-1, Channels=-1;
+        public readonly long VideoFramesLost=-1, AudioConcealments=-1, AudioQueueTrims=-1, SlowVideoHandoffs=-1;
+        public readonly double AudioFrameGapMaxMs=-1, AudioCallbackGapMaxMs=-1;
         public AudioTelemetry() { }
-        public AudioTelemetry(BinaryReader input,bool extended) {
+        public AudioTelemetry(BinaryReader input,uint version) {
             QueueMs=Scaled(input,1000); Underruns=Value(input); RttMs=Scaled(input,1000); TargetMs=Scaled(input,1000);
-            if(extended) {
+            if(version>=0x32564443) {
                 // CDV2 appends measured Opus payload bits/s, negotiated sample rate and channel count.
                 BitrateKbps=Scaled(input,1000); SampleRate=Value(input); Channels=Value(input);
                 if(SampleRate==0) SampleRate=-1;
                 if(Channels==0) Channels=-1;
+            }
+            if(version==0x33564443) {
+                VideoFramesLost=Value(input); AudioConcealments=Value(input); AudioQueueTrims=Value(input); SlowVideoHandoffs=Value(input);
+                AudioFrameGapMaxMs=Scaled(input,1000); AudioCallbackGapMaxMs=Scaled(input,1000);
             }
         }
         static long Value(BinaryReader input) { uint raw=input.ReadUInt32(); return raw==uint.MaxValue ? -1L:raw; }
@@ -55,7 +61,9 @@ internal sealed class DirectVideo : IDisposable
     volatile string error="",codec="";
     volatile AudioTelemetry audio=new AudioTelemetry();
     int decodeUs=-1,rateKbps;
-    int codecId;
+    int codecId,decodedFrames,replacedFrames;
+    public int DecodedFrames { get {return Volatile.Read(ref decodedFrames);} }
+    public int ReplacedFrames { get {return Volatile.Read(ref replacedFrames);} }
     public bool Closed { get { lock(gate) return closed && pending==IntPtr.Zero; } }
     public string Error { get { return error; } }
     public string CodecName { get { return codec; } }
@@ -83,7 +91,7 @@ internal sealed class DirectVideo : IDisposable
             pipe.EndWaitForConnection(pipe.BeginWaitForConnection(null,null));
             var reader=new BinaryReader(pipe);
             uint version=reader.ReadUInt32();
-            if(version!=0x31564443 && version!=0x32564443) throw new InvalidDataException("Unexpected direct video stream.");
+            if(version!=0x31564443 && version!=0x32564443 && version!=0x33564443) throw new InvalidDataException("Unexpected direct video stream.");
             codecId=reader.ReadInt32();
             if(codecId<1 || codecId>3) throw new InvalidDataException("Unknown console codec.");
             codec=codecId==1 ? "H.264" : codecId==2 ? "HEVC" : "HEVC HDR";
@@ -93,7 +101,7 @@ internal sealed class DirectVideo : IDisposable
             while(!stopping) {
                 int length=reader.ReadInt32();
                 if(length==0) {
-                    audio=new AudioTelemetry(reader,version==0x32564443);
+                    audio=new AudioTelemetry(reader,version);
                     continue;
                 }
                 if(length<0 || length>16*1024*1024) throw new InvalidDataException("Invalid console video packet size.");
@@ -117,7 +125,11 @@ internal sealed class DirectVideo : IDisposable
                     if(result<0) throw new InvalidDataException("Unsupported or damaged console video frame.");
                     Volatile.Write(ref decodeUs,(int)((Stopwatch.GetTimestamp()-start)*1000000.0/Stopwatch.Frequency));
                     lock(gate) {
-                        if(pending!=IntPtr.Zero) FreePicture(decoder,pending);
+                        Interlocked.Increment(ref decodedFrames);
+                        if(pending!=IntPtr.Zero) {
+                            FreePicture(decoder,pending);
+                            Interlocked.Increment(ref replacedFrames);
+                        }
                         pending=frame; picture=next; arrival=start*1000.0/Stopwatch.Frequency;
                     }
                 }

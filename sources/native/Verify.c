@@ -28,7 +28,25 @@ static void verify_profile(void)
     for (size_t i = 0; i < sizeof(invalid)/sizeof(invalid[0]); i++) CHECK(!video_profile(&profile, 1, "60", invalid[i], NULL));
 }
 
-static void verify_video(int codec, bool extended)
+// Stall the reader after the sender starts a picture larger than the pipe quota.
+static DWORD WINAPI drain_stalled_picture(void *input)
+{
+    DWORD available = 0, read = 0, total = 0;
+    for (int attempt = 0; !available && attempt < 1000; attempt++) {
+        CHECK(PeekNamedPipe(input, NULL, 0, NULL, &available, NULL));
+        if (!available) Sleep(1);
+    }
+    CHECK(available);
+    Sleep(50);
+    uint8_t buffer[4096];
+    while (total < 65536 + sizeof(uint32_t)) {
+        CHECK(ReadFile(input, buffer, sizeof(buffer), &read, NULL) && read);
+        total += read;
+    }
+    return 0;
+}
+
+static void verify_video(int codec, unsigned version)
 {
     char path[100];
     snprintf(path, sizeof(path), "\\\\.\\pipe\\CadrivectVerify-%lu-%d", GetCurrentProcessId(), codec);
@@ -37,7 +55,7 @@ static void verify_video(int codec, bool extended)
     CHECK(input != INVALID_HANDLE_VALUE);
     Video video = {0};
     video.codec = codec;
-    video.extended_stats = extended;
+    video.stats_version = version;
     video.stop = CreateEventW(NULL, TRUE, FALSE, NULL);
     video.pipe = CreateFileA(path, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL);
     CHECK(video.stop && video.pipe != INVALID_HANDLE_VALUE && video_header(&video));
@@ -51,26 +69,37 @@ static void verify_video(int codec, bool extended)
     CHECK(video_sample(config, config_size, 0, false, &video));
     CHECK(!video_sample(inter, sizeof(inter), 0, false, &video));
     CHECK(video_sample(intra, sizeof(intra), 0, false, &video));
-    CHECK(video_sample(inter, sizeof(inter), 0, false, &video));
+    CHECK(video_sample(inter, sizeof(inter), 3, true, &video));
     CHECK(video_sample(config, config_size, 0, false, &video));
     CHECK(!video_sample(inter, sizeof(inter), 0, false, &video));
     CHECK(video_sample(intra, sizeof(intra), 0, false, &video));
-    DirectMetrics metrics = {14000, 1, UINT32_MAX, DIRECT_AUDIO_TARGET_US, 128000, 48000, 2};
+    DirectMetrics metrics = {14000, 1, UINT32_MAX, DIRECT_AUDIO_TARGET_US, 128000, 48000, 2, 1, 4, 27500, 6000};
     video_stats(&video, &metrics);
     DWORD count;
     uint8_t packet[200];
     CHECK(ReadFile(input, packet, sizeof(packet), &count, NULL));
     uint8_t expected[200] = {0};
-    uint32_t header[] = {extended ? 0x32564443u : 0x31564443u, (uint32_t)codec, config_size + sizeof(intra)};
+    uint32_t header[] = {0x30564443u + (version << 24), (uint32_t)codec, config_size + sizeof(intra)};
     size_t off = 0;
 #define APPEND(data, n) do { memcpy(expected + off, data, n); off += n; } while (0)
     APPEND(header, sizeof(header)); APPEND(config, config_size); APPEND(intra, sizeof(intra));
     uint32_t inter_size = sizeof(inter), sentinel = 0;
     APPEND(&inter_size, 4); APPEND(inter, sizeof(inter));
     APPEND(&header[2], 4); APPEND(config, config_size); APPEND(intra, sizeof(intra));
-    uint32_t stats[] = {14000, 1, UINT32_MAX, DIRECT_AUDIO_TARGET_US, 128000, 48000, 2};
-    APPEND(&sentinel, 4); APPEND(stats, extended ? sizeof(stats) : 4 * sizeof(uint32_t));
+    uint32_t stats[] = {14000, 1, UINT32_MAX, DIRECT_AUDIO_TARGET_US, 128000, 48000, 2, 3, 1, 4, video.slow_handoffs, 27500, 6000};
+    APPEND(&sentinel, 4); APPEND(stats, (version == 3 ? 13 : (version == 2 ? 7 : 4)) * sizeof(uint32_t));
     CHECK(count == off && !memcmp(expected, packet, off));
+    if (codec == 1 && version == 3) {
+        uint8_t *picture = calloc(65536, 1);
+        CHECK(picture);
+        memcpy(picture, inter, sizeof(inter));
+        uint32_t before = video.slow_handoffs;
+        HANDLE reader = CreateThread(NULL, 0, drain_stalled_picture, input, 0, NULL);
+        CHECK(reader && video_sample(picture, 65536, 0, false, &video));
+        CHECK(WaitForSingleObject(reader, 3000) == WAIT_OBJECT_0 && video.slow_handoffs == before + 1);
+        CloseHandle(reader);
+        free(picture);
+    }
     CloseHandle(input);
     CHECK(!video_sample(inter, sizeof(inter), 0, false, &video));
     CHECK(WaitForSingleObject(video.stop, 0) == WAIT_OBJECT_0);
@@ -78,10 +107,81 @@ static void verify_video(int codec, bool extended)
     CloseHandle(video.pipe); CloseHandle(video.stop);
 }
 
+static uint32_t verify_burst_train(bool adaptive)
+{
+    Audio audio = {0};
+    audio_settings(2, 48000, &audio);
+    CHECK(audio.device);
+    SDL_PauseAudioDevice(audio.device, 1);
+    int16_t block[240 * 2], output[240 * 2];
+    for (int i = 0; i < 240; i++) { // Continuous 200 Hz triangle, opposite stereo polarity.
+        int sample = (i < 60 ? i : i < 180 ? 120 - i : i - 240) * 200;
+        block[2*i] = sample;
+        block[2*i+1] = -sample;
+    }
+    // Requests before the first packet are startup silence, not underruns.
+    for (int i = 0; i < 20; i++) audio_render(&audio, (Uint8 *)output, sizeof(output));
+    CHECK(!audio.underruns && audio.target_us == 15000);
+    int last = 0;
+    for (int burst = 0; burst < 12; burst++) {
+        // Every cycle supplies exactly 65 ms of media, in a single arrival burst.
+        for (int i = 0; i < 13; i++) audio_frame(block, 240, &audio);
+        for (int i = 0; i < 13; i++) {
+            audio_render(&audio, (Uint8 *)output, sizeof(output));
+            if (!adaptive) audio.target_us = DIRECT_AUDIO_TARGET_US;
+            for (int j = 0; j < 240; j++) {
+                CHECK(output[j*2+1] == -output[j*2] && abs(output[j*2] - last) <= 500);
+                last = output[j*2];
+            }
+        }
+        if (burst == 0) CHECK(audio.underruns == 1 && audio.target_us == 15000);
+    }
+    uint32_t underruns = audio.underruns;
+    DirectMetrics metrics = {0};
+    audio_stats(&audio, GetTickCount64(), &metrics);
+    if (adaptive) {
+        CHECK(underruns == 2 && metrics.target_us == 25000 && metrics.queue_trims == 2);
+        for (int i = 0; i < 6; i++) audio_frame(block, 240, &audio);
+        size_t before = audio.queued_frames;
+        for (int i = 0; i < 23 * 200; i++) {
+            audio_frame(block, 240, &audio);
+            audio_render(&audio, (Uint8 *)output, sizeof(output));
+            for (int j = 0; j < 240; j++) {
+                CHECK(output[j*2+1] == -output[j*2] && abs(output[j*2] - last) <= 500);
+                last = output[j*2];
+            }
+        }
+        CHECK(audio.underruns == underruns && audio.target_us == 15000 && audio.queued_frames == before - 480);
+        // Repeated genuine starvation can raise the reserve only up to its cap.
+        for (int i = 0; i < 16; i++) audio_render(&audio, (Uint8 *)output, sizeof(output));
+        for (int episode = 0; episode < 6; episode++) {
+            for (int i = 0; i < 11; i++) audio_frame(block, 240, &audio);
+            for (int i = 0; i < 12; i++) audio_render(&audio, (Uint8 *)output, sizeof(output));
+        }
+        CHECK(audio.target_us == DIRECT_AUDIO_MAX_TARGET_US && !audio.playing);
+        uint32_t stopped = audio.underruns;
+        for (int i = 0; i < 30; i++) audio_render(&audio, (Uint8 *)output, sizeof(output));
+        CHECK(audio.underruns == stopped);
+        SDL_Delay(25);
+        audio_frame(block, 240, &audio); audio_render(&audio, (Uint8 *)output, sizeof(output));
+        audio_stats(&audio, GetTickCount64(), &metrics);
+        CHECK(metrics.target_us == 55000 && metrics.input_gap_us >= 20000 && metrics.callback_gap_us >= 20000 &&
+              metrics.input_gap_us != UINT32_MAX && metrics.callback_gap_us != UINT32_MAX);
+        audio_stats(&audio, GetTickCount64(), &metrics);
+        CHECK(metrics.input_gap_us == UINT32_MAX && metrics.callback_gap_us == UINT32_MAX);
+    } else CHECK(underruns == 12 && metrics.queue_trims == 12);
+    SDL_CloseAudioDevice(audio.device);
+    return underruns;
+}
+
 static void verify_audio(void)
 {
     CHECK(SDL_AudioInit("dummy") == 0);
     CHECK(!strcmp(SDL_GetCurrentAudioDriver(), "dummy"));
+    uint32_t fixed = verify_burst_train(false);
+    uint32_t adaptive = verify_burst_train(true);
+    printf("Synthetic 48 kHz burst train: %u underruns with fixed 15 ms, %u adaptive; stable playback returned to 15 ms.\n",
+           (unsigned)fixed, (unsigned)adaptive);
     Audio audio = {0};
     audio_settings(2, 48000, &audio);
     CHECK(audio.device && !audio.failed);
@@ -115,6 +215,7 @@ static void verify_audio(void)
         audio_stats(&audio, GetTickCount64(), &metrics);
         CHECK(metrics.queued_us <= DIRECT_AUDIO_TARGET_US * 4);
     }
+    CHECK(metrics.queue_trims > 0 && metrics.underruns == 1);
     audio_render(&audio, (Uint8 *)out, sizeof(tone));
     for (int i=0; i<240; ++i) {
         int expected = i < 96 ? 24000 - 500*(i+1) : -24000;
@@ -143,7 +244,7 @@ static void verify_audio(void)
     CHECK(received.playing); // The actual Opus decoder supplied PCM to the playback callback.
     uint64_t start = received.window_start_ms;
     audio_stats(&received, start+1000, &metrics);
-    CHECK(metrics.sample_rate == 48000 && metrics.channels == 2 && metrics.audio_bps == 24);
+    CHECK(metrics.sample_rate == 48000 && metrics.channels == 2 && metrics.audio_bps == 24 && metrics.concealments == 1);
     audio_stats(&received, start+2000, &metrics);
     CHECK(metrics.audio_bps == 0);
     sink.frame_cb(opus_silence, sizeof(opus_silence), sink.user);
@@ -303,13 +404,12 @@ int main(void)
     SDL_SetMainReady();
     verify_profile();
     for (int codec = 1; codec <= 3; codec++) {
-        verify_video(codec, false);
-        verify_video(codec, true);
+        for (unsigned version = 1; version <= 3; version++) verify_video(codec, version);
     }
     verify_audio();
     verify_first_audio_volume();
     verify_rest();
     verify_virtual_pad();
-    puts("Verified video bitrate profiles, CDV1/CDV2 framing, actual decoded stereo Opus and bitrate, bounded dummy queue, virtual controller, and session-scoped explicit rest command exactly once.");
+    puts("Verified video bitrate profiles, CDV1/CDV2/CDV3 framing and loss counters, actual decoded stereo Opus and bitrate, bounded dummy queue, virtual controller, and session-scoped explicit rest command exactly once.");
     return 0;
 }

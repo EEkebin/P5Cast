@@ -8,6 +8,7 @@
 
 #define DIRECT_MAX_AU (16u * 1024u * 1024u)
 #define DIRECT_AUDIO_TARGET_US 15000u
+#define DIRECT_AUDIO_MAX_TARGET_US 55000u
 #define DIRECT_AUDIO_CAPACITY 8192u /* frames; holds a 100 ms Opus block at 48 kHz */
 typedef struct {
     HANDLE pipe, stop;
@@ -16,13 +17,21 @@ typedef struct {
     uint8_t *config;
     size_t config_size;
     unsigned config_mask;
-    bool waiting_for_key, extended_stats;
+    bool waiting_for_key;
+    unsigned stats_version;
+    volatile LONG lost_frames;
+    uint32_t slow_handoffs;
+    LARGE_INTEGER performance_frequency;
 } Video;
 typedef struct {
     SRWLOCK lock;
     SDL_AudioDeviceID device;
     const volatile LONG *volume_percent;
-    uint32_t rate, channels, underruns;
+    uint32_t rate, channels, underruns, concealments, queue_trims;
+    uint32_t target_us, release_frames;
+    uint64_t device_frames, last_underrun_frame, stable_frames;
+    LARGE_INTEGER frequency;
+    int64_t last_input_tick, last_callback_tick, max_input_ticks, max_callback_ticks;
     uint64_t compressed_bytes, window_start_ms;
     ChiakiAudioSink decoder_sink;
     int16_t pcm[DIRECT_AUDIO_CAPACITY * 2], last_output[2], ramp_start[2];
@@ -42,7 +51,8 @@ typedef struct {
 
 typedef struct {
     uint32_t queued_us, underruns, rtt_us, target_us;
-    uint32_t audio_bps, sample_rate, channels;
+    uint32_t audio_bps, sample_rate, channels, concealments, queue_trims;
+    uint32_t input_gap_us, callback_gap_us;
 } DirectMetrics;
 
 typedef struct {

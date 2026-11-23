@@ -97,17 +97,17 @@ internal static partial class EmbeddedProbe
         Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background,(Action)delegate {frame.Continue=false;});
         Dispatcher.PushFrame(frame); Thread.Sleep(4);
     }
-    static void SendFixture(string name,byte[][] packets,ManualResetEvent pause,ManualResetEvent end,int codec=1)
+    static void SendFixture(string name,byte[][] packets,ManualResetEvent pause,ManualResetEvent end,int codec=1,bool lossStats=false)
     {
         try {
             using(var pipe=new NamedPipeClientStream(".",name,PipeDirection.Out)) {
                 pipe.Connect(10000);
                 using(var writer=new BinaryWriter(pipe)) {
-                    writer.Write(0x32564443); writer.Write(codec); WriteAudio(writer,192750,48000,2);
+                    writer.Write(lossStats?0x33564443:0x32564443); writer.Write(codec); WriteAudio(writer,192750,48000,2,lossStats);
                     bool unavailable=false;
                     int frame=0; while(!end.WaitOne(33)) {
                         if(pause.WaitOne(0)) {
-                            if(!unavailable) { WriteAudio(writer,-1,-1,-1); writer.Flush(); unavailable=true; }
+                            if(!unavailable) { WriteAudio(writer,-1,-1,-1,lossStats); writer.Flush(); unavailable=true; }
                             continue;
                         }
                         var packet=packets[frame++%packets.Length]; writer.Write(packet.Length); writer.Write(packet); writer.Flush();
@@ -116,9 +116,10 @@ internal static partial class EmbeddedProbe
             }
         } catch(IOException) { } catch(TimeoutException) { }
     }
-    static void WriteAudio(BinaryWriter writer,int bitrate,int rate,int channels) {
+    static void WriteAudio(BinaryWriter writer,int bitrate,int rate,int channels,bool lossStats) {
         writer.Write(0); writer.Write(17000); writer.Write(0); writer.Write(4100); writer.Write(20000);
         writer.Write(bitrate); writer.Write(rate); writer.Write(channels);
+        if(lossStats) {writer.Write(4); writer.Write(7); writer.Write(1); writer.Write(2); writer.Write(27500); writer.Write(6000);}
     }
     static Thread Start(Type api,string[] options,Action<int> completed) {
         var thread=new Thread(delegate() { completed((int)api.GetMethod("Run").Invoke(null,new object[]{options})); });
@@ -212,7 +213,7 @@ internal static partial class EmbeddedProbe
             bool testNvidia=args[3]=="rtx-fruc";
             var clip=File.ReadAllBytes(args[2]);
             byte[][] frames=testNvidia ? HdrMotionPackets(clip) : new[]{clip};
-            new Thread(delegate(){SendFixture(pipe,frames,pause,end,3);}) {IsBackground=true}.Start();
+            new Thread(delegate(){SendFixture(pipe,frames,pause,end,3,true);}) {IsBackground=true}.Start();
             int lastPresented=0;
             Action<Forms.Screen,string,bool> verify=delegate(Forms.Screen screen,string mode,bool hdr) {
                 clock.Restart();
@@ -224,6 +225,10 @@ internal static partial class EmbeddedProbe
                     CheckRenderer(data,renderer);
                     Check((string)data["codec"]=="HEVC HDR" && (string)data["presentationColorSpace"]==(hdr ? "BT.2020 PQ":"sRGB") &&
                           (string)data["presenterHdrFormat"]==(hdr ? "RGB10A2_UNORM":null),"Wrong swap chain or codec: "+serializer.Serialize(data));
+                    Check(Convert.ToInt64(data["videoFramesLost"])==4 && Convert.ToInt64(data["audioConcealments"])==7 &&
+                          Convert.ToInt64(data["audioQueueTrims"])==1 && Convert.ToInt64(data["slowVideoHandoffs"])==2 &&
+                          Convert.ToDouble(data["audioFrameGapMaxMs"])==27.5 && Convert.ToDouble(data["audioCallbackGapMaxMs"])==6 &&
+                          Convert.ToInt64(data["decodedFrames"])>0,"Direct stream diagnosis counters missing.");
                     lastPresented=Convert.ToInt32(data["presented"]);
                     Console.WriteLine(renderer+" on "+screen.DeviceName+" presented "+data["codec"]+" via "+data["presentationColorSpace"]+" "+data["presenterHdrFormat"]);
                     return;
@@ -411,6 +416,10 @@ internal static partial class EmbeddedProbe
                     Check(Convert.ToInt32(data["targetPresentedFps"])==60 && Convert.ToInt32(data["audioQueueMs"])==17 &&
                           Convert.ToDouble(data["audioBitrateKbps"])==192.75 && Convert.ToInt32(data["audioSampleRate"])==48000 && Convert.ToInt32(data["audioChannels"])==2,
                           "Embedded target or audio telemetry missing.");
+                    Check(data["videoFramesLost"]==null && data["audioConcealments"]==null &&
+                          data["slowVideoHandoffs"]==null && data["audioQueueTrims"]==null &&
+                          data["audioFrameGapMaxMs"]==null && data["audioCallbackGapMaxMs"]==null,
+                          "Unavailable CDV3 fields must remain unavailable for CDV2.");
                     pause.Set(); pauseStart=elapsed; stage=4;
                 } else if(stage==4 && elapsed>pauseStart+650) {
                     Check(data["audioBitrateKbps"]==null && data["audioSampleRate"]==null && data["audioChannels"]==null,

@@ -328,7 +328,10 @@ namespace Cadrivect
             AddMetric(diagnostics,"surface","Playback area","Size of the player surface in screen pixels, including any black bars.");
             AddMetric(diagnostics,"refresh","Display refresh","Active Windows display mode in Hz. The FPS dial counts submitted frames.");
             AddMetric(diagnostics,"renderer","Effects and output API","Graphics API running picture effects and presenting the video.");
-            AddMetric(diagnostics,"incomingFps","Incoming FPS","Frames received from the source each second.");
+            AddMetric(diagnostics,"incomingFps","Source FPS","Source frames accepted by the renderer each second. Duplicate filtering and skipped decoded frames can lower this number.");
+            AddMetric(diagnostics,"videoLoss","Lost video frames","Cumulative video frames the Direct receiver reports missing before decode.");
+            AddMetric(diagnostics,"localSkips","Skipped after decode","Decoded pictures replaced by newer pictures before the player could render them.");
+            AddMetric(diagnostics,"slowHandoffs","Slow decoder handoffs","Video callbacks that spent at least 15 ms handing compressed video to the local decoder. These can also delay audio delivery.");
             AddMetric(diagnostics,"requested","Requested bitrate","Configured bitrate requested from the PS5 when connecting.");
             AddMetric(diagnostics,"bitrate","Received bitrate","Measured compressed video arriving from the PS5.");
             AddMetric(diagnostics,"decode","Video decode","Time spent decoding the latest video frame.");
@@ -339,6 +342,8 @@ namespace Cadrivect
             AddMetric(diagnostics,"queue","Audio queue","Audio buffered locally, excluding the Windows mixer and device buffers.");
             AddMetric(diagnostics,"audioTarget","Queue target","Requested local audio preroll.");
             AddMetric(diagnostics,"underruns","Queue underruns","Observed audio queue underruns during the session.");
+            AddMetric(diagnostics,"concealments","Concealed audio frames","Missing Opus frames for which the Direct receiver requested concealment.");
+            AddMetric(diagnostics,"queueTrims","Audio queue trims","Local audio bursts trimmed to keep playback latency bounded.");
             Subheading(diagnostics,"Network");
             AddMetric(diagnostics,"rtt","Handshake RTT","Round-trip estimate from session setup.");
             var scrolling=new ScrollViewer {Content=sections,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};
@@ -716,6 +721,11 @@ namespace Cadrivect
             values["audioFormat"].Text=format.Length==0 ? "—" : format;
             values["audioTarget"].Text=Metric(Number(snapshot,"audioTargetMs")," ms","0.#");
             values["underruns"].Text=Metric(Number(snapshot,"audioUnderruns"),"","0");
+            values["videoLoss"].Text=Metric(Number(snapshot,"videoFramesLost"),"","0");
+            values["localSkips"].Text=Metric(Number(snapshot,"replacedFrames"),"","0");
+            values["slowHandoffs"].Text=Metric(Number(snapshot,"slowVideoHandoffs"),"","0");
+            values["concealments"].Text=Metric(Number(snapshot,"audioConcealments"),"","0");
+            values["queueTrims"].Text=Metric(Number(snapshot,"audioQueueTrims"),"","0");
             values["rtt"].Text=Metric(Number(snapshot,"handshakeRttMs")," ms","0.0");
             if(hdrFlag.HasValue && hdr!=hdrFlag.Value) {
                 hdr=hdrFlag.Value;

@@ -17,6 +17,7 @@ namespace Cadrivect
     internal partial class Dashboard
     {
         NetworkPlayer network;
+        DirectDiagnostics directDiagnostics;
         bool firstFrame;
         bool stopRequested;
         long transportOperation;
@@ -140,7 +141,12 @@ namespace Cadrivect
             string raw=engine.Snapshot();
             if(!string.IsNullOrEmpty(raw) && raw!="{}") {
                 var snapshot=json.Deserialize<Dictionary<string,object>>(raw);
-                if(source=="Direct") snapshot["requestedVideoKbps"]=sessionVideoKbps;
+                if(source=="Direct") {
+                    snapshot["requestedVideoKbps"]=sessionVideoKbps;
+                    if(directDiagnostics==null) directDiagnostics=new DirectDiagnostics(Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"P5Cast","diagnostics"));
+                    directDiagnostics.Record(snapshot);
+                }
                 // A selection made while the engine worker starts may precede its session.
                 if(!firstFrame && (Field(snapshot,"frameGenerationProvider")!=meter.FrameGenerationProvider ||
                     Field(snapshot,"mode")!=modeIds[mode] || PlaybackMeter.Number(snapshot,"multiplier")!=factor))
@@ -189,6 +195,7 @@ namespace Cadrivect
         }
         void Finish()
         {
+            if(directDiagnostics!=null) {directDiagnostics.Finish(); directDiagnostics=null;}
             EndSwitchTracking();
             if(pendingStop!=null) {
                 if(closeAfterStop) {SaveSettings(); closing=true;}

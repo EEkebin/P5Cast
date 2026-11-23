@@ -136,7 +136,7 @@ namespace Cadrivect
                 };
                 viewGrid.Children.Add(button);
             }
-            var loupeHint=Label("Hold the picture to inspect pixels. Scroll to zoom.",Muted,11,FontWeights.Normal);
+            var loupeHint=Label("Hold the picture or drag the split to inspect pixels. Scroll to zoom.",Muted,11,FontWeights.Normal);
             loupeHint.TextWrapping=TextWrapping.Wrap;
             loupeHint.Margin=new Thickness(0,5,0,0);
             picture.Children.Add(loupeHint);

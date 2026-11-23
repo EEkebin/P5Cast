@@ -147,6 +147,7 @@ internal static partial class EmbeddedProbe
 
     static void CheckPausedLoupe(Window window,Type api) {
         api.GetMethod("SetWipeHorizontal").Invoke(null,new object[]{false});
+        api.GetMethod("SetWipeGrip").Invoke(null,new object[]{0,1f});
         var initial=SetWipePosition(api,.5f);
         var still=WaitSnapshot(api,s=>!(bool)s["wipeHorizontal"] && !(bool)s["loupeActive"] &&
             Convert.ToInt32(s["sampleId"])>Convert.ToInt32(initial["sampleId"]) && Convert.ToDouble(s["submittedFps"])==0,"paused wipe before loupe");
@@ -184,6 +185,35 @@ internal static partial class EmbeddedProbe
         Console.WriteLine("Loupe matched native, 2x and 5x composite pixels, tracked the pointer to the picture edge, and released without changing video FPS.");
     }
 
+    static void CheckDividerLoupe(Window window,Type api,Bitmap original,Bitmap enhanced,Rectangle frame,bool horizontal,int cut) {
+        int cx=horizontal ? frame.Left+frame.Width/2 : cut;
+        int cy=horizontal ? cut : frame.Top+frame.Height/2;
+        float u=(cx+.5f)/original.Width,v=(cy+.5f)/original.Height;
+        var set=api.GetMethod("SetLoupe");
+        api.GetMethod("SetWipeGrip").Invoke(null,new object[]{2,1f});
+        var captured=WaitSnapshot(api,s=>Convert.ToInt32(s["wipeGripState"])==2,"captured divider");
+        int repaints=Convert.ToInt32(captured["repaints"]);
+        foreach(int level in new[]{0,5}) {
+            set.Invoke(null,new object[]{true,u,v,level,1f});
+            var sample=WaitSnapshot(api,s=>Equals(s["loupeActive"],true) && Convert.ToInt32(s["loupeLevel"])==level &&
+                Convert.ToInt32(s["repaints"])>repaints,"magnified divider");
+            repaints=Convert.ToInt32(sample["repaints"]);
+            using(var image=CaptureComparison(window)) {
+                int zoom=Math.Max(1,level);
+                for(int dy=-32;dy<=16;dy++) for(int dx=-32;dx<=32;dx++) {
+                    int sx=(int)Math.Floor(cx+.5+dx/(double)zoom),sy=(int)Math.Floor(cy+.5+dy/(double)zoom);
+                    var source=(horizontal ? sy : sx)<cut ? original : enhanced;
+                    Check(Matches(image.GetPixel(cx+dx,cy+dy),source.GetPixel(sx,sy)),
+                          "Dragging magnified a grip or rail pixel over the comparison.");
+                }
+                var rail=image.GetPixel(horizontal ? cx-100 : cx,horizontal ? cy : cy-100);
+                Check(Matches(rail,Color.FromArgb(38,55,59)),"Dragging hid the divider outside the lens.");
+            }
+        }
+        set.Invoke(null,new object[]{false,u,v,0,1f});
+        WaitSnapshot(api,s=>Equals(s["loupeActive"],false) && Convert.ToInt32(s["repaints"])>repaints,"dismissed divider lens");
+    }
+
     static void CheckFullSizeWipe(Window window,Type api,Action<string> setView,
                                   Func<string,string,Dictionary<string,object>> waitView,float[] positions) {
         setView("original"); waitView("original","original");
@@ -211,6 +241,8 @@ internal static partial class EmbeddedProbe
                               Convert.ToInt32(data["renderHeight"])==Convert.ToInt32(single["renderHeight"]),
                               "Wipe changed the enhancement resolution.");
                         using(var wipe=CaptureComparison(window)) cuts[position]=CheckWipePixels(wipe,original,enhanced,frame,horizontal,position,state,scale);
+                        if(position==.5f) CheckDividerLoupe(window,api,original,enhanced,frame,horizontal,
+                            (horizontal ? frame.Top : frame.Left)+cuts[position]);
                     }
                     int length=horizontal ? frame.Height : frame.Width;
                     Check(cuts[0]<length/8 && cuts[1]>length-length/8 && Math.Abs(cuts[0]-(length-cuts[1]))<=2,

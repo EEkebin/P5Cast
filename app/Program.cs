@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.14.0.0")]
+[assembly: AssemblyVersion("0.14.1.0")]
 
 namespace Cadrivect
 {
@@ -119,7 +119,7 @@ namespace Cadrivect
             surface.LoupeChanged+=delegate(bool active,float x,float y,int level,float scale) {
                 if(rendering!=null) engine.SetLoupe(active,x,y,level,scale);
             };
-            window.Deactivated+=delegate {surface.CancelLoupe();};
+            window.Deactivated+=delegate {surface.EndPointerGesture();};
             window.PreviewMouseWheel+=delegate(object sender,MouseWheelEventArgs e) {
                 if(surface.ZoomWheel(e.Delta)) e.Handled=true;
             };
@@ -243,7 +243,7 @@ namespace Cadrivect
                 else if(chord && key==Key.O) ToggleStats();
                 else if(chord && key==Key.Q) {e.Handled=true; await UserStop(); return;}
                 else if(chord && key==Key.B && rendering!=null) meter.ToggleOriginal();
-                else if(key==Key.Escape && (surface.CancelLoupe() || surface.CancelWipeDrag())) {e.Handled=true; return;}
+                else if(key==Key.Escape && surface.EndPointerGesture(true)) {e.Handled=true; return;}
                 else if(key==Key.Escape && UI<StackPanel>("StopPanel").IsVisible && !requestingRest) SetPage("Play");
                 else if(key==Key.Escape && UI<StackPanel>("PairPanel").IsVisible) SetPage("Play");
                 else if(key==Key.Escape && fullscreen) ToggleFullscreen();

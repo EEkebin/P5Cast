@@ -26,7 +26,7 @@ namespace Cadrivect
         }
         void ToggleFullscreen()
         {
-            surface.CancelLoupe();
+            surface.EndPointerGesture();
             SetFullscreenFrame(!fullscreen);
             fullscreen=!fullscreen;
             UI<Button>("Fullscreen").Content=fullscreen?"Windowed":"Fullscreen";

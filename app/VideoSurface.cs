@@ -56,7 +56,7 @@ namespace Cadrivect
             if(child==IntPtr.Zero) throw new Win32Exception();
             return new HandleRef(this,child);
         }
-        protected override void DestroyWindowCore(HandleRef hwnd) { EndLoupe(hwnd.Handle); EndDrag(hwnd.Handle); DestroyWindow(hwnd.Handle); }
+        protected override void DestroyWindowCore(HandleRef hwnd) { EndGesture(hwnd.Handle); DestroyWindow(hwnd.Handle); }
         internal void SetWipeScale(float scale)
         {
             if(gripScale==scale) return;
@@ -83,10 +83,10 @@ namespace Cadrivect
         {
             bool wasActive=wipeActive;
             pictureAspect=sourceAspect>0 && !double.IsInfinity(sourceAspect) ? sourceAspect : 0;
-            if(inspecting && (pictureAspect==0 || sideBySide!=(view=="side-by-side"))) EndLoupe(Handle);
+            if(inspecting && (pictureAspect==0 || sideBySide!=(view=="side-by-side"))) EndGesture(Handle);
             sideBySide=view=="side-by-side";
             wipeActive=view=="wipe" && pictureAspect>0;
-            if(dragging && (!wipeActive || horizontalWipe!=horizontal)) EndDrag(Handle);
+            if(dragging && (!wipeActive || horizontalWipe!=horizontal)) EndGesture(Handle);
             if(!wipeActive || horizontalWipe!=horizontal) SetGrip(0);
             if(wipeActive && !wasActive && WipeGripChanged!=null) WipeGripChanged(gripState,gripScale);
             horizontalWipe=horizontal;
@@ -131,18 +131,6 @@ namespace Cadrivect
             wipePosition=next;
             if(WipePositionChanged!=null) WipePositionChanged(next);
         }
-        void EndDrag(IntPtr hwnd)
-        {
-            if(!dragging) return;
-            dragging=false;
-            if(GetCapture()==hwnd) ReleaseCapture();
-            SetGrip(0);
-        }
-        internal bool CancelWipeDrag()
-        {
-            if(!dragging) return false;
-            EndDrag(Handle); ChangePosition(initialPosition); return true;
-        }
         void PublishLoupe()
         {
             if(LoupeChanged!=null) LoupeChanged(loupeVisible,loupeX,loupeY,loupeLevel,gripScale);
@@ -169,18 +157,22 @@ namespace Cadrivect
             }
             return true;
         }
-        void EndLoupe(IntPtr hwnd)
+        void EndGesture(IntPtr hwnd)
         {
             if(!inspecting) return;
-            inspecting=loupeVisible=false;
+            inspecting=loupeVisible=dragging=false;
             wheelRemainder=0;
+            SetGrip(0);
             if(GetCapture()==hwnd) ReleaseCapture();
             PublishLoupe();
         }
-        internal bool CancelLoupe()
+        internal bool EndPointerGesture(bool restoreDivider=false)
         {
             if(!inspecting) return false;
-            EndLoupe(Handle); return true;
+            bool restore=restoreDivider && dragging;
+            EndGesture(Handle);
+            if(restore) ChangePosition(initialPosition);
+            return true;
         }
         internal bool ZoomWheel(int delta)
         {
@@ -203,42 +195,36 @@ namespace Cadrivect
             if(msg==MouseMove || msg==ButtonDown || msg==ButtonUp || msg==DoubleClick) {
                 int x=unchecked((short)(lp.ToInt64() & 0xffff));
                 int y=unchecked((short)((lp.ToInt64() >> 16) & 0xffff));
+                if(inspecting && (msg==ButtonDown || msg==DoubleClick)) {handled=true; return IntPtr.Zero;}
                 if(inspecting && (msg==MouseMove || msg==ButtonUp)) {
-                    if(msg==ButtonUp) {EndLoupe(hwnd); if(wipeActive) UpdateHover(hwnd,x,y);}
+                    if(dragging) ChangePosition(PointerFraction(hwnd,x,y)+grabOffset);
+                    if(msg==ButtonUp) {EndGesture(hwnd); if(wipeActive) UpdateHover(hwnd,x,y);}
                     else TrackLoupe(hwnd,x,y,false);
                     handled=true; return IntPtr.Zero;
                 }
                 if(msg==MouseMove && !dragging && wipeActive) UpdateHover(hwnd,x,y);
-                if((msg==ButtonDown || msg==DoubleClick) && HitDivider(hwnd,x,y)) {
-                    initialPosition=wipePosition;
-                    grabOffset=wipePosition-PointerFraction(hwnd,x,y);
-                    SetCapture(hwnd); dragging=GetCapture()==hwnd;
-                    if(dragging) SetGrip(2);
-                    SetCursor(ResizeCursor); handled=true; return IntPtr.Zero;
-                }
-                if(dragging && (msg==MouseMove || msg==ButtonUp)) {
-                    ChangePosition(PointerFraction(hwnd,x,y)+grabOffset);
-                    if(msg==ButtonUp) {
-                        EndDrag(hwnd);
-                        UpdateHover(hwnd,x,y);
+                bool grabDivider=(msg==ButtonDown || msg==DoubleClick) && HitDivider(hwnd,x,y);
+                if((msg==ButtonDown || grabDivider) && TrackLoupe(hwnd,x,y,true)) {
+                    dragging=grabDivider;
+                    if(dragging) {
+                        initialPosition=wipePosition;
+                        grabOffset=wipePosition-PointerFraction(hwnd,x,y);
+                        SetCursor(ResizeCursor);
                     }
+                    SetGrip(dragging ? 2 : 0);
                     handled=true; return IntPtr.Zero;
-                }
-                if(msg==ButtonDown && TrackLoupe(hwnd,x,y,true)) {
-                    SetGrip(0); handled=true; return IntPtr.Zero;
                 }
             }
             if(msg==0x20A && ZoomWheel(unchecked((short)(wp.ToInt64()>>16)))) {handled=true; return IntPtr.Zero;}
-            if(msg==Cursor && wipeActive && !inspecting) {
+            if(msg==Cursor && wipeActive && (dragging || !inspecting)) {
                 PixelPoint pt;
                 if(dragging || (GetCursorPos(out pt) && ScreenToClient(hwnd,ref pt) && HitDivider(hwnd,pt.X,pt.Y))) {
                     SetCursor(ResizeCursor); handled=true; return new IntPtr(1);
                 }
             }
-            if(msg==CaptureChanged) { dragging=false; SetGrip(0); EndLoupe(hwnd); }
-            if(msg==0x0008) EndLoupe(hwnd); // WM_KILLFOCUS
+            if(msg==CaptureChanged || msg==0x0008) EndGesture(hwnd); // WM_CAPTURECHANGED / WM_KILLFOCUS
             if(msg==0x02A3 && !dragging) SetGrip(0); // WM_MOUSELEAVE
-            if(msg==CancelMode && (CancelLoupe() || CancelWipeDrag())) {handled=true; return IntPtr.Zero;}
+            if(msg==CancelMode && EndPointerGesture(true)) {handled=true; return IntPtr.Zero;}
             if(msg==0x203 && DoubleClicked!=null) {DoubleClicked(); handled=true; return IntPtr.Zero;}
             if(msg==15 || msg==20) {
                 Paint paint=new Paint(); IntPtr dc=msg==15?BeginPaint(hwnd,out paint):wp;

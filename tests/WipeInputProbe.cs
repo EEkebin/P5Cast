@@ -112,14 +112,33 @@ internal static partial class WindowChromeProbe
         mouse(0x201,layout.Center,crossMin-2);
         Require(GetCapture()!=video,"A click outside the picture grabbed the divider.");
         mouse(0x202,layout.Center,crossMin-2);
-        await Until(delegate {mouse(0x201,layout.Center,crossQuarter); return GetCapture()==video;},"Cannot grab the divider rail.");
-        mouse(0x200,new WipeLayout(picture,horizontal,.76,scale).Center,crossQuarter);
+        mouse(0x201,layout.Center,crossQuarter);
+        await Until(()=>GetCapture()==video && Equals(sample()["loupeActive"],true) && Convert.ToInt32(sample()["wipeGripState"])==2,
+                    backend+" did not open the loupe when grabbing the "+(horizontal?"horizontal":"vertical")+" divider rail.");
+        var forward=new WipeLayout(picture,horizontal,.76,scale);
+        mouse(0x200,forward.Center,crossQuarter);
         Require(Math.Abs(slider.Value-76)<1,"The drawer slider did not track the drag.");
         await Until(()=>Math.Abs(Convert.ToDouble(sample()["wipePosition"])-.76)<.01,"Dragging did not move the rendered divider.");
         Require(Convert.ToInt32(sample()["wipeGripState"])==2,"Captured divider did not use the drawer's active grip color.");
-        Require(Equals(sample()["loupeActive"],false),"Grabbing the divider activated the loupe.");
+        Bounds client;
+        Require(GetClientRect(video,out client),"Cannot measure the loupe surface.");
+        Func<NativePoint,bool> lensAt=delegate(NativePoint pos) {
+            var frame=sample();
+            return Equals(frame["loupeActive"],true) &&
+                   Math.Abs(Convert.ToDouble(frame["loupeX"])-(pos.X+.5)/client.Width)<.0005 &&
+                   Math.Abs(Convert.ToDouble(frame["loupeY"])-(pos.Y+.5)/client.Height)<.0005;
+        };
+        await Until(()=>lensAt(point(forward.Center,crossQuarter)),"The loupe did not follow the divider forward.");
+        var back=new WipeLayout(picture,horizontal,.31,scale);
+        mouse(0x200,back.Center,crossCenter);
+        SendMessage(video,0x20A,new IntPtr(120<<16),IntPtr.Zero);
+        await Until(()=>lensAt(point(back.Center,crossCenter)) && Math.Abs(Convert.ToDouble(sample()["wipePosition"])-.31)<.01 &&
+                        Convert.ToInt32(sample()["loupeLevel"])==3 && GetCapture()==video,
+                    "The reverse drag and wheel zoom did not work together.");
+        SendMessage(video,0x20A,new IntPtr(-120<<16),IntPtr.Zero);
         SendMessage(video,0x1F,IntPtr.Zero,IntPtr.Zero);
-        await Until(()=>Math.Abs(Convert.ToDouble(sample()["wipePosition"])-initial)<.01 && GetCapture()!=video,"Cancel did not restore the drag.");
+        await Until(()=>Math.Abs(Convert.ToDouble(sample()["wipePosition"])-initial)<.01 && GetCapture()!=video &&
+                        Equals(sample()["loupeActive"],false),"Cancel did not dismiss the loupe and restore the divider.");
         mouse(0x201,layout.Center,crossQuarter); SetCapture(hwnd);
         try {
             mouse(0x200,new WipeLayout(picture,horizontal,.64,scale).Center,crossQuarter);
@@ -138,7 +157,8 @@ internal static partial class WindowChromeProbe
             Require(GetCapture()==video,"The outer part of the handle cannot be grabbed at its limit.");
             int target=layout.Center+outer-endpoint.Center;
             mouse(0x202,target,crossCenter);
-            await Until(()=>Math.Abs(Convert.ToDouble(sample()["wipePosition"])-initial)<.01,"Dragging the inset handle failed to return to its original position.");
+            await Until(()=>Math.Abs(Convert.ToDouble(sample()["wipePosition"])-initial)<.01 && GetCapture()!=video &&
+                            Equals(sample()["loupeActive"],false),"Releasing the inset handle did not commit the drag and dismiss the loupe.");
         }
     }
 }

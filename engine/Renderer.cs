@@ -522,18 +522,23 @@ internal sealed partial class Renderer : IDisposable
     }
     int Present(bool samplePixel,bool holdOriginal)
     {
+        bool inspectingDivider=wipe && wipeGripState==2 && loupeActive;
+        Rectangle lensArea=Rectangle.Empty;
         if(wipe)
         {
             var layout=new WipeLayout(viewport,wipeHorizontal,wipePosition,wipeGripScale);
             // Keep both image layers at full scale and clip only the original layer.
             if(layout.Original.Width>0 && layout.Original.Height>0) DrawOriginal(viewport,holdOriginal,layout.Original);
+            // Grab the two picture layers before drawing the handle under the pointer.
+            if(inspectingDivider) lensArea=CaptureLoupe();
             float hdrUi=HdrEnabled ? 1 : 0;
             Draw("WipeDivider",display,layout.Rail,null,hdrUi);
             context.OutputMerger.SetBlendState(handleBlend);
             Draw("WipeHandle",display,layout.Handle,null,hdrUi);
             context.OutputMerger.SetBlendState(null);
         }
-        if(loupeActive) DrawLoupe();
+        if(loupeActive && !inspectingDivider) lensArea=CaptureLoupe();
+        if(!lensArea.IsEmpty) DrawLoupe(lensArea);
         if(VerifyNextOutput)
         {
             SampleOutput();

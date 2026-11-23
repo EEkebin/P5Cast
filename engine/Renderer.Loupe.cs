@@ -56,14 +56,14 @@ internal sealed partial class Renderer
         }
     }
 
-    void DrawLoupe()
+    Rectangle CaptureLoupe()
     {
         int x=Math.Min(screenSize.Width-1,(int)Math.Floor(loupeX*screenSize.Width));
         int y=Math.Min(screenSize.Height-1,(int)Math.Floor(loupeY*screenSize.Height));
         var pane=viewport.Contains(x,y) ? viewport : originalViewport;
-        if(!pane.Contains(x,y)) return;
+        if(!pane.Contains(x,y)) return Rectangle.Empty;
         int radius=Math.Min((int)Math.Round(86*loupeScale),Math.Min(pane.Width,pane.Height)/2);
-        if(radius<2) return;
+        if(radius<2) return Rectangle.Empty;
         int diameter=2*radius+1,zoom=Math.Max(1,loupeLevel);
         var area=Rectangle.Intersect(pane,new Rectangle(x-radius,y-radius,diameter,diameter));
         // Only the source footprint is copied. Keeping a fixed scratch capacity avoids
@@ -83,6 +83,11 @@ internal sealed partial class Renderer
         var info=new LoupeInfo { CenterX=x+.5f,CenterY=y+.5f,CopyX=copy.Left,CopyY=copy.Top,Radius=radius,Zoom=zoom,
             UiScale=loupeScale,LabelRow=zoom-1,LabelX=labelX,LabelY=y+.5f+(y+labelOffset+10*loupeScale<pane.Bottom ? labelOffset : -labelOffset) };
         context.UpdateSubresource(ref info,loupeConstants);
+        return area;
+    }
+
+    void DrawLoupe(Rectangle area)
+    {
         context.PixelShader.SetConstantBuffer(1,loupeConstants);
         context.OutputMerger.SetBlendState(handleBlend);
         Draw("InspectionLoupe",display,area,loupePixels.Read,HdrEnabled ? 1 : 0,loupeLabels);

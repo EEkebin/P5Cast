@@ -88,7 +88,8 @@ internal static partial class WindowChromeProbe
             await Until(delegate{return settings.VerticalOffset>0;},"The scrollbar page target did not scroll the settings.");
         } finally {settings.MaxHeight=originalHeight; settings.ScrollToTop(); window.UpdateLayout();}
 
-        var sidebar=SettingsDescendant<ScrollViewer>(Find<Border>("MeterHost"));
+        var sidebar=(ScrollViewer)FindVisual(Find<Border>("MeterHost"),"ScrollViewer",
+            element=>((ScrollViewer)element).Content is StackPanel);
         Require(sidebar!=null,"Missing sidebar scroll viewer.");
         double oldHeight=sidebar.MaxHeight;
         try {

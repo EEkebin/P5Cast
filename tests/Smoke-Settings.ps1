@@ -27,6 +27,38 @@ try {
     function State($name,$value){$type.GetField($name,'Instance,NonPublic').SetValue($dash,$value)}
     function Call($name){$type.GetMethod($name,[Reflection.BindingFlags]'Instance,NonPublic').Invoke($dash,@())}
     function IsShown($name){(Widget $name).Visibility -eq 'Visible'}
+    # The arc counts submitted frames. Input and output can diverge while the stream is running.
+    $meter=$type.GetField('meter','Instance,NonPublic').GetValue($dash)
+    $dial=$meter.GetType().GetField('dial','Instance,NonPublic').GetValue($meter)
+    $sample=[Collections.Generic.Dictionary[string,object]]::new()
+    $sample['captured']=120; $sample['sourceFps']=90; $sample['submittedFps']=120; $sample['generatedFps']=60
+    $meter.Update($sample)
+    Require ([Windows.Automation.AutomationProperties]::GetHelpText($dial) -match 'Output 120 FPS\. Source 60 FPS\. Generated 60 FPS') 'Output must be the sum of the two submitted components'
+    function RenderDial {
+        $dial.Measure([Windows.Size]::new(260,150))
+        $dial.Arrange([Windows.Rect]::new(0,0,260,141))
+        $dial.UpdateLayout()
+        $image=[Windows.Media.Imaging.RenderTargetBitmap]::new(260,141,96,96,[Windows.Media.PixelFormats]::Pbgra32)
+        $image.Render($dial)
+        return $image
+    }
+    function ArcPixel($image,$fraction) {
+        $hub=$dial.ActualHeight-10
+        $r=[Math]::Min($dial.ActualWidth/2-18,$hub-11)-18
+        $x=[int][Math]::Round($dial.ActualWidth/2-$r*[Math]::Cos($fraction*[Math]::PI))
+        $y=[int][Math]::Round($hub-$r*[Math]::Sin($fraction*[Math]::PI))
+        $pixel=[byte[]]::new(4)
+        $image.CopyPixels([Windows.Int32Rect]::new($x,$y,1,1),$pixel,4,0)
+        return '{0:X2}{1:X2}{2:X2}' -f $pixel[2],$pixel[1],$pixel[0]
+    }
+    $image=RenderDial
+    Require ((ArcPixel $image 0.125) -eq '8FE6D0' -and (ArcPixel $image 0.375) -eq 'EABC8E' -and (ArcPixel $image 0.75) -eq '2B3D43') 'Source and generated segments must share the same arc radius'
+    $sample['generatedFps']=0
+    $meter.Update($sample)
+    Require ((ArcPixel (RenderDial) 0.375) -eq '8FE6D0') 'Disabling generation must produce one source-colored segment'
+    $sample['captured']=0
+    $meter.Update($sample)
+    Require ((ArcPixel (RenderDial) 0.125) -eq '2B3D43') 'Waiting for video must clear the gauge'
     (Widget SourceChoice).SelectedIndex=0
     Click StreamGroup
     Require ((IsShown StreamSettings) -and !(IsShown ConsoleSettings)) 'Direct stream group'
@@ -66,8 +98,11 @@ try {
     $row.Name='Fixture'; $row.Mac='000000000001'; $row.Address='fixture.invalid'
     (Widget ConsolePicker).ItemsSource=@($row); (Widget ConsolePicker).SelectedIndex=0
     State playingMac $row.Mac; State firstFrame $true; State directCore ([Diagnostics.Process]::GetCurrentProcess())
+    (Widget ShowSettings).IsChecked=$false
+    Require (!(IsShown SettingsDrawer)) 'The settings drawer can be closed before stop'
+
     $null=(Call UserStop).GetAwaiter().GetResult()
-    Require ((IsShown StopPanel) -and !(Widget RestOnStop).IsChecked -and !(Widget RememberStop).IsChecked) 'Safe initial stop prompt'
+    Require ((IsShown StopPanel) -and (IsShown SettingsDrawer) -and (Widget ShowSettings).IsChecked -and !(Widget RestOnStop).IsChecked -and !(Widget RememberStop).IsChecked) 'Stop reopens the drawer with safe default choices'
     Click CancelStop
     Require (!(IsShown StopPanel) -and (IsShown PlayPage)) 'Keep playing'
     $null=(Call UserStop).GetAwaiter().GetResult()

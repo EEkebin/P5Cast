@@ -62,6 +62,7 @@ namespace Cadrivect
                 bool open=toggle.IsChecked==true;
                 if(stats==open) return;
                 stats=open; ApplySidebar(true);
+                if(window.IsLoaded) SaveSettings();
             };
             toggle.Checked+=change;
             toggle.Unchecked+=change;
@@ -101,7 +102,8 @@ namespace Cadrivect
             bool visible=stats && !fullscreen;
             int transition=++sidebarTransition;
             double x=slide.X,opacity=panel.Opacity;
-            if(visible) {column.Width=new GridLength(312); panel.Visibility=Visibility.Visible;}
+            UI<Thumb>("SidebarResize").Visibility=visible?Visibility.Visible:Visibility.Collapsed;
+            if(visible) {RefreshDrawerSizes(); panel.Visibility=Visibility.Visible;}
             panel.IsHitTestVisible=visible;
             double endX=visible?0:42,endOpacity=visible?1:0;
             slide.X=endX; panel.Opacity=endOpacity;

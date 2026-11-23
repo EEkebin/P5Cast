@@ -62,7 +62,7 @@ namespace Cadrivect
             if(directCore==null || !firstFrame || playingMac==null) {StopPlayback(); return;}
             string rule;
             if(stopChoices.TryGetValue(playingMac,out rule)) await StopDirect(rule=="rest",false);
-            else if(UI<StackPanel>("StopPanel").Visibility!=Visibility.Visible) OpenStopPrompt();
+            else if(!settingsOpen || UI<StackPanel>("StopPanel").Visibility!=Visibility.Visible) OpenStopPrompt();
         }
         async Task StopDirect(bool rest,bool remember)
         {

@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.7.0.0")]
+[assembly: AssemblyVersion("0.8.0.0")]
 
 namespace Cadrivect
 {
@@ -89,7 +89,6 @@ namespace Cadrivect
         bool refreshingDisplays;
         readonly Brush mint = new SolidColorBrush(Color.FromRgb(143,230,208));
         readonly Brush dark = new SolidColorBrush(Color.FromRgb(16,39,37));
-        readonly Brush grey = new SolidColorBrush(Color.FromRgb(38,53,60));
         readonly Brush light = new SolidColorBrush(Color.FromRgb(230,240,239));
         string source = "Sony";
         string page = "Play";
@@ -122,6 +121,7 @@ namespace Cadrivect
             },delegate(bool enabled){comparing=enabled; if(rendering!=null) engine.Compare(enabled);});
             UI<Border>("MeterHost").Child=meter;
             var saved = ReadSettings();
+            InitDrawers(saved);
             InitTitleBar(!Field(saved,"sidebarOpen").Equals("False",StringComparison.OrdinalIgnoreCase));
             InitInterfaceScale(saved);
             InitDiscord(saved);
@@ -204,7 +204,7 @@ namespace Cadrivect
             sourcePicker.SelectedIndex=Math.Max(0,Array.IndexOf(names,selected));
             SetSource(names[sourcePicker.SelectedIndex]);
             sourcePicker.SelectionChanged+=delegate {if(sourcePicker.SelectedIndex>=0) SetSource(names[sourcePicker.SelectedIndex]);};
-            SetPage(client?"Client":"Play");
+            SetPage(client?"Client":"Play",client);
             foreach(var key in new[]{"Play","Host","Client"}) UI<Button>(key+"Nav").Click+=delegate {SetPage(key);};
             UI<Button>("AddConsole").Click+=delegate {OpenPair();};
             UI<Button>("CancelPair").Click+=delegate {SetPage("Play");};
@@ -390,8 +390,9 @@ namespace Cadrivect
             b.FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal;
         }
 
-        void SetPage(string value)
+        void SetPage(string value,bool reveal=true)
         {
+            if(reveal) SetSettingsDrawer(true);
             page = value;
             UI<StackPanel>("StopPanel").Visibility=Visibility.Collapsed;
             pendingRevocation=null;
@@ -418,9 +419,6 @@ namespace Cadrivect
                 bool on=key==selected;
                 UI<FrameworkElement>(key+"Settings").Visibility=on?Visibility.Visible:Visibility.Collapsed;
                 var button=UI<Button>(key+"Group");
-                button.Background=on?dark:grey; button.Foreground=on?mint:light;
-                button.BorderBrush=on?mint:grey;
-                button.FontWeight=on?FontWeights.SemiBold:FontWeights.Normal;
                 System.Windows.Automation.AutomationProperties.SetItemStatus(button,on?"Selected":"");
             }
         }
@@ -522,7 +520,8 @@ namespace Cadrivect
                 Directory.CreateDirectory(Path.GetDirectoryName(preferences));
                 var hostTarget=UI<ComboBox>("HostDisplay").SelectedItem as DisplayTarget;
                 var console=UI<ComboBox>("ConsolePicker").SelectedItem as DirectConsole;
-                var settings = new { sidebarOpen=stats, discordPresence=UI<CheckBox>("SharePresence").IsChecked==true,
+                var settings = new { sidebarOpen=stats,sidebarWidth=sidebarWidth,settingsOpen=settingsOpen,settingsHeight=settingsHeight,
+                    discordPresence=UI<CheckBox>("SharePresence").IsChecked==true,
                     discordGame=UI<CheckBox>("ShareGame").IsChecked==true,discordProject=UI<CheckBox>("ShareProject").IsChecked==true,stopChoices=stopChoices,directMbps=DirectKbps()/1000, relayMbps=networkRates[UI<ComboBox>("NetworkBitrate").SelectedIndex],audioLayout=UI<ComboBox>("NetworkAudio").SelectedIndex,pictureDefaults=1, mode=mode, multiplier=factor-1,
                     consoleMac=console==null?"":console.Mac,consoleAddresses=consoleAddresses,directFps=UI<ComboBox>("DirectFps").SelectedIndex,
                     display=SelectedDisplayName(), uiScale=PreferredScalePercent, resolution=UI<ComboBox>("RenderResolution").SelectedIndex,hdr=preferredHdr,renderer=SelectedRenderer,

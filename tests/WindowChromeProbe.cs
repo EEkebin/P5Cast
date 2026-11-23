@@ -20,7 +20,7 @@ using System.Windows.Shapes;
 using System.Windows.Threading;
 using Path = System.IO.Path;
 
-internal static class WindowChromeProbe
+internal static partial class WindowChromeProbe
 {
     [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)] struct Startup {
         public int Size; public string Reserved,Desktop,Title; public uint X,Y,Width,Height,CharsX,CharsY,Fill,Flags;
@@ -118,11 +118,11 @@ internal static class WindowChromeProbe
     static bool Near(double x,double y) { return Math.Abs(x-y)<0.25; }
     static IntPtr Video() { return ((HwndHost)Find<Border>("VideoHost").Child).Handle; }
 
-    static FrameworkElement FindVisual(DependencyObject parent,string typeName) {
+    static FrameworkElement FindVisual(DependencyObject parent,string typeName,Func<FrameworkElement,bool> accept=null) {
         for(int i=0;i<VisualTreeHelper.GetChildrenCount(parent);i++) {
             var child=VisualTreeHelper.GetChild(parent,i);
-            if(child.GetType().Name==typeName) return (FrameworkElement)child;
-            var match=FindVisual(child,typeName);
+            if(child.GetType().Name==typeName && (accept==null || accept((FrameworkElement)child))) return (FrameworkElement)child;
+            var match=FindVisual(child,typeName,accept);
             if(match!=null) return match;
         }
         return null;
@@ -214,8 +214,8 @@ internal static class WindowChromeProbe
         displays.SelectedItem=original;
         await Until(delegate{return Screen().Device==originalDevice && Scaled(Measure(),autoSizes[originalDevice],1);},"Auto did not restore the original display scale.");
         Note("The playing demo adapted automatically when moved between monitors; telemetry and the video surface remained live.");
-        Click("MaximizeWindow");
-        await Until(delegate{return !IsZoomed(hwnd);},"Could not restore window for compact layout test.");
+        window.WindowState=WindowState.Normal;
+        await Until(delegate{return !IsZoomed(hwnd) && window.WindowState==WindowState.Normal;},"Could not restore window for compact layout test.");
         scale.SelectedItem="200%"; window.Width=window.MinWidth+10; window.Height=window.MinHeight+10;
         await Task.Delay(120); window.UpdateLayout();
         Require(scale.SelectedItem.ToString()=="200%" && Find<TextBlock>("ScaleStatus").Text.Contains("fitted"),
@@ -334,9 +334,11 @@ internal static class WindowChromeProbe
                 "Leaving fullscreen failed to restore the maximized window and its work area inset.");
             Require(Video()==video && provider.ToggleState==ToggleState.On,"Maximized fullscreen round trip lost sidebar or video surface.");
             Note("Fullscreen entered from maximized restored the exact work area and title bar.");
+            if(CheckDrawerOption) await CheckDrawers();
             if(Environment.GetEnvironmentVariable("P5CAST_PROBE_SCALING")=="1") await CheckScaling();
             Click("OpenSource");
             await Until(delegate{return status.Text=="Disconnected";},"Offline demo did not disconnect.");
+            if(CheckDrawerOption) await CheckPairDrawer();
             string renderCheck=Environment.GetEnvironmentVariable("P5CAST_PROBE_RENDERERS");
             if(renderCheck=="1" || renderCheck=="hdr") {
                 Click("DisplayGroup");
@@ -380,6 +382,8 @@ internal static class WindowChromeProbe
                     Note(labels[i]+" presented through the dashboard and released the same playback surface.");
                 }
             }
+            if(!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("P5CAST_SCREENSHOT"))) await SaveDashboardScreenshot();
+            if(CheckDrawerOption) await SaveDrawerPreference();
             completed=true; Click("CloseWindow");
         } catch(Exception e) {
             failure=e;
@@ -387,11 +391,15 @@ internal static class WindowChromeProbe
         }
     }
 
-    static void CheckSavedScale() {
+    static async void CheckSavedScale() {
         try {
             window=Application.Current.MainWindow;
-            Require(window!=null && Find<ComboBox>("InterfaceScale").SelectedItem.ToString()=="150%","Manual scale did not survive a clean process relaunch.");
-            Note("A new dashboard process restored the saved 150% scale.");
+            Require(window!=null,"The dashboard did not reopen.");
+            if(Environment.GetEnvironmentVariable("P5CAST_PROBE_SCALING")=="1") {
+                Require(Find<ComboBox>("InterfaceScale").SelectedItem.ToString()=="150%","Manual scale did not survive a clean process relaunch.");
+                Note("A new dashboard process restored the saved 150% scale.");
+            }
+            if(CheckDrawerOption) await CheckSavedDrawers();
             completed=true; Click("CloseWindow");
         } catch(Exception e) {failure=e; Application.Current.Shutdown(1);}
     }
@@ -440,7 +448,7 @@ internal static class WindowChromeProbe
         try {
             if(args.Length==4) return OnPrivateDesktop(args[0],args[1],args[2],args[3]=="--reopen");
             int result=Launch(args[0],args[1],args[2],false);
-            if(result==0 && Environment.GetEnvironmentVariable("P5CAST_PROBE_SCALING")=="1") result=Launch(args[0],args[1],args[2],true);
+            if(result==0 && (CheckDrawerOption || Environment.GetEnvironmentVariable("P5CAST_PROBE_SCALING")=="1")) result=Launch(args[0],args[1],args[2],true);
             return result;
         } catch(Exception e) { Note(e.ToString()); return 1; }
         finally { if(args.Length==3 && File.Exists(report)) Console.Write(File.ReadAllText(report)); }

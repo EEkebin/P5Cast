@@ -171,7 +171,7 @@ try {
     $factorCondition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty,'2×')
     $factor=$ui.FindFirst([Windows.Automation.TreeScope]::Descendants,$factorCondition)
     $factor.GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
-    $null=Wait-For { (Get-Control 'FrameRateDial').Current.HelpText -match 'Added\s+[1-9]' } 'generated frames on the dial'
+    $null=Wait-For { (Get-Control 'FrameRateDial').Current.HelpText -match 'Generated\s+[1-9]' } 'generated frames on the dial'
     Assert-Layout
     $null=Wait-For { -not [Cadrivect.DashboardSnapshot]::Black($video) } 'rendered demo pixels'
     [Cadrivect.DashboardSnapshot]::Save($handle,$snapshot)

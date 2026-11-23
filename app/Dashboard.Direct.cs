@@ -7,6 +7,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
 
 namespace Cadrivect
@@ -39,16 +40,18 @@ namespace Cadrivect
             UI<RowDefinition>("HeaderRow").Height=new GridLength(fullscreen?0:HeaderHeight);
             UI<Border>("HeaderBar").Visibility=fullscreen?Visibility.Collapsed:Visibility.Visible;
             UI<RowDefinition>("TransportRow").Height=new GridLength(fullscreen?0:52);
-            UI<RowDefinition>("SettingsRow").Height=new GridLength(fullscreen?0:181);
             UI<RowDefinition>("StatusRow").Height=fullscreen?new GridLength(0):GridLength.Auto;
             UI<Grid>("Workspace").Margin=fullscreen?new Thickness(0):new Thickness(16,14,16,12);
             ApplySidebar(false);
+            ApplySettingsDrawer();
             window.Focus();
         }
         void ToggleStats()
         {
-            if(fullscreen) {stats=true; ToggleFullscreen(); return;}
-            stats=!stats; ApplySidebar(true);
+            if(fullscreen) {
+                ToggleFullscreen();
+                UI<ToggleButton>("ShowStats").IsChecked=true;
+            } else UI<ToggleButton>("ShowStats").IsChecked=!stats;
         }
         void UpdateTransport()
         {

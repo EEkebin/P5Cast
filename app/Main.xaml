@@ -30,16 +30,20 @@
     <Style x:Key="Detail" TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="Foreground" Value="#B3C1C4"/><Setter Property="FontSize" Value="14"/><Setter Property="LineHeight" Value="21"/></Style>
     <Style x:Key="Heading" TargetType="TextBlock"><Setter Property="FontSize" Value="21"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Margin" Value="0,0,0,10"/></Style>
     <Style TargetType="Button">
-      <Setter Property="Padding" Value="12,7"/><Setter Property="Margin" Value="0,0,8,0"/><Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Padding" Value="12,6"/><Setter Property="MinHeight" Value="32"/><Setter Property="Margin" Value="0,0,8,0"/><Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
       <Setter Property="Foreground" Value="#E6F0EF"/><Setter Property="Background" Value="#26353C"/><Setter Property="BorderBrush" Value="#36474D"/><Setter Property="BorderThickness" Value="1"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-        <Border x:Name="Surface" CornerRadius="7" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}">
-          <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-        </Border>
+        <Grid>
+          <Border x:Name="Surface" CornerRadius="7" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"/>
+          <Border Name="Wash" CornerRadius="7" Margin="1" Background="White" Opacity="0"/>
+          <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+        </Grid>
         <ControlTemplate.Triggers>
-          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Surface" Property="Opacity" Value="0.82"/></Trigger>
-          <Trigger Property="IsPressed" Value="True"><Setter TargetName="Surface" Property="Opacity" Value="0.65"/></Trigger>
-          <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Surface" Property="Opacity" Value="0.45"/></Trigger>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Wash" Property="Opacity" Value="0.08"/></Trigger>
+          <Trigger Property="IsPressed" Value="True"><Setter TargetName="Wash" Property="Background" Value="Black"/><Setter TargetName="Wash" Property="Opacity" Value="0.14"/></Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Surface" Property="BorderBrush" Value="#ADFAE6"/></Trigger>
+          <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.48"/></Trigger>
         </ControlTemplate.Triggers>
       </ControlTemplate></Setter.Value></Setter>
     </Style>
@@ -47,35 +51,136 @@
       <Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="#102725"/><Setter Property="Background" Value="#8FE6D0"/><Setter Property="BorderBrush" Value="#A2F1DE"/>
     </Style>
     <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="#172127"/><Setter Property="BorderBrush" Value="#2C3A41"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="20"/><Setter Property="Margin" Value="0,0,0,12"/></Style>
-    <Style TargetType="TextBox"><Setter Property="Foreground" Value="#EBF3F3"/><Setter Property="Background" Value="#10191F"/><Setter Property="BorderBrush" Value="#45585E"/><Setter Property="Padding" Value="9,7"/><Setter Property="VerticalContentAlignment" Value="Center"/></Style>
+    <Style x:Key="GroupRail" TargetType="Border">
+      <Setter Property="Background" Value="#111B20"/><Setter Property="BorderBrush" Value="#304048"/><Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="9"/><Setter Property="Padding" Value="3"/><Setter Property="Margin" Value="0,0,0,12"/><Setter Property="HorizontalAlignment" Value="Left"/>
+    </Style>
+    <Style x:Key="GroupTab" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Foreground" Value="#ADBDC0"/>
+      <Setter Property="FontSize" Value="13"/><Setter Property="Padding" Value="10,3"/><Setter Property="MinHeight" Value="28"/><Setter Property="Margin" Value="0"/>
+      <Style.Triggers>
+        <Trigger Property="AutomationProperties.ItemStatus" Value="Selected">
+          <Setter Property="Background" Value="#264039"/><Setter Property="BorderBrush" Value="#42665B"/><Setter Property="Foreground" Value="#B7F3DF"/><Setter Property="FontWeight" Value="SemiBold"/>
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+    <Style x:Key="ScrollPage" TargetType="RepeatButton">
+      <Setter Property="Focusable" Value="False"/><Setter Property="IsTabStop" Value="False"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent"/></ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style TargetType="ScrollBar">
+      <Setter Property="Width" Value="14"/><Setter Property="Background" Value="Transparent"/><Setter Property="Stylus.IsPressAndHoldEnabled" Value="False"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollBar">
+        <Grid Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
+          <Track Name="PART_Track" IsDirectionReversed="True" Orientation="{TemplateBinding Orientation}">
+            <Track.DecreaseRepeatButton><RepeatButton Name="Before" Style="{StaticResource ScrollPage}" Command="{x:Static ScrollBar.PageUpCommand}"/></Track.DecreaseRepeatButton>
+            <Track.Thumb>
+              <Thumb Name="Grip" Background="#50646A" Focusable="False">
+                <Thumb.Template><ControlTemplate TargetType="Thumb">
+                  <Grid Background="Transparent"><Border Name="Pill" CornerRadius="4" Margin="4,2" Background="{TemplateBinding Background}"/></Grid>
+                  <ControlTemplate.Triggers>
+                    <DataTrigger Binding="{Binding Orientation, RelativeSource={RelativeSource AncestorType=ScrollBar}}" Value="Horizontal"><Setter TargetName="Pill" Property="Margin" Value="2,4"/></DataTrigger>
+                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Pill" Property="Background" Value="#87A4A6"/></Trigger>
+                    <Trigger Property="IsDragging" Value="True"><Setter TargetName="Pill" Property="Background" Value="#8FE6D0"/></Trigger>
+                  </ControlTemplate.Triggers>
+                </ControlTemplate></Thumb.Template>
+              </Thumb>
+            </Track.Thumb>
+            <Track.IncreaseRepeatButton><RepeatButton Name="After" Style="{StaticResource ScrollPage}" Command="{x:Static ScrollBar.PageDownCommand}"/></Track.IncreaseRepeatButton>
+          </Track>
+        </Grid>
+        <ControlTemplate.Triggers>
+          <Trigger Property="Orientation" Value="Horizontal">
+            <Setter TargetName="PART_Track" Property="IsDirectionReversed" Value="False"/>
+            <Setter TargetName="Before" Property="Command" Value="{x:Static ScrollBar.PageLeftCommand}"/><Setter TargetName="After" Property="Command" Value="{x:Static ScrollBar.PageRightCommand}"/>
+          </Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+      <Style.Triggers><Trigger Property="Orientation" Value="Horizontal"><Setter Property="Height" Value="14"/><Setter Property="Width" Value="Auto"/></Trigger></Style.Triggers>
+    </Style>
+    <Style TargetType="ScrollViewer">
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollViewer">
+        <Grid Background="{TemplateBinding Background}">
+          <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+          <ScrollContentPresenter Name="PART_ScrollContentPresenter" Margin="{TemplateBinding Padding}" CanContentScroll="{TemplateBinding CanContentScroll}" Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}"/>
+          <ScrollBar Name="PART_VerticalScrollBar" Style="{StaticResource {x:Type ScrollBar}}" Grid.Column="1" Orientation="Vertical" Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"
+            Maximum="{TemplateBinding ScrollableHeight}" ViewportSize="{TemplateBinding ViewportHeight}" Value="{Binding VerticalOffset, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}"/>
+          <ScrollBar Name="PART_HorizontalScrollBar" Style="{StaticResource {x:Type ScrollBar}}" Grid.Row="1" Orientation="Horizontal" Visibility="{TemplateBinding ComputedHorizontalScrollBarVisibility}"
+            Maximum="{TemplateBinding ScrollableWidth}" ViewportSize="{TemplateBinding ViewportWidth}" Value="{Binding HorizontalOffset, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}"/>
+        </Grid>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style TargetType="TextBox">
+      <Setter Property="Foreground" Value="#EBF3F3"/><Setter Property="Background" Value="#121D23"/><Setter Property="BorderBrush" Value="#3B4F56"/>
+      <Setter Property="BorderThickness" Value="1"/><Setter Property="Padding" Value="10,5"/><Setter Property="MinHeight" Value="32"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="CaretBrush" Value="#C2F5E9"/><Setter Property="SelectionBrush" Value="#4A786D"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TextBox">
+        <Border Name="Field" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="7">
+          <ScrollViewer Name="PART_ContentHost" Focusable="False" Margin="{TemplateBinding Padding}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Hidden"/>
+        </Border>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Field" Property="BorderBrush" Value="#688287"/></Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Field" Property="BorderBrush" Value="#8FE6D0"/></Trigger>
+          <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.48"/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style TargetType="CheckBox">
+      <Setter Property="Foreground" Value="#D5E1E1"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="CheckBox">
+        <StackPanel Orientation="Horizontal" Background="Transparent">
+          <Border Name="Box" Width="17" Height="17" CornerRadius="5" Background="#152229" BorderBrush="#5A7075" BorderThickness="1" VerticalAlignment="Center">
+            <Path Name="Tick" Visibility="Hidden" Width="10" Height="8" Stretch="Uniform" Stroke="#152923" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Data="M1,4 L4,7 L10,1"/>
+          </Border>
+          <ContentPresenter Margin="7,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+        </StackPanel>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Box" Property="BorderBrush" Value="#96ADA9"/></Trigger>
+          <Trigger Property="IsChecked" Value="True"><Setter TargetName="Tick" Property="Visibility" Value="Visible"/><Setter TargetName="Box" Property="Background" Value="#8FE6D0"/><Setter TargetName="Box" Property="BorderBrush" Value="#8FE6D0"/></Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Box" Property="BorderBrush" Value="White"/><Setter TargetName="Box" Property="BorderThickness" Value="2"/></Trigger>
+          <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.48"/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
     <Style TargetType="ComboBoxItem">
-      <Setter Property="Foreground" Value="#E6F0EF"/><Setter Property="Padding" Value="9,6"/>
+      <Setter Property="Foreground" Value="#E6F0EF"/><Setter Property="Padding" Value="9,6"/><Setter Property="Margin" Value="0,1"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBoxItem">
-        <Border Name="Item" Background="Transparent" Padding="{TemplateBinding Padding}"><ContentPresenter/></Border>
+        <Border Name="Item" Background="Transparent" Padding="{TemplateBinding Padding}" CornerRadius="5"><ContentPresenter/></Border>
         <ControlTemplate.Triggers>
           <Trigger Property="IsSelected" Value="True"><Setter TargetName="Item" Property="Background" Value="#28443F"/></Trigger>
           <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Item" Property="Background" Value="#324950"/></Trigger>
+          <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.46"/></Trigger>
         </ControlTemplate.Triggers>
       </ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style TargetType="ComboBox">
-      <Setter Property="Foreground" Value="#E6F0EF"/><Setter Property="MinHeight" Value="31"/>
+      <Setter Property="Foreground" Value="#E6F0EF"/><Setter Property="MinHeight" Value="32"/><Setter Property="MaxDropDownHeight" Value="320"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBox">
         <Grid>
-          <ToggleButton Focusable="False" ClickMode="Press" IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
-            <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border Background="#1C2A31" BorderBrush="#405259" BorderThickness="1" CornerRadius="4"/></ControlTemplate></ToggleButton.Template>
+          <Border Name="Field" Background="#1B292F" BorderBrush="#3B4F56" BorderThickness="1" CornerRadius="7"/>
+          <ToggleButton Focusable="False" ClickMode="Press" Cursor="Hand" IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+            <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border Background="Transparent" CornerRadius="7"/></ControlTemplate></ToggleButton.Template>
           </ToggleButton>
-          <Grid IsHitTestVisible="False" Margin="9,3">
+          <Grid IsHitTestVisible="False" Margin="10,3">
             <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="12"/></Grid.ColumnDefinitions>
             <ContentPresenter VerticalAlignment="Center" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"/>
             <Path Grid.Column="1" Data="M 1,2 L 5,6 L 9,2" Stroke="#B7C9CB" StrokeThickness="1.5" VerticalAlignment="Center"/>
           </Grid>
-          <Popup Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True" Focusable="False">
-            <Border MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" MaxHeight="320" BorderBrush="#405259" BorderThickness="1" Background="#17252C" Padding="2">
-              <ScrollViewer CanContentScroll="True"><ItemsPresenter/></ScrollViewer>
+          <Popup Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True" Focusable="False" VerticalOffset="3">
+            <Border MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" MaxHeight="{TemplateBinding MaxDropDownHeight}" CornerRadius="8" BorderBrush="#476069" BorderThickness="1" Background="#1A272E" Padding="4">
+              <ScrollViewer Style="{StaticResource {x:Type ScrollViewer}}" CanContentScroll="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/></ScrollViewer>
             </Border>
           </Popup>
         </Grid>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Field" Property="BorderBrush" Value="#688287"/></Trigger>
+          <Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="Field" Property="BorderBrush" Value="#8FE6D0"/></Trigger>
+          <Trigger Property="IsDropDownOpen" Value="True"><Setter TargetName="Field" Property="BorderBrush" Value="#8FE6D0"/></Trigger>
+          <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Field" Property="Background" Value="#152127"/><Setter Property="Opacity" Value="0.55"/></Trigger>
+        </ControlTemplate.Triggers>
       </ControlTemplate></Setter.Value></Setter>
     </Style>
   </Window.Resources>
@@ -118,22 +223,57 @@
       </DockPanel>
     </Border>
     <Grid Name="Workspace" Grid.Row="1" Margin="16,14,16,12">
+      <Grid.Resources>
+        <Style x:Key="DrawerGrip" TargetType="Thumb">
+          <Setter Property="Focusable" Value="True"/><Setter Property="IsTabStop" Value="True"/>
+          <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Thumb">
+            <Grid Background="Transparent">
+              <Border Name="Grip" Width="36" Height="3" CornerRadius="2" Background="#516168" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Grid>
+            <ControlTemplate.Triggers>
+              <Trigger Property="Tag" Value="Vertical"><Setter TargetName="Grip" Property="Width" Value="3"/><Setter TargetName="Grip" Property="Height" Value="36"/></Trigger>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Grip" Property="Background" Value="#93BCB3"/></Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Grip" Property="Background" Value="#8FE6D0"/></Trigger>
+              <Trigger Property="IsDragging" Value="True"><Setter TargetName="Grip" Property="Background" Value="#8FE6D0"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate></Setter.Value></Setter>
+        </Style>
+      </Grid.Resources>
       <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Name="MeterColumn" Width="312"/></Grid.ColumnDefinitions>
       <Grid>
-        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Name="TransportRow" Height="52"/><RowDefinition Name="SettingsRow" Height="181"/></Grid.RowDefinitions>
+        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Name="TransportRow" Height="52"/><RowDefinition Name="SettingsRow" Height="220"/></Grid.RowDefinitions>
         <Border Name="VideoHost" Background="Black" ClipToBounds="True"/>
-        <DockPanel Grid.Row="1" LastChildFill="False" VerticalAlignment="Center">
+        <DockPanel Name="TransportBar" Grid.Row="1" LastChildFill="False" VerticalAlignment="Center">
           <Button DockPanel.Dock="Left" Name="OpenSource" Content="Connect" Width="108" Style="{StaticResource Primary}"/>
           <ComboBox DockPanel.Dock="Left" Name="SourceChoice" Padding="6,4" VerticalContentAlignment="Center" Width="142" Margin="0,0,10,0"/>
           <Button DockPanel.Dock="Right" Name="Fullscreen" Content="Fullscreen" ToolTip="Fullscreen video (F11). Press Escape or double-click the video to return." Margin="0"/>
+          <ToggleButton DockPanel.Dock="Right" Name="ShowSettings" Style="{StaticResource TitleAction}" AutomationProperties.Name="Settings drawer" Margin="0,0,6,0">
+            <StackPanel Orientation="Horizontal"><TextBlock Text="Settings" VerticalAlignment="Center"/>
+              <Path Stroke="#9CBAB6" StrokeThickness="1.5" Data="M0,0 L4,4 L8,0" VerticalAlignment="Center" Margin="7,0,0,0" RenderTransformOrigin=".5,.5">
+                <Path.Style><Style TargetType="Path"><Style.Triggers>
+                  <DataTrigger Binding="{Binding IsChecked, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Value="False"><Setter Property="RenderTransform"><Setter.Value><RotateTransform Angle="180"/></Setter.Value></Setter></DataTrigger>
+                </Style.Triggers></Style></Path.Style>
+              </Path>
+            </StackPanel>
+          </ToggleButton>
         </DockPanel>
-        <Border Grid.Row="2" Background="#172127" CornerRadius="8" BorderBrush="#2C3A41" BorderThickness="1">
+        <Border Name="SettingsDrawer" Grid.Row="2" ClipToBounds="True">
+        <DockPanel>
+        <Thumb Name="SettingsResize" Style="{StaticResource DrawerGrip}" DockPanel.Dock="Top" Height="12" Cursor="SizeNS"
+               AutomationProperties.Name="Resize settings drawer" ToolTip="Drag or use Up and Down to resize. Enter collapses the drawer."/>
+        <Border Background="#172127" CornerRadius="8" BorderBrush="#2C3A41" BorderThickness="1">
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <Grid Name="Pages" Margin="14,10">
         <StackPanel Name="PlayPage">
-          <WrapPanel Margin="0,0,0,12">
-            <Button Name="ConsoleGroup" Content="Console"/><Button Name="StreamGroup" Content="Stream quality"/><Button Name="DisplayGroup" Content="Display"/><Button Name="InterfaceGroup" Content="Interface"/><Button Name="DiscordGroup" Content="Discord"/>
-          </WrapPanel>
+          <Border Style="{StaticResource GroupRail}">
+            <WrapPanel KeyboardNavigation.DirectionalNavigation="Cycle">
+              <Button Name="ConsoleGroup" Style="{StaticResource GroupTab}" Content="Console"/>
+              <Button Name="DisplayGroup" Style="{StaticResource GroupTab}" Content="Graphics &amp; display"/>
+              <Button Name="StreamGroup" Style="{StaticResource GroupTab}" Content="Stream quality"/>
+              <Button Name="InterfaceGroup" Style="{StaticResource GroupTab}" Content="Interface"/>
+              <Button Name="DiscordGroup" Style="{StaticResource GroupTab}" Content="Discord"/>
+            </WrapPanel>
+          </Border>
           <Grid Name="ConsoleSettings">
             <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
             <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -149,14 +289,19 @@
             </Grid>
             <TextBlock Style="{StaticResource Detail}" Margin="0,6,0,0" Text="Changes apply on your next connection. The PS5 sets the Opus audio bitrate."/>
           </StackPanel>
-          <Grid Name="DisplaySettings" Visibility="Collapsed"><Grid.ColumnDefinitions><ColumnDefinition Width="1.5*"/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
-            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-            <StackPanel Margin="0,0,12,0"><TextBlock Text="Playback display" Margin="0,0,0,5"/><ComboBox Name="PlaybackDisplay"/></StackPanel>
-            <StackPanel Grid.Column="1" Margin="0,0,12,0"><TextBlock Text="Render resolution" Margin="0,0,0,5"/><ComboBox Name="RenderResolution"/></StackPanel>
-            <StackPanel Grid.Column="2" Margin="0,0,12,0"><TextBlock Text="Color output" Margin="0,0,0,5"/><ComboBox Name="HdrOutput"/></StackPanel>
-            <StackPanel Grid.Column="3"><TextBlock Text="Video renderer" Margin="0,0,0,5"/><ComboBox Name="VideoRenderer" AutomationProperties.Name="Video renderer" ToolTip="Choose the graphics API that presents video in the player."/></StackPanel>
-            <TextBlock Grid.Row="1" Grid.ColumnSpan="4" Name="RendererHint" Style="{StaticResource Detail}" Margin="0,6,0,0" TextWrapping="Wrap"/>
-          </Grid>
+          <StackPanel Name="DisplaySettings" Visibility="Collapsed">
+            <WrapPanel>
+              <StackPanel Width="165" Margin="0,0,12,6"><Label Content="Graphics API" Target="{Binding ElementName=VideoRenderer}" Foreground="#DFEBEA" Padding="0,0,0,5"/><ComboBox Name="VideoRenderer" AutomationProperties.Name="Graphics API" ToolTipService.ShowOnDisabled="True" ToolTip="Choose the graphics API between playback sessions."/></StackPanel>
+              <StackPanel Width="230" Margin="0,0,12,6"><TextBlock Text="Playback display" Margin="0,0,0,5"/>
+                <ComboBox Name="PlaybackDisplay" ToolTip="{Binding SelectedItem, RelativeSource={RelativeSource Self}}">
+                  <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/></DataTemplate></ComboBox.ItemTemplate>
+                </ComboBox>
+              </StackPanel>
+              <StackPanel Width="144" Margin="0,0,12,6"><TextBlock Text="Render resolution" Margin="0,0,0,5"/><ComboBox Name="RenderResolution"/></StackPanel>
+              <StackPanel Width="124" Margin="0,0,0,6"><TextBlock Text="Color output" Margin="0,0,0,5"/><ComboBox Name="HdrOutput"/></StackPanel>
+            </WrapPanel>
+            <TextBlock Name="RendererHint" Style="{StaticResource Detail}" TextWrapping="Wrap"/>
+          </StackPanel>
           <StackPanel Name="InterfaceSettings" Visibility="Collapsed">
             <Label Content="Interface scale" Target="{Binding ElementName=InterfaceScale}" Foreground="#E8F0F1" Padding="0,0,0,5"/>
             <ComboBox Name="InterfaceScale" HorizontalAlignment="Left" Width="182" AutomationProperties.Name="Interface scale" ToolTip="Auto adapts to the monitor. A percentage adjusts the interface relative to Windows display scaling."/>
@@ -193,7 +338,7 @@
           <StackPanel Orientation="Horizontal" Margin="0,8,0,0"><Button Name="PairConsole" Content="Pair console" Style="{StaticResource Primary}"/><Button Name="CancelPair" Content="Cancel"/></StackPanel>
         </StackPanel>
         <StackPanel Name="HostPage" Visibility="Collapsed">
-          <StackPanel Orientation="Horizontal" Margin="0,0,0,12"><Button Name="SharingGroup" Content="Sharing"/><Button Name="DevicesGroup" Content="Paired devices"/></StackPanel>
+          <Border Style="{StaticResource GroupRail}"><WrapPanel KeyboardNavigation.DirectionalNavigation="Cycle"><Button Name="SharingGroup" Style="{StaticResource GroupTab}" Content="Sharing"/><Button Name="DevicesGroup" Style="{StaticResource GroupTab}" Content="Paired devices"/></WrapPanel></Border>
           <StackPanel Name="SharingSettings">
             <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
               <StackPanel Margin="0,0,12,0"><TextBlock Text="Listen on this network address" Margin="0,0,0,5"/><ComboBox Name="BindIP"/></StackPanel>
@@ -209,7 +354,7 @@
           </StackPanel>
         </StackPanel>
         <StackPanel Name="ClientPage" Visibility="Collapsed">
-          <StackPanel Orientation="Horizontal" Margin="0,0,0,12"><Button Name="NetworkGroup" Content="Connection"/><Button Name="QualityGroup" Content="Stream quality"/></StackPanel>
+          <Border Style="{StaticResource GroupRail}"><WrapPanel KeyboardNavigation.DirectionalNavigation="Cycle"><Button Name="NetworkGroup" Style="{StaticResource GroupTab}" Content="Connection"/><Button Name="QualityGroup" Style="{StaticResource GroupTab}" Content="Stream quality"/></WrapPanel></Border>
           <StackPanel Name="NetworkSettings">
             <TextBlock Text="Host PC address" Margin="0,0,0,4"/>
             <WrapPanel><TextBox Name="HostAddress" Width="215" Margin="0,0,8,0" ToolTip="Use the host's LAN or private VPN address."/><Button Name="ClientPair" Content="Pair with host"/><Button Name="ClientPlay" Style="{StaticResource Primary}" Content="Start stream"/></WrapPanel>
@@ -226,9 +371,14 @@
         </StackPanel>
       </Grid>
         </ScrollViewer></Border>
+        </DockPanel></Border>
       </Grid>
       <Border Grid.Column="1" ClipToBounds="True">
+        <Grid>
         <Border Name="MeterHost" Background="#172127" CornerRadius="8" BorderBrush="#2C3A41" BorderThickness="1" Margin="12,0,0,0"><Border.RenderTransform><TranslateTransform/></Border.RenderTransform></Border>
+        <Thumb Name="SidebarResize" Style="{StaticResource DrawerGrip}" Tag="Vertical" Width="12" HorizontalAlignment="Left" Cursor="SizeWE"
+               AutomationProperties.Name="Resize performance sidebar" ToolTip="Drag or use Left and Right to resize. Enter collapses the sidebar."/>
+        </Grid>
       </Border>
     </Grid>
     <Border Grid.Row="2" Padding="30,11" Background="#121D22" BorderBrush="#293940" BorderThickness="0,1,0,0">

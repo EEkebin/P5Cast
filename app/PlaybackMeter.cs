@@ -7,7 +7,6 @@ using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
-using System.Windows.Markup;
 using System.Windows.Media;
 using System.Windows.Shapes;
 
@@ -20,28 +19,13 @@ namespace Cadrivect
         static readonly string[] Descriptions={"Display the source picture.","Sharpen edges and upscale fine detail.","AMD FidelityFX Super Resolution 1.",
             "NVIDIA RTX Video Super Resolution for SDR video.","Experimental DLSS with motion estimated from the stream.","Experimental DLAA at the source resolution."};
         static readonly Brush Ink=ColorBrush("#E9F3F1"), Muted=ColorBrush("#A5B9BB"), Line=ColorBrush("#304147"), Dark=ColorBrush("#141F24");
-        static readonly Brush[] Series={ColorBrush("#ADBBC0"),ColorBrush("#8DBAF6"),ColorBrush("#8FE6D0"),ColorBrush("#EABC8E")};
+        static readonly Brush Mint=ColorBrush("#8FE6D0"), Amber=ColorBrush("#EABC8E");
         static readonly ControlTemplate ChipTemplate=MakeChipTemplate();
         static readonly ControlTemplate GroupTemplate=MakeGroupTemplate();
-        static readonly Style ScrollBarStyle=(Style)XamlReader.Parse(
-            @"<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='ScrollBar'>
-                <Setter Property='Width' Value='9'/>
-                <Setter Property='Template'><Setter.Value><ControlTemplate TargetType='ScrollBar'>
-                  <Border Background='#141F24' Padding='2,3'>
-                    <Track Name='PART_Track' Orientation='Vertical' IsDirectionReversed='True'>
-                      <Track.DecreaseRepeatButton><RepeatButton Command='ScrollBar.PageUpCommand' Opacity='0'/></Track.DecreaseRepeatButton>
-                      <Track.Thumb><Thumb MinHeight='18'><Thumb.Template><ControlTemplate TargetType='Thumb'>
-                        <Border Background='#52696E' CornerRadius='3' Width='5' HorizontalAlignment='Center'/>
-                      </ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
-                      <Track.IncreaseRepeatButton><RepeatButton Command='ScrollBar.PageDownCommand' Opacity='0'/></Track.IncreaseRepeatButton>
-                    </Track>
-                  </Border>
-                </ControlTemplate></Setter.Value></Setter>
-              </Style>");
         readonly Action<int,int> change;
         readonly Action<bool> compare;
         readonly RadioButton[] modes=new RadioButton[6], factors=new RadioButton[4];
-        readonly TextBlock sourceLabel,sourceValue,addedValue,targetValue;
+        readonly TextBlock sourceValue,generatedValue,targetValue;
         readonly Dictionary<string,TextBlock> values=new Dictionary<string,TextBlock>();
         readonly TextBlock submitLabel,notice;
         readonly ToggleButton compareButton;
@@ -56,7 +40,7 @@ namespace Cadrivect
         public PlaybackMeter(Action<int,int> change,Action<bool> compare)
         {
             this.change=change; this.compare=compare;
-            UseLayoutRounding=true; SnapsToDevicePixels=true; Background=Dark;
+            UseLayoutRounding=true; SnapsToDevicePixels=true; Background=Brushes.Transparent;
             Foreground=Ink; FontFamily=new FontFamily("Segoe UI"); FontSize=12;
             var layout=new DockPanel();
             var fixedMeter=new StackPanel {Margin=new Thickness(16,14,16,0)};
@@ -70,9 +54,8 @@ namespace Cadrivect
             heading.Children.Add(targetValue); heading.Children.Add(title); fixedMeter.Children.Add(heading);
             dial.Height=133; dial.Margin=new Thickness(0,2,0,6); fixedMeter.Children.Add(dial);
             var legend=new UniformGrid {Rows=1,Columns=2}; fixedMeter.Children.Add(legend);
-            sourceLabel=Label("Source",Muted,11,FontWeights.Normal);
-            sourceValue=RateReadout(legend,sourceLabel,Series[1],"Frames received each second from the selected source.");
-            addedValue=RateReadout(legend,Label("Added",Muted,11,FontWeights.Normal),Series[3],"Extra frames P5Cast created and sent to the screen each second.");
+            sourceValue=RateReadout(legend,Label("Source",Muted,11,FontWeights.Normal),Mint,"Source frames submitted for display each second, including redraws.");
+            generatedValue=RateReadout(legend,Label("Generated",Muted,11,FontWeights.Normal),Amber,"Interpolated frames submitted for display each second.");
             Separator(fixedMeter);
             var picture=AddGroup(sections,"Picture","PictureGroup");
             string group=Guid.NewGuid().ToString("N");
@@ -108,7 +91,7 @@ namespace Cadrivect
                 if(syncing) return;
                 pendingCompare=DateTime.UtcNow.AddSeconds(2); if(compare!=null) compare(compareButton.IsChecked==true);
             };
-            notice=Label("",Series[3],11,FontWeights.Normal); notice.TextWrapping=TextWrapping.Wrap; notice.Margin=new Thickness(0,5,0,0);
+            notice=Label("",Amber,11,FontWeights.Normal); notice.TextWrapping=TextWrapping.Wrap; notice.Margin=new Thickness(0,5,0,0);
             notice.Visibility=Visibility.Collapsed; picture.Children.Add(notice);
             Separator(sections);
             var diagnostics=AddGroup(sections,"Stream diagnostics","StreamDiagnosticsGroup");
@@ -116,6 +99,7 @@ namespace Cadrivect
             AddMetric(diagnostics,"size","Input → output","Incoming frame size and presentation surface size in pixels.");
             AddMetric(diagnostics,"format","Video format","Source codec and active output color mode.");
             AddMetric(diagnostics,"renderer","Video renderer","Graphics API currently presenting frames to the display.");
+            AddMetric(diagnostics,"incomingFps","Incoming FPS","Frames received from the source each second.");
             AddMetric(diagnostics,"requested","Requested bitrate","Configured bitrate requested from the PS5 when connecting.");
             AddMetric(diagnostics,"bitrate","Received bitrate","Measured compressed video arriving from the PS5.");
             AddMetric(diagnostics,"decode","Video decode","Time spent decoding the latest video frame.");
@@ -129,7 +113,6 @@ namespace Cadrivect
             Subheading(diagnostics,"Network");
             AddMetric(diagnostics,"rtt","Handshake RTT","Round-trip estimate from session setup.");
             var scrolling=new ScrollViewer {Content=sections,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};
-            scrolling.Resources.Add(typeof(ScrollBar),ScrollBarStyle);
             layout.Children.Add(scrolling);
             Content=layout;
             Reset(0,1);
@@ -137,7 +120,6 @@ namespace Cadrivect
         public void SetSource(string source)
         {
             directSelected=source=="Direct";
-            sourceLabel.Text=source=="Direct"?"From PS5":source=="Sony"?"From Sony app":"From demo";
             submitLabel.Text=directSelected ? "Receive → submit" : source=="Sony" ? "Capture → submit" : "Frame → submit";
             ShowRequested(directSelected);
         }
@@ -179,7 +161,7 @@ namespace Cadrivect
         }
         static void Subheading(Panel parent,string title)
         {
-            var label=Label(title,Series[2],12,FontWeights.SemiBold);
+            var label=Label(title,Mint,12,FontWeights.SemiBold);
             label.Margin=new Thickness(0,8,0,2); parent.Children.Add(label);
         }
         static ControlTemplate MakeGroupTemplate()
@@ -241,9 +223,9 @@ namespace Cadrivect
             var selected=new Trigger {Property=ToggleButton.IsCheckedProperty,Value=true};
             selected.Setters.Add(new Setter(Border.BackgroundProperty,ColorBrush("#263F3D"),"Surface"));
             selected.Setters.Add(new Setter(Border.BorderBrushProperty,ColorBrush("#557D74"),"Surface"));
-            selected.Setters.Add(new Setter(Control.ForegroundProperty,Series[2])); template.Triggers.Add(selected);
+            selected.Setters.Add(new Setter(Control.ForegroundProperty,Mint)); template.Triggers.Add(selected);
             var focus=new Trigger {Property=UIElement.IsKeyboardFocusedProperty,Value=true};
-            focus.Setters.Add(new Setter(Border.BorderBrushProperty,Series[2],"Surface")); template.Triggers.Add(focus);
+            focus.Setters.Add(new Setter(Border.BorderBrushProperty,Mint,"Surface")); template.Triggers.Add(focus);
             var disabled=new Trigger {Property=UIElement.IsEnabledProperty,Value=false};
             disabled.Setters.Add(new Setter(UIElement.OpacityProperty,.44,"Surface")); template.Triggers.Add(disabled);
             return template;
@@ -266,7 +248,7 @@ namespace Cadrivect
             try {modes[selectedMode].IsChecked=true; factors[selectedFactor-1].IsChecked=true; compareButton.IsChecked=false;}
             finally {syncing=false;}
             hdr=false; lastSample=-1; pendingSettings=pendingCompare=DateTime.MinValue; dial.SetRates(double.NaN,double.NaN,double.NaN,double.NaN);
-            sourceValue.Text=addedValue.Text="—"; targetValue.Text="Target —";
+            sourceValue.Text=generatedValue.Text="—"; targetValue.Text="Target —";
             foreach(var label in values.Values) label.Text="—";
             values["format"].ToolTip=null;
             ShowRequested(directSelected);
@@ -323,14 +305,18 @@ namespace Cadrivect
             double id=Number(snapshot,"sampleId");
             if(!double.IsNaN(id) && (long)id<=lastSample) return;
             if(!double.IsNaN(id)) lastSample=(long)id;
-            double[] rates={Number(snapshot,"targetPresentedFps"),Number(snapshot,"sourceFps"),Number(snapshot,"submittedFps"),Number(snapshot,"generatedFps")};
-            // The engine can publish telemetry while waiting for its first picture.
-            if(Number(snapshot,"captured")==0) for(int i=0;i<rates.Length;i++) rates[i]=double.NaN;
-            targetValue.Text="Target "+Metric(rates[0],"","0.#");
-            sourceValue.Text=Metric(rates[1],"","0.#"); addedValue.Text=Metric(rates[3],"","0.#");
-            dial.SetRates(rates[0],rates[1],rates[2],rates[3]);
-            string input=Dimensions(snapshot,"input"),output=Dimensions(snapshot,"output");
-            values["size"].Text=input=="—" && output=="—" ? "—" : input+" → "+output;
+            bool waiting=Number(snapshot,"captured")==0;
+            double output=waiting ? double.NaN : Number(snapshot,"submittedFps");
+            double generated=Math.Min(output,Number(snapshot,"generatedFps"));
+            double originals=output-generated;
+            double target=Number(snapshot,"targetPresentedFps");
+            targetValue.Text="Target "+Metric(target,"","0.#");
+            sourceValue.Text=Metric(originals,"","0.#");
+            generatedValue.Text=Metric(generated,"","0.#");
+            dial.SetRates(target,originals,output,generated);
+            values["incomingFps"].Text=Metric(waiting ? double.NaN : Number(snapshot,"sourceFps"),"","0.#");
+            string input=Dimensions(snapshot,"input"),outputSize=Dimensions(snapshot,"output");
+            values["size"].Text=input=="—" && outputSize=="—" ? "—" : input+" → "+outputSize;
             values["renderer"].Text=Dashboard.RendererName(Text(snapshot,"renderer"));
             string codec=Text(snapshot,"codec"); bool? hdrFlag=Flag(snapshot,"presenterHdr10") ?? Flag(snapshot,"hdrEnabled");
             string color=hdrFlag.HasValue ? (hdrFlag.Value ? "HDR10":"SDR") : "";
@@ -378,7 +364,6 @@ namespace Cadrivect
 
         sealed class FrameRateDial : FrameworkElement
         {
-            const double Maximum=240;
             static readonly Brush Track=ColorBrush("#2B3D43"), Tick=ColorBrush("#5C7378");
             static readonly Pen MinorTick=new Pen(Tick,1),MajorTick=new Pen(Muted,1.3);
             static readonly Typeface NumberFace=new Typeface(new FontFamily("Segoe UI"),FontStyles.Normal,FontWeights.SemiBold,FontStretches.Normal);
@@ -400,37 +385,26 @@ namespace Cadrivect
                 protected override AutomationControlType GetAutomationControlTypeCore() {return AutomationControlType.Custom;}
             }
             static string Describe(double rate) {return double.IsNaN(rate) ? "unavailable" : Metric(rate," FPS","0.#");}
-            public void SetRates(double aim,double input,double submitted,double synthetic)
+            public void SetRates(double aim,double originals,double submitted,double synthetic)
             {
-                target=aim; source=input; presented=submitted; generated=synthetic;
-                string detail="Output "+Describe(presented)+". Source "+Describe(source)+". Added "+Describe(generated)+". Target "+Describe(target)+".";
+                target=aim; source=originals; presented=submitted; generated=synthetic;
+                string detail="Output "+Describe(presented)+". Source "+Describe(source)+". Generated "+Describe(generated)+". Target "+Describe(target)+".";
                 AutomationProperties.SetHelpText(this,detail); ToolTip=detail; InvalidateVisual();
             }
-            // All tracks use the same half-circle and zero-to-240 scale, including at 30 fps.
             static Point Polar(Point hub,double radius,double angle)
             {
                 return new Point(hub.X-radius*Math.Cos(angle),hub.Y-radius*Math.Sin(angle));
             }
-            static double Angle(double fps) {return Math.PI*Math.Min(1,Math.Max(0,fps/Maximum));}
-            static void Arc(DrawingContext dc,Point hub,double r,double angle,Brush color,double width)
+            static void Arc(DrawingContext dc,Point hub,double r,double start,double end,Brush color,bool roundStart,bool roundEnd)
             {
-                var pen=new Pen(color,width){StartLineCap=PenLineCap.Round,EndLineCap=PenLineCap.Round};
+                if(!(end>start)) return;
+                var pen=new Pen(color,8){StartLineCap=roundStart?PenLineCap.Round:PenLineCap.Flat,EndLineCap=roundEnd?PenLineCap.Round:PenLineCap.Flat};
                 var shape=new StreamGeometry();
                 using(var g=shape.Open()) {
-                    g.BeginFigure(Polar(hub,r,0),false,false);
-                    g.ArcTo(Polar(hub,r,angle),new Size(r,r),0,false,SweepDirection.Clockwise,true,false);
+                    g.BeginFigure(Polar(hub,r,start),false,false);
+                    g.ArcTo(Polar(hub,r,end),new Size(r,r),0,false,SweepDirection.Clockwise,true,false);
                 }
                 dc.DrawGeometry(null,pen,shape);
-            }
-            static void TrackValue(DrawingContext dc,Point hub,double r,double value,Brush brush)
-            {
-                Arc(dc,hub,r,Math.PI,Track,4);
-                if(double.IsNaN(value)) return;
-                double angle=Angle(value); Point tip=Polar(hub,r,angle);
-                if(value>0) {
-                    Arc(dc,hub,r,angle,brush,4);
-                    dc.DrawEllipse(brush,null,tip,3.2,3.2);
-                } else dc.DrawEllipse(Dark,new Pen(brush,1.5),tip,2.3,2.3);
             }
             void CenterText(DrawingContext dc,string text,Point center,double size,Typeface font,Brush color)
             {
@@ -444,19 +418,21 @@ namespace Cadrivect
                 Point hub=new Point(ActualWidth/2,ActualHeight-10);
                 double radius=Math.Min(hub.X-18,hub.Y-11);
                 if(radius<45) return;
-                // Put the scale beyond the tips so endpoint readings and target marks never cover the rates.
+                double peak=Math.Max(double.IsNaN(target)?0:target,double.IsNaN(presented)?0:presented);
+                double maximum=Math.Max(240,240*Math.Ceiling(peak/240));
                 for(int i=0;i<=16;i++) {
                     double angle=i*Math.PI/16;
                     bool major=i%4==0;
                     dc.DrawLine(major ? MajorTick:MinorTick,Polar(hub,radius-10,angle),Polar(hub,radius-(major?3:i%2==0?5:7),angle));
-                    if(major) CenterText(dc,i==16 ? "240+" : (i*15).ToString(CultureInfo.InvariantCulture),
+                    if(major) CenterText(dc,(maximum*i/16).ToString("0",CultureInfo.InvariantCulture),
                         Polar(hub,radius+7,angle),10,LabelFace,Muted);
                 }
-                TrackValue(dc,hub,radius-18,presented,Series[2]);
-                TrackValue(dc,hub,radius-27,source,Series[1]);
-                TrackValue(dc,hub,radius-36,generated,Series[3]);
+                double ring=radius-18,split=Math.PI*source/maximum,end=Math.PI*presented/maximum;
+                Arc(dc,hub,ring,0,Math.PI,Track,true,true);
+                Arc(dc,hub,ring,0,split,Mint,true,generated==0);
+                Arc(dc,hub,ring,split,end,Amber,source==0,true);
                 if(!double.IsNaN(target)) {
-                    double a=Angle(target);
+                    double a=Math.PI*target/maximum;
                     var tip=Polar(hub,radius-16,a); var back=Polar(hub,radius-7,a);
                     double dx=3.8*Math.Sin(a),dy=-3.8*Math.Cos(a);
                     var marker=new StreamGeometry();
@@ -467,7 +443,7 @@ namespace Cadrivect
                     }
                     dc.DrawGeometry(Ink,new Pen(Dark,1),marker);
                 }
-                CenterText(dc,Metric(presented,"","0"),new Point(hub.X,hub.Y-24),29,NumberFace,Series[2]);
+                CenterText(dc,Metric(presented,"","0.#"),new Point(hub.X,hub.Y-24),29,NumberFace,Ink);
                 CenterText(dc,"Output FPS",new Point(hub.X,hub.Y-2),10.5,LabelFace,Muted);
             }
         }

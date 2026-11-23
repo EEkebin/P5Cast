@@ -161,9 +161,12 @@ int main(int argc, char **argv)
 {
     if (argc == 2 && !strcmp(argv[1], "--version")) { puts("CadrivectDirect / libchiaki 1.10.1 / CDV1 + CDV2"); return 0; }
     if (argc == 3 && !strcmp(argv[1], "--register")) return register_console(argv[2]);
-    if (argc < 4 || argc > 7 || strlen(argv[3]) != 1 || (argc == 7 && strcmp(argv[6], "--rest-control"))) return 20;
+    bool rest_control = argc >= 7 && !strcmp(argv[argc - 1], "--rest-control");
+    if (rest_control) argc--;
+    if (argc < 4 || argc > 7 || strlen(argv[3]) != 1) return 20;
     ChiakiConnectInfo info = {0};
-    if (!video_profile(&info.video_profile, argv[3][0] - '0', argc >= 5 ? argv[4] : NULL, argc >= 6 ? argv[5] : NULL)) return 20;
+    if (!video_profile(&info.video_profile, argv[3][0] - '0', argc >= 5 ? argv[4] : NULL,
+                       argc >= 6 ? argv[5] : NULL, argc >= 7 ? argv[6] : NULL)) return 20;
     Direct core = {0};
     core.rtt_us = -1;
     core.video.pipe = INVALID_HANDLE_VALUE;
@@ -177,7 +180,7 @@ int main(int argc, char **argv)
     info.enable_idr_on_fec_failure = true;
     int status = 20;
     if (read_auth(&info, &core)) {
-        if (argc == 7) {
+        if (rest_control) {
             rest_open(&core.rest, argv[1]);
             core.report_peer = GetFileType(GetStdHandle(STD_OUTPUT_HANDLE)) == FILE_TYPE_PIPE;
         }

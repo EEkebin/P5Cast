@@ -83,6 +83,9 @@ try {
     Require ((ArcPixel (RenderDial) 0.125) -eq '2B3D43') 'Waiting for video must clear the gauge'
     (Widget SourceChoice).SelectedIndex=0
     Click StreamGroup
+    Require ((Widget DirectStreamSize).SelectedItem -eq '1080p') 'Existing settings default to a 1080p source'
+    Require (((Widget DirectStreamSize).Items -join ',') -eq '1080p,720p,540p,360p') 'PS5 stream presets'
+    (Widget DirectStreamSize).SelectedItem='720p'
     Require ((IsShown StreamSettings) -and !(IsShown ConsoleSettings)) 'Direct stream group'
     Require ((Widget DirectBitrate).SelectedItem -eq '100 Mbps') 'Maximum Direct request'
     Click DiscordGroup
@@ -108,6 +111,7 @@ try {
     Require ($orientation.GetValue($restoredMeter)) 'Horizontal divider survives reopening'
     Require (!$second.FindName('SharePresence').IsChecked -and !$second.FindName('ShareProject').IsChecked) 'Discord opt-outs survive reopening'
     Require ($second.FindName('VideoRenderer').SelectedItem -eq 'OpenGL' -and !$second.FindName('HdrOutput').IsEnabled) 'Renderer choice survives reopening'
+    Require ($second.FindName('DirectStreamSize').SelectedItem -eq '720p') 'Saved 720p source survives reopening'
     $second.FindName('VideoRenderer').SelectedItem='Vulkan'
     Require ($second.FindName('HdrOutput').SelectedItem -eq 'HDR10' -and $second.FindName('HdrOutput').IsEnabled) 'Switching back restores HDR preference'
     State preparing $true; Call UpdateTransport

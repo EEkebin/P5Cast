@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-bool video_profile(ChiakiConnectVideoProfile *profile, int codec, const char *fps, const char *kbps)
+bool video_profile(ChiakiConnectVideoProfile *profile, int codec, const char *fps, const char *kbps, const char *height)
 {
     if (codec < 1 || codec > 3 || (fps && strcmp(fps, "30") && strcmp(fps, "60"))) return false;
     uint32_t requested = 0;
@@ -15,7 +15,14 @@ bool video_profile(ChiakiConnectVideoProfile *profile, int codec, const char *fp
         }
         if (requested != 0 && (requested < 2000 || requested > 100000)) return false;
     }
-    chiaki_connect_video_profile_preset(profile, CHIAKI_VIDEO_RESOLUTION_PRESET_1080p,
+    ChiakiVideoResolutionPreset resolution = CHIAKI_VIDEO_RESOLUTION_PRESET_1080p;
+    if (height && strcmp(height, "1080")) {
+        if (!strcmp(height, "720")) resolution = CHIAKI_VIDEO_RESOLUTION_PRESET_720p;
+        else if (!strcmp(height, "540")) resolution = CHIAKI_VIDEO_RESOLUTION_PRESET_540p;
+        else if (!strcmp(height, "360")) resolution = CHIAKI_VIDEO_RESOLUTION_PRESET_360p;
+        else return false;
+    }
+    chiaki_connect_video_profile_preset(profile, resolution,
         fps && !strcmp(fps, "30") ? CHIAKI_VIDEO_FPS_PRESET_30 : CHIAKI_VIDEO_FPS_PRESET_60);
     if (requested) profile->bitrate = requested;
     profile->codec = (ChiakiCodec)(codec - 1);

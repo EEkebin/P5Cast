@@ -26,7 +26,8 @@ namespace Cadrivect {
                 Console.OpenStandardInput().CopyTo(buffer); var request=buffer.ToArray();
                 if(args[0]!="--register") {
                     string expected=args[0]=="Cadrivect-BitrateFixture" ? "100000" : "0";
-                    if(args.Length!=6 || args[3]!="60" || args[4]!=expected || args[5]!="--rest-control" || !request.SequenceEqual(dummyKeys)) return 41;
+                    string height=args[0]=="Cadrivect-BitrateFixture" ? "720" : "1080";
+                    if(args.Length!=7 || args[3]!="60" || args[4]!=expected || args[5]!=height || args[6]!="--rest-control" || !request.SequenceEqual(dummyKeys)) return 41;
                     string prefix="Local\\P5Cast.Rest."+Process.GetCurrentProcess().Id+"."+args[0]+".";
                     using(var signal=EventWaitHandle.OpenExisting(prefix+"request"))
                     using(var ack=EventWaitHandle.OpenExisting(prefix+"accepted"))
@@ -72,7 +73,7 @@ namespace Cadrivect {
             using(var child=row.Connect("Cadrivect-ProfileFixture","fixture.invalid",2,60)) {
                 Require(child.WaitForExit(4000) && child.ExitCode==0,"DPAPI / binary stdin round trip");
             }
-            using(var child=row.Connect("Cadrivect-BitrateFixture","fixture.invalid",2,60,100000)) {
+            using(var child=row.Connect("Cadrivect-BitrateFixture","fixture.invalid",2,60,100000,720)) {
                 Require(child.WaitForExit(4000) && child.ExitCode==0,"Explicit bitrate did not reach the helper");
             }
             bool rejected=false;

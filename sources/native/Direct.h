@@ -47,7 +47,7 @@ void rest_open(RestControl *control, const char *pipe_name);
 void rest_close(RestControl *control);
 void rest_tick(RestControl *control, bool connected, ChiakiSession *session, ChiakiErrorCode (*send)(ChiakiSession *));
 int register_console(const char *host);
-bool video_profile(ChiakiConnectVideoProfile *profile, int codec, const char *fps, const char *kbps);
+bool video_profile(ChiakiConnectVideoProfile *profile, int codec, const char *fps, const char *kbps, const char *height);
 bool video_header(Video *video);
 bool video_sample(uint8_t *data, size_t size, int32_t lost, bool recovered, void *user);
 void video_stats(Video *video, const DirectMetrics *stats);

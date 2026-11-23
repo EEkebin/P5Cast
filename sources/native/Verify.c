@@ -9,15 +9,23 @@
 static void verify_profile(void)
 {
     ChiakiConnectVideoProfile profile;
-    CHECK(video_profile(&profile, 1, NULL, NULL));
+    CHECK(video_profile(&profile, 1, NULL, NULL, NULL));
     CHECK(profile.width == 1920 && profile.height == 1080 && profile.max_fps == 60 && profile.bitrate == 15000);
-    CHECK(video_profile(&profile, 2, "30", "0") && profile.max_fps == 30 && profile.bitrate == 15000);
-    CHECK(video_profile(&profile, 3, "60", "100000") && profile.bitrate == 100000 && profile.codec == CHIAKI_CODEC_H265_HDR);
-    CHECK(video_profile(&profile, 1, "60", "2000") && profile.bitrate == 2000);
-    CHECK(video_profile(&profile, 2, "60", "37500") && profile.bitrate == 37500);
-    CHECK(!video_profile(&profile, 1, "120", "0") && !video_profile(&profile, 0, "60", NULL));
+    CHECK(video_profile(&profile, 2, "30", "0", NULL) && profile.max_fps == 30 && profile.bitrate == 15000);
+    CHECK(video_profile(&profile, 3, "60", "100000", NULL) && profile.bitrate == 100000 && profile.codec == CHIAKI_CODEC_H265_HDR);
+    CHECK(video_profile(&profile, 1, "60", "2000", NULL) && profile.bitrate == 2000);
+    CHECK(video_profile(&profile, 2, "60", "37500", NULL) && profile.bitrate == 37500);
+    CHECK(!video_profile(&profile, 1, "120", "0", NULL) && !video_profile(&profile, 0, "60", NULL, NULL));
+    CHECK(video_profile(&profile, 1, "60", "0", "1080") && profile.width == 1920 && profile.height == 1080 && profile.bitrate == 15000);
+    CHECK(video_profile(&profile, 2, "30", "0", "720") && profile.width == 1280 && profile.height == 720 && profile.bitrate == 10000 && profile.max_fps == 30);
+    CHECK(video_profile(&profile, 3, "60", "0", "540") && profile.width == 960 && profile.height == 540 && profile.bitrate == 6000 && profile.codec == CHIAKI_CODEC_H265_HDR);
+    CHECK(video_profile(&profile, 1, "60", "0", "360") && profile.width == 640 && profile.height == 360 && profile.bitrate == 2000);
+    CHECK(video_profile(&profile, 3, "60", "50000", "720") && profile.bitrate == 50000 && profile.codec == CHIAKI_CODEC_H265_HDR);
+    const char *invalid_heights[] = {"", "1440", "2160", "0720", "720p", "360 "};
+    for (size_t i = 0; i < sizeof(invalid_heights)/sizeof(invalid_heights[0]); i++)
+        CHECK(!video_profile(&profile, 1, "60", "0", invalid_heights[i]));
     const char *invalid[] = {"", "1999", "100001", "-2000", "5e4", "35000 ", "4294967296"};
-    for (size_t i = 0; i < sizeof(invalid)/sizeof(invalid[0]); i++) CHECK(!video_profile(&profile, 1, "60", invalid[i]));
+    for (size_t i = 0; i < sizeof(invalid)/sizeof(invalid[0]); i++) CHECK(!video_profile(&profile, 1, "60", invalid[i], NULL));
 }
 
 static void verify_video(int codec, bool extended)

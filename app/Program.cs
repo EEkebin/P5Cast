@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.15.1.0")]
+[assembly: AssemblyVersion("0.15.2.0")]
 
 namespace Cadrivect
 {
@@ -191,15 +191,18 @@ namespace Cadrivect
                 timer.Start(); await ReadGpu(requested);
             };
             timer.Tick+=delegate {Tick();};
+            var streamSize=UI<ComboBox>("DirectStreamSize");
+            streamSize.ItemsSource=DirectConsole.StreamHeights.Select(height=>height+"p").ToArray();
+            streamSize.SelectedIndex=SavedChoiceIndex(saved,"directStreamHeight",DirectConsole.StreamHeights,1080);
             UI<ComboBox>("DirectFps").ItemsSource=new[]{"60 FPS","30 FPS"};
             UI<ComboBox>("DirectFps").SelectedIndex=ParseIndex(saved,"directFps",0,2);
             var directRate=UI<ComboBox>("DirectBitrate");
             directRate.ItemsSource=directRates.Select(rate=>rate+" Mbps").ToArray();
-            directRate.SelectedIndex=RateIndex(saved,"directMbps",directRates,100);
+            directRate.SelectedIndex=SavedChoiceIndex(saved,"directMbps",directRates,100);
             directRate.SelectionChanged+=delegate {if(!Active && !preparing) meter.SetRequestedVideoKbps(source=="Direct"?DirectKbps():0);};
             var relayRate=UI<ComboBox>("NetworkBitrate");
             relayRate.ItemsSource=networkRates.Select(rate=>rate==0?"Use video preset":rate+" Mbps").ToArray();
-            relayRate.SelectedIndex=RateIndex(saved,"relayMbps",networkRates,500);
+            relayRate.SelectedIndex=SavedChoiceIndex(saved,"relayMbps",networkRates,500);
             UI<ComboBox>("NetworkAudio").ItemsSource=new[]{"Use client settings","Stereo","5.1 surround","7.1 surround"};
             UI<ComboBox>("NetworkAudio").SelectedIndex=ParseIndex(saved,"audioLayout",0,audioLayouts.Length);
             foreach(var group in settingsGroups)
@@ -434,12 +437,13 @@ namespace Cadrivect
             }
         }
 
-        static int RateIndex(Dictionary<string,object> saved,string key,int[] rates,int fallback)
+        static int SavedChoiceIndex(Dictionary<string,object> saved,string key,int[] choices,int fallback)
         {
-            int rate;
-            int index=int.TryParse(Field(saved,key),out rate)?Array.IndexOf(rates,rate):-1;
-            return index>=0?index:Array.IndexOf(rates,fallback);
+            int value;
+            int index=int.TryParse(Field(saved,key),out value)?Array.IndexOf(choices,value):-1;
+            return index>=0?index:Array.IndexOf(choices,fallback);
         }
+        int DirectStreamHeight() {return DirectConsole.StreamHeights[UI<ComboBox>("DirectStreamSize").SelectedIndex];}
         int DirectKbps() {return directRates[UI<ComboBox>("DirectBitrate").SelectedIndex]*1000;}
         void SelectGroup(string[] group,string selected)
         {
@@ -544,7 +548,7 @@ namespace Cadrivect
                 var settings = new { wipeHorizontal=meter.WipeHorizontal,sidebarOpen=stats,sidebarWidth=sidebarWidth,settingsOpen=settingsOpen,settingsHeight=settingsHeight,
                     discordPresence=UI<CheckBox>("SharePresence").IsChecked==true,
                     discordGame=UI<CheckBox>("ShareGame").IsChecked==true,discordProject=UI<CheckBox>("ShareProject").IsChecked==true,stopChoices=stopChoices,directMbps=DirectKbps()/1000, relayMbps=networkRates[UI<ComboBox>("NetworkBitrate").SelectedIndex],audioLayout=UI<ComboBox>("NetworkAudio").SelectedIndex,pictureDefaults=1, mode=mode, multiplier=factor-1,
-                    consoleMac=console==null?"":console.Mac,consoleAddresses=consoleAddresses,directFps=UI<ComboBox>("DirectFps").SelectedIndex,
+                    consoleMac=console==null?"":console.Mac,consoleAddresses=consoleAddresses,directStreamHeight=DirectStreamHeight(),directFps=UI<ComboBox>("DirectFps").SelectedIndex,
                     display=SelectedDisplayName(), uiScale=PreferredScalePercent, resolution=UI<ComboBox>("RenderResolution").SelectedIndex,hdr=preferredHdr,renderer=SelectedRenderer,
                     maximized=(fullscreen?previousWindowState:window.WindowState)==WindowState.Maximized,
                     clientHdr=UI<CheckBox>("ClientHdr").IsChecked==true,hostDisplay=hostTarget==null ? "" : hostTarget.DeviceName,

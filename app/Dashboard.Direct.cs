@@ -169,7 +169,7 @@ namespace Cadrivect
                     string pipe="Cadrivect-Video-"+Guid.NewGuid().ToString("N");
                     args.AddRange(new[]{"--direct-pipe",pipe,"--direct-runtime",runtime,"--target-fps",fps.ToString()});
                     sessionVideoKbps=DirectKbps();
-                    directCore=console.Connect(pipe,address,codec,fps,sessionVideoKbps);
+                    directCore=console.Connect(pipe,address,codec,fps,sessionVideoKbps,DirectStreamHeight());
                     playingMac=console.Mac; playingPipe=pipe; titleAddress=address;
                     Show("Connecting to "+console.Name+"…");
                 } else if(source=="Demo") {

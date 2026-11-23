@@ -215,14 +215,18 @@ namespace Cadrivect
             try {if(!p.HasExited) {p.Kill(); p.WaitForExit(2000);}} catch(InvalidOperationException) {}
             catch(System.ComponentModel.Win32Exception) {if(!p.HasExited) throw;}
         }
-        public Process Connect(string pipe,string host,int codec,int fps,int videoKbps=0)
+        internal static readonly int[] StreamHeights={1080,720,540,360};
+
+        public Process Connect(string pipe,string host,int codec,int fps,int videoKbps=0,int streamHeight=1080)
         {
+            if(Array.IndexOf(StreamHeights,streamHeight)<0)
+                throw new ArgumentOutOfRangeException("streamHeight","Choose a supported PS5 stream resolution.");
             if(videoKbps!=0 && (videoKbps<2000 || videoKbps>100000))
                 throw new ArgumentOutOfRangeException("videoKbps","Choose a video bitrate from 2 to 100 Mbps or the console profile default.");
             if(string.IsNullOrEmpty(pipe) || pipe.Length>120 || pipe.Any(c=>!(c>='A' && c<='Z' || c>='a' && c<='z' || c>='0' && c<='9' || c=='-' || c=='_')))
                 throw new ArgumentException("Invalid Direct session pipe.");
             string address=Host(host);
-            string arguments=pipe+" "+address+" "+codec+" "+fps+" "+videoKbps.ToString(System.Globalization.CultureInfo.InvariantCulture)+" --rest-control";
+            string arguments=pipe+" "+address+" "+codec+" "+fps+" "+videoKbps.ToString(System.Globalization.CultureInfo.InvariantCulture)+" "+streamHeight.ToString(System.Globalization.CultureInfo.InvariantCulture)+" --rest-control";
             byte[] secret=Keys(); Process p=null;
             try {
                 if(secret.Length!=32 && secret.Length!=36) throw new InvalidDataException("This registration needs to be paired again.");

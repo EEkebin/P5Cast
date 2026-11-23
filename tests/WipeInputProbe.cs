@@ -61,7 +61,8 @@ internal static partial class WindowChromeProbe
     static async Task CheckWipeAxis(string backend,Rectangle picture,bool horizontal,Slider slider,
                                     Func<Dictionary<string,object>> sample) {
         double initial=Convert.ToDouble(sample()["wipePosition"]);
-        var layout=new WipeLayout(picture,horizontal,initial);
+        double scale=Convert.ToDouble(sample()["wipeGripScale"]);
+        var layout=new WipeLayout(picture,horizontal,initial,scale);
         int crossMin=horizontal ? picture.Left : picture.Top;
         int crossLength=horizontal ? picture.Width : picture.Height;
         int crossCenter=crossMin+crossLength/2, crossQuarter=crossMin+crossLength/4;
@@ -82,26 +83,26 @@ internal static partial class WindowChromeProbe
         Require(GetCapture()!=video,"A click away from the divider started a drag.");
         mouse(0x202,minimum+1,crossQuarter);
         await Until(delegate {mouse(0x201,layout.Center,crossQuarter); return GetCapture()==video;},"Cannot grab the divider rail.");
-        mouse(0x200,new WipeLayout(picture,horizontal,.76).Center,crossQuarter);
+        mouse(0x200,new WipeLayout(picture,horizontal,.76,scale).Center,crossQuarter);
         Require(Math.Abs(slider.Value-76)<1,"The drawer slider did not track the drag.");
         await Until(()=>Math.Abs(Convert.ToDouble(sample()["wipePosition"])-.76)<.01,"Dragging did not move the rendered divider.");
+        Require(Convert.ToInt32(sample()["wipeGripState"])==2,"Captured divider did not use the drawer's active grip color.");
         SendMessage(video,0x1F,IntPtr.Zero,IntPtr.Zero);
         await Until(()=>Math.Abs(Convert.ToDouble(sample()["wipePosition"])-initial)<.01 && GetCapture()!=video,"Cancel did not restore the drag.");
         mouse(0x201,layout.Center,crossQuarter); SetCapture(hwnd);
         try {
-            mouse(0x200,new WipeLayout(picture,horizontal,.64).Center,crossQuarter);
+            mouse(0x200,new WipeLayout(picture,horizontal,.64,scale).Center,crossQuarter);
             Require(GetCapture()==hwnd && Math.Abs(slider.Value/100-initial)<.01,"The divider kept moving after capture loss.");
         } finally {ReleaseCapture();}
         foreach(int end in new[]{0,1}) {
             int outside=end==0 ? minimum-20 : maximum+20;
             mouse(0x201,layout.Center,crossQuarter); mouse(0x200,outside,crossQuarter); mouse(0x202,outside,crossQuarter);
             await Until(()=>Convert.ToDouble(sample()["wipePosition"])==end && GetCapture()!=video,"The drag did not stop at its limit.");
-            var endpoint=new WipeLayout(picture,horizontal,end);
+            var endpoint=new WipeLayout(picture,horizontal,end,scale);
             Require(picture.Contains(endpoint.Handle) && endpoint.Center>minimum && endpoint.Center<maximum-1,
                     "A handle crossed the picture boundary.");
-            // Catch a rail-only hit test: drag from the outer grip, away from its center line.
-            int outer=end==0 ? (horizontal ? endpoint.Handle.Top : endpoint.Handle.Left)+2
-                             : (horizontal ? endpoint.Handle.Bottom : endpoint.Handle.Right)-3;
+            // The full-width invisible hit zone remains usable beyond either edge of the slim painted grip.
+            int outer=endpoint.Center+(end==0 ? -1 : 1)*(int)Math.Max(4,Math.Floor(6*scale));
             mouse(0x201,outer,crossCenter);
             Require(GetCapture()==video,"The outer part of the handle cannot be grabbed at its limit.");
             int target=layout.Center+outer-endpoint.Center;

@@ -8,16 +8,15 @@ internal struct WipeLayout
     public readonly Rectangle Rail,Handle,Original;
     readonly int minimum,maximum;
 
-    public WipeLayout(Rectangle picture,bool horizontal,double position)
+    public WipeLayout(Rectangle picture,bool horizontal,double position,double scale=1)
     {
         int axisStart=horizontal ? picture.Top : picture.Left;
         int axis=horizontal ? picture.Height : picture.Width;
         int cross=horizontal ? picture.Width : picture.Height;
-        double scale=Math.Max(1,Math.Min(2.5,Math.Min(axis,cross)/900.0));
-        int handleAlong=Math.Min(axis,(int)Math.Round(44*scale));
-        int handleAcross=Math.Min(cross,(int)Math.Round(26*scale));
-        int railWidth=Math.Min(axis,(int)Math.Round(5*scale));
-        int margin=Math.Min((axis-handleAlong)/2,(int)Math.Round(4*scale));
+        int handleAlong=Math.Min(axis,Math.Max(1,(int)Math.Round(3*scale)));
+        int handleAcross=Math.Min(cross,Math.Max(1,(int)Math.Round(36*scale)));
+        int railWidth=Math.Min(axis,Math.Max(1,(int)Math.Round(scale)));
+        int margin=Math.Min((axis-handleAlong)/2,(int)Math.Ceiling(8*scale));
         minimum=axisStart+handleAlong/2+margin;
         maximum=axisStart+axis-(handleAlong-handleAlong/2)-margin;
         Center=minimum+(int)Math.Round((maximum-minimum)*Math.Max(0,Math.Min(1,position)));

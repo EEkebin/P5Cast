@@ -22,6 +22,10 @@ internal sealed class NgxVideo : IDisposable
     [DllImport(Bridge, CallingConvention=CallingConvention.Cdecl, ExactSpelling=true)]
     static extern void NgxClose(IntPtr state);
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.AssemblyDirectory | DllImportSearchPath.System32)]
+    [DllImport(Bridge, CallingConvention=CallingConvention.Cdecl, ExactSpelling=true)]
+    static extern uint NgxConfigureFeature(IntPtr state, IntPtr context, int outputWidth, int outputHeight, int dlaa, int hdr);
+
     public NgxVideo(Device device,int inputWidth,int inputHeight,int outputWidth,int outputHeight,bool dlaa,bool hdr=false)
     {
         if (inputWidth<1 || inputHeight<1 || outputWidth<1 || outputHeight<1)
@@ -49,6 +53,11 @@ internal sealed class NgxVideo : IDisposable
         uint result=NgxEvaluate(state,context.NativePointer,color.NativePointer,motion.NativePointer,depth.NativePointer,
             output.NativePointer,jitterX,jitterY,frameMs,reset ? 1 : 0);
         Check(result,"frame evaluation");
+    }
+
+    public void Resize(DeviceContext context,int width,int height,bool dlaa,bool hdr)
+    {
+        Check(NgxConfigureFeature(state,context.NativePointer,width,height,dlaa ? 1 : 0,hdr ? 1 : 0),"resizing the output");
     }
 
     static void Check(uint result,string operation)

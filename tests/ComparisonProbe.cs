@@ -71,11 +71,11 @@ internal static partial class EmbeddedProbe
         return changed;
     }
 
-    static bool Mint(Color c) {
-        return c.R>=65 && c.G>=140 && c.B>=115 && c.G-c.R>30 && c.G>=c.B;
+    static bool Matches(Color pixel,Color expected) {
+        return Math.Abs(pixel.R-expected.R)<=2 && Math.Abs(pixel.G-expected.G)<=2 && Math.Abs(pixel.B-expected.B)<=2;
     }
 
-    static int CheckWipePixels(Bitmap actual,Bitmap original,Bitmap enhanced,Rectangle frame,bool horizontal,float position) {
+    static int CheckWipePixels(Bitmap actual,Bitmap original,Bitmap enhanced,Rectangle frame,bool horizontal,float position,int state,double scale) {
         Check(original.Size==enhanced.Size && actual.Size==original.Size,"Wipe changed the output size.");
         int start=horizontal ? frame.Top : frame.Left;
         int length=horizontal ? frame.Height : frame.Width;
@@ -83,30 +83,23 @@ internal static partial class EmbeddedProbe
         int alongLength=horizontal ? frame.Width : frame.Height;
         Func<int,int,Color> pixel=(axis,along)=>horizontal ? actual.GetPixel(along,axis) : actual.GetPixel(axis,along);
         string label=(horizontal ? "horizontal" : "vertical")+" wipe at "+position;
-        // The lossless fixture is grayscale. Locate the actual mint spine in a cross section away from the grip.
+        // Measure the rail and grip independently of the renderer's layout code.
         int first=-1,last=-1;
         for(int i=start;i<start+length;i++) {
-            if(!Mint(pixel(i,alongStart+alongLength/4))) continue;
+            if(!Matches(pixel(i,alongStart+alongLength/4),Color.FromArgb(38,55,59))) continue;
             if(first<0) first=i;
             last=i;
         }
-        Check(first>=0 && last-first+1>=2 && last-first+1<=12,"Missing or incorrectly sized mint rail for "+label);
+        Check(first>=0 && last-first+1==Math.Max(1,(int)Math.Round(scale)),"Missing or incorrectly sized rail for "+label);
         int cut=(first+last+1)/2, middle=alongStart+alongLength/2;
-        double scale=Math.Max(1,Math.Min(2.5,Math.Min(frame.Width,frame.Height)/900.0));
-        int gripRadius=(int)Math.Ceiling(23*scale), gripHeight=(int)Math.Ceiling(14*scale);
+        int gripRadius=(int)Math.Ceiling(1.5*scale), gripHeight=(int)Math.Ceiling(18*scale);
         Check(cut-gripRadius>=start && cut+gripRadius<start+length,"The grip extends outside the picture for "+label);
-        // Look for both chevrons and the short central stripe inside the dark grip.
-        for(int sign=-1;sign<=1;sign++) {
-            bool found=false;
-            int from=sign==0 ? -1 : (int)Math.Ceiling(4*scale);
-            int to=sign==0 ? 1 : (int)Math.Floor(16*scale);
-            for(int d=from;d<=to;d++) for(int dy=-1;dy<=1;dy++)
-                if(Mint(pixel(cut+(sign==0?d:sign*d),middle+dy))) found=true;
-            Check(found,"Missing "+(sign<0?"first chevron":sign>0?"second chevron":"center bar")+" for "+label);
-        }
-        int gap=(int)Math.Round(5*scale);
-        Check(pixel(cut-gap,middle).G<110 && pixel(cut+gap,middle).G<110,
-              "The grip face does not separate the two arrows from the center stripe for "+label);
+        var gripColor=state==2 ? Color.FromArgb(143,230,208) : state==1 ? Color.FromArgb(147,188,179) : Color.FromArgb(81,97,104);
+        int gripWidth=0,gripLength=0;
+        for(int axis=start;axis<start+length;axis++) if(Matches(pixel(axis,middle),gripColor)) gripWidth++;
+        for(int along=alongStart;along<alongStart+alongLength;along++) if(Matches(pixel(cut,along),gripColor)) gripLength++;
+        Check(gripWidth==(int)Math.Round(3*scale) && Math.Abs(gripLength-36*scale)<=3,
+              "The centered grip does not match drawer dimensions and state "+state+" for "+label+": "+gripWidth+" x "+gripLength);
         int wrong=0,samples=0;
         for(int y=0;y<actual.Height;y+=3) for(int x=0;x<actual.Width;x+=3) {
             int axis=horizontal ? y : x, along=horizontal ? x : y;
@@ -140,15 +133,20 @@ internal static partial class EmbeddedProbe
                     api.GetMethod("SetWipeHorizontal").Invoke(null,new object[]{horizontal});
                     WaitSnapshot(api,s=>Equals(s["wipeHorizontal"],horizontal),"wipe orientation");
                     var cuts=new Dictionary<float,int>();
+                    float scale=frame.Width>=1000 ? 1.5f : 1f;
                     foreach(float position in positions) {
+                        int state=position==0 ? 1 : position==1 ? 2 : 0;
+                        api.GetMethod("SetWipeGrip").Invoke(null,new object[]{state,scale});
                         var data=SetWipePosition(api,position);
+                        WaitSnapshot(api,s=>Convert.ToInt32(s["wipeGripState"])==state &&
+                            Convert.ToDouble(s["wipeGripScale"])==scale,"drawer grip state and scale");
                         var reported=new Rectangle(Convert.ToInt32(data["pictureX"]),Convert.ToInt32(data["pictureY"]),
                             Convert.ToInt32(data["pictureWidth"]),Convert.ToInt32(data["pictureHeight"]));
                         Check(reported==frame,"The divider hit bounds differ from the physical picture.");
                         Check(Convert.ToInt32(data["renderWidth"])==Convert.ToInt32(single["renderWidth"]) &&
                               Convert.ToInt32(data["renderHeight"])==Convert.ToInt32(single["renderHeight"]),
                               "Wipe changed the enhancement resolution.");
-                        using(var wipe=CaptureComparison(window)) cuts[position]=CheckWipePixels(wipe,original,enhanced,frame,horizontal,position);
+                        using(var wipe=CaptureComparison(window)) cuts[position]=CheckWipePixels(wipe,original,enhanced,frame,horizontal,position,state,scale);
                     }
                     int length=horizontal ? frame.Height : frame.Width;
                     Check(cuts[0]<length/8 && cuts[1]>length-length/8 && Math.Abs(cuts[0]-(length-cuts[1]))<=2,
@@ -156,7 +154,7 @@ internal static partial class EmbeddedProbe
                     foreach(var row in cuts)
                         Check(Math.Abs(row.Value-(cuts[0]+row.Key*(cuts[1]-cuts[0])))<=2,"Rendered divider missed its selected travel position.");
                 }
-                Console.WriteLine("Both wipe orientations retained the mint rail and grip at both ends and matched the original/enhanced full-size references in "+frame.Width+"x"+frame.Height+
+                Console.WriteLine("Both wipe orientations matched the drawer grip dimensions and states and the original/enhanced full-size references in "+frame.Width+"x"+frame.Height+
                     " picture pixels within a "+enhanced.Width+"x"+enhanced.Height+" surface.");
             }
         }

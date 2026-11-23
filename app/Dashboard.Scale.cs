@@ -73,6 +73,7 @@ namespace Cadrivect
             if(availableWidth<=0 || availableHeight<=0) return;
             double fit=Math.Min(availableWidth/MinimumLayoutWidth,availableHeight/MinimumLayoutHeight);
             double zoom=fullscreen?1:Math.Min(requested,fit);
+            surface.SetWipeScale((float)(dpi*zoom));
             if(Math.Abs(interfaceTransform.ScaleX-zoom)>0.00001) {
                 interfaceTransform.ScaleX=zoom; interfaceTransform.ScaleY=zoom;
                 titleChrome.CaptionHeight=HeaderHeight*zoom;

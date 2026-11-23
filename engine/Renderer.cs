@@ -37,7 +37,7 @@ internal sealed partial class Renderer : IDisposable
 {
     [StructLayout(LayoutKind.Sequential)] struct FrameInfo
     {
-        public float SourceX,SourceY,OutputX,OutputY,Phase,OriginX,OriginY,WipeHorizontal,TargetX,TargetY,Pad1,Pad2;
+        public float SourceX,SourceY,OutputX,OutputY,Phase,OriginX,OriginY,WipeHorizontal,TargetX,TargetY,WipeGripState,Pad;
     }
     public Device Device { get; private set; }
     readonly DeviceContext context;
@@ -58,9 +58,13 @@ internal sealed partial class Renderer : IDisposable
     RenderTargetView display;
     GpuImage curr,prev,incoming,motion,mixed,scaled;
     Size srcSize,outSize,screenSize;
+    Size pendingSize;
+    long resizeStartedAt,sizeChangedAt;
     Rectangle viewport,originalViewport;
     bool sideBySide,wipe,wipeHorizontal;
     float wipePosition=.5f;
+    int wipeGripState;
+    float wipeGripScale=1;
     public Rectangle PictureViewport { get; private set; }
     readonly IntPtr hwnd;
     readonly bool clearOnDispose;
@@ -155,19 +159,31 @@ internal sealed partial class Renderer : IDisposable
         using(var data=Assembly.GetExecutingAssembly().GetManifestResourceStream(name+".cso"))
         using(var stream=new MemoryStream()) { data.CopyTo(stream); return stream.ToArray(); }
     }
-    public void Resize(Size window)
+    public void Resize(Size window) { UpdateWindowSize(window,false); }
+    public bool UpdateWindowSize(Size window,bool coalesce)
     {
-        if(window.Width<=0 || window.Height<=0) return;
+        if(window.Width<=0 || window.Height<=0) return false;
         var target=MonitorFromWindow(hwnd,2);
-        if(window==screenSize && target==monitor) return;
+        if(window==screenSize && target==monitor) { pendingSize=Size.Empty; return false; }
+        bool displayChanged=target!=monitor;
+        if(coalesce && !displayChanged && display!=null) {
+            // WPF can produce several child sizes during one chrome/layout change.
+            // Briefly coalesce intermediate sizes, but keep continuous dragging responsive.
+            long now=System.Diagnostics.Stopwatch.GetTimestamp();
+            if(pendingSize.IsEmpty) resizeStartedAt=now;
+            if(window!=pendingSize) { pendingSize=window; sizeChangedAt=now; }
+            long frequency=System.Diagnostics.Stopwatch.Frequency;
+            if(now-sizeChangedAt<frequency/60 && now-resizeStartedAt<frequency/15) return false;
+        }
+        pendingSize=Size.Empty;
         // Moving an active session onto an SDR-only display keeps the stream running. Switch back
         // to PQ on return to an HDR display when HDR10 was explicitly selected.
-        bool displayChanged=target!=monitor;
         string request=displayChanged && display!=null && hdrMode=="hdr10" ? "auto" : hdrMode;
         bool next=displayChanged && display!=null ? ChooseHdr(request) : HdrEnabled;
         ConfigureDisplay(window,next,display!=null,request=="auto",displayChanged);
         monitor=target;
         screenSize=window; SetViewport();
+        return true;
     }
     void ConfigureDisplay(Size window,bool hdr,bool resize,bool allowSdr,bool displayChanged)
     {
@@ -175,7 +191,9 @@ internal sealed partial class Renderer : IDisposable
             if(display!=null) { context.OutputMerger.ResetTargets(); display.Dispose(); display=null; }
             if(backBuffer!=null) { backBuffer.Dispose(); backBuffer=null; }
             if(resize) swap.ResizeBuffers(2,window.Width,window.Height,DisplayHdr.OutputFormat(hdr),SwapChainFlags.None);
-            outputInfo=DisplayHdr.Configure(swap,hdr);
+            // Reapply the swap-chain color space without walking the display topology
+            // again on a size-only change. Display notifications invalidate the cache.
+            outputInfo=DisplayHdr.Configure(swap,hdr,displayChanged || HdrEnabled!=hdr ? null : outputInfo);
             backBuffer=Texture2D.FromSwapChain<Texture2D>(swap,0);
             display=new RenderTargetView(Device,backBuffer);
         } else hdr=ConfigurePortableDisplay(window,hdr,allowSdr,displayChanged);
@@ -189,7 +207,7 @@ internal sealed partial class Renderer : IDisposable
     {
         // Keep the currently displayed image and working swap chain until the new
         // API surface, color space, processing texture and render view all exist.
-        var info=DisplayHdr.Probe(hwnd);
+        var info=displayChanged || outputInfo==null ? DisplayHdr.Probe(hwnd) : outputInfo;
         Presentation candidate=null;
         Texture2D target=null;
         RenderTargetView view=null;
@@ -271,8 +289,10 @@ internal sealed partial class Renderer : IDisposable
         sideBySide=enabled;
         SetViewport();
     }
-    public void SetWipe(bool enabled,float position,bool horizontal=false)
+    public void SetWipe(bool enabled,float position,bool horizontal,int gripState,float gripScale)
     {
+        wipeGripState=gripState;
+        wipeGripScale=gripScale;
         wipeHorizontal=horizontal;
         if(float.IsNaN(position) || float.IsInfinity(position)) throw new ArgumentOutOfRangeException("position");
         wipePosition=Math.Max(0,Math.Min(1,position));
@@ -357,7 +377,7 @@ internal sealed partial class Renderer : IDisposable
               ShaderResourceView previous=null, ShaderResourceView flow=null,Rectangle? clip=null,RenderTargetView auxiliary=null)
     {
         var info=new FrameInfo { SourceX=srcSize.Width,SourceY=srcSize.Height,OutputX=outSize.Width,OutputY=outSize.Height,
-                                 Phase=phase,WipeHorizontal=wipeHorizontal ? 1 : 0,OriginX=area.X,OriginY=area.Y,TargetX=area.Width,TargetY=area.Height };
+                                 Phase=phase,WipeHorizontal=wipeHorizontal ? 1 : 0,OriginX=area.X,OriginY=area.Y,TargetX=area.Width,TargetY=area.Height,WipeGripState=wipeGripState };
         context.UpdateSubresource(ref info,constants);
         if(auxiliary==null) context.OutputMerger.SetRenderTargets(target);
         else context.OutputMerger.SetTargets(target,auxiliary);
@@ -504,7 +524,7 @@ internal sealed partial class Renderer : IDisposable
     {
         if(wipe)
         {
-            var layout=new WipeLayout(viewport,wipeHorizontal,wipePosition);
+            var layout=new WipeLayout(viewport,wipeHorizontal,wipePosition,wipeGripScale);
             // Keep both image layers at full scale and clip only the original layer.
             if(layout.Original.Width>0 && layout.Original.Height>0) DrawOriginal(viewport,holdOriginal,layout.Original);
             float hdrUi=HdrEnabled ? 1 : 0;

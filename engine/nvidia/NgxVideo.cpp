@@ -19,6 +19,24 @@ struct VideoState {
 };
 
 #define EXPORT extern "C" __declspec(dllexport)
+EXPORT unsigned NgxConfigureFeature(VideoState* state, ID3D11DeviceContext* context,
+    unsigned outputWidth, unsigned outputHeight, int dlaa, int hdr) {
+    if (!state || !context || !outputWidth || !outputHeight) return NVSDK_NGX_Result_FAIL_InvalidParameter;
+    if (state->feature) {
+        auto released=NVSDK_NGX_D3D11_ReleaseFeature(state->feature);
+        if (NVSDK_NGX_FAILED(released)) return released;
+        state->feature=nullptr;
+    }
+    NVSDK_NGX_DLSS_Create_Params create{};
+    create.Feature.InWidth=state->inputWidth;
+    create.Feature.InHeight=state->inputHeight;
+    create.Feature.InTargetWidth=outputWidth;
+    create.Feature.InTargetHeight=outputHeight;
+    create.Feature.InPerfQualityValue=dlaa ? NVSDK_NGX_PerfQuality_Value_DLAA : NVSDK_NGX_PerfQuality_Value_MaxQuality;
+    create.InFeatureCreateFlags=NVSDK_NGX_DLSS_Feature_Flags_MVLowRes | NVSDK_NGX_DLSS_Feature_Flags_AutoExposure;
+    if (hdr) create.InFeatureCreateFlags |= NVSDK_NGX_DLSS_Feature_Flags_IsHDR;
+    return NGX_D3D11_CREATE_DLSS_EXT(context,&state->feature,state->parameters,&create);
+}
 EXPORT unsigned NgxOpen2(ID3D11Device* device, ID3D11DeviceContext* context,
     const wchar_t* runtimeFolder, const wchar_t* dataFolder, unsigned inputWidth,
     unsigned inputHeight, unsigned outputWidth, unsigned outputHeight, int dlaa, int hdr,
@@ -54,15 +72,7 @@ EXPORT unsigned NgxOpen2(ID3D11Device* device, ID3D11DeviceContext* context,
     }
     if (NVSDK_NGX_SUCCEED(result)) {
         *stage=4;
-        NVSDK_NGX_DLSS_Create_Params create{};
-        create.Feature.InWidth=inputWidth;
-        create.Feature.InHeight=inputHeight;
-        create.Feature.InTargetWidth=outputWidth;
-        create.Feature.InTargetHeight=outputHeight;
-        create.Feature.InPerfQualityValue=dlaa ? NVSDK_NGX_PerfQuality_Value_DLAA : NVSDK_NGX_PerfQuality_Value_MaxQuality;
-        create.InFeatureCreateFlags=NVSDK_NGX_DLSS_Feature_Flags_MVLowRes | NVSDK_NGX_DLSS_Feature_Flags_AutoExposure;
-        if (hdr) create.InFeatureCreateFlags |= NVSDK_NGX_DLSS_Feature_Flags_IsHDR;
-        result=NGX_D3D11_CREATE_DLSS_EXT(context,&state->feature,state->parameters,&create);
+        result=static_cast<NVSDK_NGX_Result>(NgxConfigureFeature(state,context,outputWidth,outputHeight,dlaa,hdr));
     }
     if (NVSDK_NGX_FAILED(result)) delete state;
     else *out=state;

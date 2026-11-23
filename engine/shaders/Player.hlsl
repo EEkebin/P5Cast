@@ -5,7 +5,8 @@ cbuffer Frame : register(b0) {
     float2 viewportOrigin;
     float wipeHorizontal;
     float2 targetSize;
-    float2 reserved;
+    float wipeGripState;
+    float reserved;
 };
 Texture2D<float4> image : register(t0);
 Texture2D<float4> previous : register(t1);

@@ -295,6 +295,8 @@ internal static class Player
                         float wipePosition=initialPosition;
                         bool initialHorizontal=Array.IndexOf(args,"--wipe-horizontal")>=0;
                         bool wipeHorizontal=host!=null ? host.WipeHorizontal : initialHorizontal;
+                        int gripState=0;
+                        float gripScale=1;
                         string previousView="enhanced",comparisonView="enhanced";
                         Action<string,int> change=delegate(string picture,int factor) {
                             if(picture!=null) requestedMode=picture;
@@ -328,10 +330,14 @@ internal static class Player
                                 double now=clock.Elapsed.TotalMilliseconds;
                                 float requestedPosition=host!=null ? host.WipePosition : initialPosition;
                                 bool horizontal=host!=null ? host.WipeHorizontal : initialHorizontal;
-                                bool redraw=comparisonView=="wipe" && (requestedPosition!=wipePosition || horizontal!=wipeHorizontal);
+                                int requestedGrip=host!=null ? host.WipeGripState : 0;
+                                float requestedScale=host!=null ? host.WipeGripScale : 1;
+                                bool redraw=comparisonView=="wipe" && (requestedPosition!=wipePosition || horizontal!=wipeHorizontal ||
+                                                                      requestedGrip!=gripState || requestedScale!=gripScale);
+                                gripState=requestedGrip; gripScale=requestedScale;
                                 wipeHorizontal=horizontal;
                                 wipePosition=requestedPosition;
-                                if(redraw || previousView!=comparisonView) renderer.SetWipe(comparisonView=="wipe",wipePosition,wipeHorizontal);
+                                if(redraw || previousView!=comparisonView) renderer.SetWipe(comparisonView=="wipe",wipePosition,wipeHorizontal,gripState,gripScale);
                                 string newSize,newHdr;
                                 if(host!=null && host.TakeOutput(out newSize,out newHdr)) {
                                     try {
@@ -371,7 +377,7 @@ internal static class Player
                                         (renderer.Presented-snapshotPresented)*perSecond,(renderer.Generated-snapshotGenerated)*perSecond)
                                         +",\"repaints\":"+renderer.Repaints+",\"mode\":"+JsonString(mode)+",\"multiplier\":"+multiplier+",\"effectivePictureMode\":"+JsonString(renderer.EffectivePictureMode)
                                         +",\"effectNotice\":"+JsonString(settingsNotice ?? (string.IsNullOrEmpty(renderer.EffectNotice) ? renderer.OutputNotice : renderer.EffectNotice))+",\"compare\":"+(compare ? "true":"false")
-                                        +",\"wipeHorizontal\":"+(wipeHorizontal ? "true" : "false")+",\"wipePosition\":"+wipePosition.ToString("R",CultureInfo.InvariantCulture)+",\"comparisonView\":"+JsonString(comparisonView)+",\"sampleId\":"+(++sampleId)+",\"elapsedMs\":"+Number(now)+",\"display\":"+JsonString(renderer.DisplayName)
+                                        +",\"wipeGripState\":"+gripState+",\"wipeGripScale\":"+Number(gripScale)+",\"wipeHorizontal\":"+(wipeHorizontal ? "true" : "false")+",\"wipePosition\":"+wipePosition.ToString("R",CultureInfo.InvariantCulture)+",\"comparisonView\":"+JsonString(comparisonView)+",\"sampleId\":"+(++sampleId)+",\"elapsedMs\":"+Number(now)+",\"display\":"+JsonString(renderer.DisplayName)
                                         +",\"hdrEnabled\":"+(renderer.HdrEnabled ? "true":"false")+",\"outputWidth\":"+renderer.OutputSize.Width+",\"outputHeight\":"+renderer.OutputSize.Height
                                         +",\"resolution\":"+JsonString(resolution)+",\"hdrMode\":"+JsonString(hdr)
                                         +",\"renderWidth\":"+renderer.RenderSize.Width+",\"renderHeight\":"+renderer.RenderSize.Height
@@ -395,8 +401,7 @@ internal static class Player
                                 }
                                 if(host==null ? window.ConsumeDisplayChange():host.ConsumeDisplayChange()) { renderer.InvalidateDisplay(); redraw=true; }
                                 Size surfaceSize=host==null ? window.ClientSize:host.ClientSize;
-                                if(surfaceSize!=renderer.OutputSize) redraw=true;
-                                renderer.Resize(surfaceSize);
+                                if(renderer.UpdateWindowSize(surfaceSize,true)) redraw=true;
                                 double timestamp;
                                 bool deduplicate=multiplier>1 || testing || vendor;
                                 bool fresh=demo ? offline.Read(renderer,out timestamp) : direct ? decoded.Read(renderer,deduplicate,out timestamp) : capture.Read(renderer,deduplicate,out timestamp);

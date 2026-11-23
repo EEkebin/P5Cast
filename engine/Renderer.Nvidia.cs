@@ -62,14 +62,19 @@ internal sealed partial class Renderer
         var target=native ? srcSize : outSize;
         if(neuralMode!=effective || neuralSize!=target)
         {
-            ReleaseEffects();
+            // The input and GPU device are unchanged on a window resize. Keep their
+            // initialized SDK runtime while rebuilding the size-dependent output.
+            bool reuseRuntime=mode=="rtxvideo" ? video!=null : ngx!=null;
+            ReleaseEffects(reuseRuntime);
             neuralSize=target;
             neuralMode=effective;
             var format=HdrEnabled ? Format.R16G16B16A16_Float : Format.R8G8B8A8_UNorm;
             neuralCurrent=new GpuImage(Device,target.Width,target.Height,format,true,true);
             neuralPrevious=new GpuImage(Device,target.Width,target.Height,format,true,true);
             rgba=new GpuImage(Device,srcSize.Width,srcSize.Height,format,true);
-            if(mode=="rtxvideo") video=new RtxVideo(Device.NativePointer);
+            if(mode=="rtxvideo") {
+                if(video==null) video=new RtxVideo(Device.NativePointer);
+            }
             else
             {
                 strokeMask=new GpuImage(Device,srcSize.Width,srcSize.Height,Format.R8_UNorm,true);
@@ -78,7 +83,8 @@ internal sealed partial class Renderer
                 depth=new GpuImage(Device,srcSize.Width,srcSize.Height,Format.R32_Float,true);
                 // Remote Play supplies no scene geometry. Model the finished video as one plane.
                 context.ClearRenderTargetView(depth.Write,new RawColor4(0.5f,0,0,1));
-                ngx=new NgxVideo(Device,srcSize.Width,srcSize.Height,target.Width,target.Height,native,HdrEnabled);
+                if(ngx==null) ngx=new NgxVideo(Device,srcSize.Width,srcSize.Height,target.Width,target.Height,native,HdrEnabled);
+                else ngx.Resize(context,target.Width,target.Height,native,HdrEnabled);
             }
             RestoreDrawState();
         }
@@ -119,10 +125,10 @@ internal sealed partial class Renderer
         context.PixelShader.SetSampler(0,sampler);
         context.PixelShader.SetConstantBuffer(0,constants);
     }
-    void ReleaseEffects()
+    void ReleaseEffects(bool keepRuntime=false)
     {
-        if(ngx!=null) { ngx.Dispose(); ngx=null; }
-        if(video!=null) { video.Dispose(); video=null; }
+        if(!keepRuntime && ngx!=null) { ngx.Dispose(); ngx=null; }
+        if(!keepRuntime && video!=null) { video.Dispose(); video=null; }
         foreach(var image in new[]{neuralCurrent,neuralPrevious,rgba,vectors,depth,strokeMask,ngxOutput}) if(image!=null) image.Dispose();
         neuralCurrent=neuralPrevious=rgba=vectors=depth=strokeMask=ngxOutput=null;
         havePriorEnhanced=false; evaluatedFrame=-1; neuralMode=null;

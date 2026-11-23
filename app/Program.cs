@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.12.1.0")]
+[assembly: AssemblyVersion("0.13.0.0")]
 
 namespace Cadrivect
 {
@@ -124,6 +124,7 @@ namespace Cadrivect
                 UpdateWipeInput();
             });
             surface.WipePositionChanged+=delegate(double position){meter.WipePosition=position;};
+            surface.WipeGripChanged+=delegate(int state,float scale){if(rendering!=null) engine.SetWipeGrip(state,scale);};
             meter.WipePositionChanged+=delegate(double position){
                 if(rendering!=null) engine.SetWipePosition((float)position);
                 UpdateWipeInput();

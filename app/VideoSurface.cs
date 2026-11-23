@@ -10,7 +10,10 @@ namespace Cadrivect
     {
         internal event Action DoubleClicked;
         internal event Action<double> WipePositionChanged;
+        internal event Action<int,float> WipeGripChanged;
         bool wipeActive, horizontalWipe, dragging;
+        int gripState;
+        float gripScale=1;
         double wipePosition=.5, pictureAspect;
         double initialPosition, grabOffset;
         [DllImport("user32.dll", CharSet=CharSet.Unicode,SetLastError=true)]
@@ -31,7 +34,8 @@ namespace Cadrivect
         [DllImport("user32.dll")] static extern IntPtr SetCapture(IntPtr hwnd);
         [DllImport("user32.dll")] static extern IntPtr GetCapture();
         [DllImport("user32.dll")] static extern bool ReleaseCapture();
-        [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr hwnd);
+        [StructLayout(LayoutKind.Sequential)] struct MouseTracking {public int Size,Flags; public IntPtr Window; public int HoverTime;}
+        [DllImport("user32.dll")] static extern bool TrackMouseEvent(ref MouseTracking request);
         [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern IntPtr LoadCursor(IntPtr instance,IntPtr resource);
         [DllImport("user32.dll")] static extern IntPtr SetCursor(IntPtr cursor);
         static readonly IntPtr resizeWE=LoadCursor(IntPtr.Zero,new IntPtr(32644)); // IDC_SIZEWE
@@ -49,10 +53,34 @@ namespace Cadrivect
             return new HandleRef(this,child);
         }
         protected override void DestroyWindowCore(HandleRef hwnd) { EndDrag(hwnd.Handle); DestroyWindow(hwnd.Handle); }
+        internal void SetWipeScale(float scale)
+        {
+            if(gripScale==scale) return;
+            gripScale=scale;
+            if(wipeActive && WipeGripChanged!=null) WipeGripChanged(gripState,scale);
+        }
+        void SetGrip(int state)
+        {
+            if(gripState==state) return;
+            gripState=state;
+            if(WipeGripChanged!=null) WipeGripChanged(state,gripScale);
+        }
+        void UpdateHover(IntPtr hwnd,int x,int y)
+        {
+            bool hit=HitDivider(hwnd,x,y);
+            if(hit && gripState==0) {
+                var request=new MouseTracking {Size=Marshal.SizeOf(typeof(MouseTracking)),Flags=2,Window=hwnd}; // TME_LEAVE
+                TrackMouseEvent(ref request);
+            }
+            SetGrip(hit ? 1 : 0);
+        }
         internal void ConfigureWipe(bool active,double position,double sourceAspect,bool horizontal)
         {
+            bool wasActive=wipeActive;
             wipeActive=active && sourceAspect>0 && !double.IsInfinity(sourceAspect);
             if(dragging && (!wipeActive || horizontalWipe!=horizontal)) EndDrag(Handle);
+            if(!wipeActive || horizontalWipe!=horizontal) SetGrip(0);
+            if(wipeActive && !wasActive && WipeGripChanged!=null) WipeGripChanged(gripState,gripScale);
             horizontalWipe=horizontal;
             wipePosition=Math.Max(0,Math.Min(1,position));
             pictureAspect=sourceAspect;
@@ -73,15 +101,14 @@ namespace Cadrivect
         {
             Rectangle picture;
             if(!GetPicture(hwnd,out picture) || !picture.Contains(x,y)) return false;
-            var layout=new WipeLayout(picture,horizontalWipe,wipePosition);
-            double slop=8*Math.Max(96u,GetDpiForWindow(hwnd))/96.0;
-            return layout.Handle.Contains(x,y) || Math.Abs((horizontalWipe ? y : x)-layout.Center)<=slop;
+            var layout=new WipeLayout(picture,horizontalWipe,wipePosition,gripScale);
+            return Math.Abs((horizontalWipe ? y : x)-layout.Center)<=Math.Max(6,8*gripScale);
         }
         double PointerFraction(IntPtr hwnd,int x,int y)
         {
             Rectangle picture;
             if(!GetPicture(hwnd,out picture)) return wipePosition;
-            var layout=new WipeLayout(picture,horizontalWipe,wipePosition);
+            var layout=new WipeLayout(picture,horizontalWipe,wipePosition,gripScale);
             return layout.PositionAt(horizontalWipe ? y : x);
         }
         void ChangePosition(double next)
@@ -96,6 +123,7 @@ namespace Cadrivect
             if(!dragging) return;
             dragging=false;
             if(GetCapture()==hwnd) ReleaseCapture();
+            SetGrip(0);
         }
         internal bool CancelWipeDrag()
         {
@@ -109,15 +137,20 @@ namespace Cadrivect
             if(msg==MouseMove || msg==ButtonDown || msg==ButtonUp || msg==DoubleClick) {
                 int x=unchecked((short)(lp.ToInt64() & 0xffff));
                 int y=unchecked((short)((lp.ToInt64() >> 16) & 0xffff));
+                if(msg==MouseMove && !dragging && wipeActive) UpdateHover(hwnd,x,y);
                 if((msg==ButtonDown || msg==DoubleClick) && HitDivider(hwnd,x,y)) {
                     initialPosition=wipePosition;
                     grabOffset=wipePosition-PointerFraction(hwnd,x,y);
                     SetCapture(hwnd); dragging=GetCapture()==hwnd;
+                    if(dragging) SetGrip(2);
                     SetCursor(ResizeCursor); handled=true; return IntPtr.Zero;
                 }
                 if(dragging && (msg==MouseMove || msg==ButtonUp)) {
                     ChangePosition(PointerFraction(hwnd,x,y)+grabOffset);
-                    if(msg==ButtonUp) EndDrag(hwnd);
+                    if(msg==ButtonUp) {
+                        EndDrag(hwnd);
+                        UpdateHover(hwnd,x,y);
+                    }
                     handled=true; return IntPtr.Zero;
                 }
             }
@@ -127,7 +160,8 @@ namespace Cadrivect
                     SetCursor(ResizeCursor); handled=true; return new IntPtr(1);
                 }
             }
-            if(msg==CaptureChanged) dragging=false;
+            if(msg==CaptureChanged) { dragging=false; SetGrip(0); }
+            if(msg==0x02A3 && !dragging) SetGrip(0); // WM_MOUSELEAVE
             if(msg==CancelMode && CancelWipeDrag()) {handled=true; return IntPtr.Zero;}
             if(msg==0x203 && DoubleClicked!=null) {DoubleClicked(); handled=true; return IntPtr.Zero;}
             if(msg==15 || msg==20) {

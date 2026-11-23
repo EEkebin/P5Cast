@@ -79,11 +79,11 @@ internal sealed class DisplayHdr
         throw new InvalidOperationException("The player window has no active DXGI monitor. Reconnect the display and reopen the player.");
     }
 
-    public static DisplayHdr Configure(SwapChain chain,bool hdr10)
+    public static DisplayHdr Configure(SwapChain chain,bool hdr10,DisplayHdr knownOutput=null)
     {
         if (chain==null) throw new ArgumentNullException("chain");
         var desc=chain.Description;
-        DisplayHdr output=Probe(desc.OutputHandle);
+        DisplayHdr output=knownOutput ?? Probe(desc.OutputHandle);
         if (hdr10 && !output.WindowsHdrActive)
         {
             if(output.HdrSupported==false)

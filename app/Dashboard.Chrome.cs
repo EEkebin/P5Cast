@@ -23,6 +23,34 @@ namespace Cadrivect
         [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hwnd,ref FramePoint point);
         [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr hwnd,uint flags);
         [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern bool GetMonitorInfo(IntPtr monitor,ref FrameMonitor info);
+        const int DwmTransitionsForceDisabled=3;
+        [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd,int attribute,ref int value,int bytes);
+
+        void SetFullscreenFrame(bool enter)
+        {
+            // Fullscreen uses a borderless maximized window. Suppress the native
+            // restore/maximize animation only while changing this window's frame.
+            var hwnd=new WindowInteropHelper(window).Handle;
+            int disabled=1;
+            bool restore=DwmSetWindowAttribute(hwnd,DwmTransitionsForceDisabled,ref disabled,sizeof(int))==0;
+            try {
+                if(enter) {
+                    previousWindowState=window.WindowState;
+                    if(previousWindowState!=WindowState.Normal) window.WindowState=WindowState.Normal;
+                    WindowChrome.SetWindowChrome(window,null);
+                    window.WindowStyle=WindowStyle.None;
+                    window.WindowState=WindowState.Maximized;
+                } else {
+                    window.WindowState=WindowState.Normal;
+                    window.WindowStyle=WindowStyle.SingleBorderWindow;
+                    WindowChrome.SetWindowChrome(window,titleChrome);
+                    if(previousWindowState!=WindowState.Normal) window.WindowState=previousWindowState;
+                }
+            } finally {
+                disabled=0;
+                if(restore) DwmSetWindowAttribute(hwnd,DwmTransitionsForceDisabled,ref disabled,sizeof(int));
+            }
+        }
 
         void UpdateFrameInsets()
         {

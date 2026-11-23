@@ -87,6 +87,12 @@ namespace Cadrivect.Engine
         {
             lock(Gate) if(current!=null) current.WipeHorizontal=horizontal;
         }
+        public static void SetWipeGrip(int state,float scale)
+        {
+            if(state<0 || state>2) throw new ArgumentOutOfRangeException("state");
+            if(!(scale>0 && scale<=32)) throw new ArgumentOutOfRangeException("scale");
+            lock(Gate) if(current!=null) {current.WipeGripState=state; current.WipeGripScale=scale;}
+        }
         public static void SetWipePosition(float position)
         {
             ValidatePosition(position);
@@ -113,6 +119,8 @@ namespace Cadrivect.Engine
         public volatile string ComparisonView="enhanced";
         public volatile float WipePosition=0.5f;
         public volatile bool WipeHorizontal;
+        public volatile int WipeGripState;
+        public volatile float WipeGripScale=1;
         public HostedSurface(IntPtr hwnd) {
             uint pid;
             using(var process=Process.GetCurrentProcess())

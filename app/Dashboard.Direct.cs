@@ -26,16 +26,9 @@ namespace Cadrivect
         }
         void ToggleFullscreen()
         {
-            if(!fullscreen) {
-                previousWindowState=window.WindowState; window.WindowState=WindowState.Normal;
-                System.Windows.Shell.WindowChrome.SetWindowChrome(window,null);
-                window.WindowStyle=WindowStyle.None; window.WindowState=WindowState.Maximized;
-            } else {
-                window.WindowState=WindowState.Normal; window.WindowStyle=WindowStyle.SingleBorderWindow;
-                System.Windows.Shell.WindowChrome.SetWindowChrome(window,titleChrome);
-                window.WindowState=previousWindowState;
-            }
-            fullscreen=!fullscreen; UI<Button>("Fullscreen").Content=fullscreen?"Windowed":"Fullscreen";
+            SetFullscreenFrame(!fullscreen);
+            fullscreen=!fullscreen;
+            UI<Button>("Fullscreen").Content=fullscreen?"Windowed":"Fullscreen";
             UpdateFrameInsets();
             QueueInterfaceScale();
             UI<RowDefinition>("HeaderRow").Height=new GridLength(fullscreen?0:HeaderHeight);

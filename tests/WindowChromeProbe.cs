@@ -158,6 +158,25 @@ internal static partial class WindowChromeProbe
     static RadioButton ViewButton(string id) {
         return (RadioButton)FindVisual(Find<Border>("MeterHost"),"RadioButton",e=>AutomationProperties.GetAutomationId(e)==id);
     }
+    static async Task CheckFullscreenFrame(Action toggle,Func<bool> hasGeometry,string direction) {
+        var api=AppDomain.CurrentDomain.GetAssemblies().Select(a=>a.GetType("Cadrivect.Engine.EmbeddedPlayback")).First(t=>t!=null);
+        var read=api.GetMethod("Snapshot");
+        var json=new System.Web.Script.Serialization.JavaScriptSerializer();
+        Func<Dictionary<string,object>> snapshot=()=>json.Deserialize<Dictionary<string,object>>((string)read.Invoke(null,null));
+        int before=Convert.ToInt32(snapshot()["presented"]);
+        var timer=Stopwatch.StartNew();
+        toggle();
+        await Until(hasGeometry,"Video layout did not settle on "+direction+".");
+        long layoutMs=timer.ElapsedMilliseconds;
+        var bounds=Rect(video);
+        await Until(delegate {
+            var data=snapshot();
+            return Convert.ToInt32(data["outputWidth"])==bounds.Width && Convert.ToInt32(data["outputHeight"])==bounds.Height &&
+                Convert.ToInt32(data["presented"])>before;
+        },"Video stopped presenting at the new size on "+direction+".");
+        Note(direction+" layout settled in "+layoutMs+" ms. Playback telemetry confirmed "+bounds.Width+"x"+bounds.Height+
+             " output at "+timer.ElapsedMilliseconds+" ms (250 ms sampling).");
+    }
     static async Task CheckComparisonViews() {
         var api=AppDomain.CurrentDomain.GetAssemblies().Select(a=>a.GetType("Cadrivect.Engine.EmbeddedPlayback")).First(t=>t!=null);
         var snapshot=api.GetMethod("Snapshot");
@@ -345,12 +364,10 @@ internal static partial class WindowChromeProbe
                 Math.Abs(Rect(video).Width-narrow)<=2 && Find<Border>("MeterHost").IsVisible;},"Rapid toggling left stale sidebar geometry or glyph state.");
             Require(Video()==video,"Sidebar toggling replaced the video HWND.");
             Note(string.Format("Sidebar accessibility and {0} menu motion passed. The same video HWND grew from {1} to {2} px and returned.",animate?"animated":"reduced",narrow,wide));
-            Click("Fullscreen");
-            await Until(delegate{return !header.IsVisible || header.ActualHeight<1;},"Header is still visible in fullscreen.");
             var full=Screen().Full;
-            await Until(delegate{return Fits(Rect(video),full,2);},"Fullscreen video "+Geometry(Rect(video))+" did not fill monitor "+Geometry(full)+".");
-            SendMessage(video,0x203,IntPtr.Zero,IntPtr.Zero);
-            await Until(delegate{return header.IsVisible && header.ActualHeight>5 && Math.Abs(Rect(video).Width-narrow)<=2;},"Fullscreen did not restore the original dashboard geometry.");
+            await CheckFullscreenFrame(()=>Click("Fullscreen"),()=>!header.IsVisible && Fits(Rect(video),full,2),"Enter fullscreen");
+            await CheckFullscreenFrame(()=>SendMessage(video,0x203,IntPtr.Zero,IntPtr.Zero),
+                ()=>header.IsVisible && header.ActualHeight>5 && Math.Abs(Rect(video).Width-narrow)<=2,"Exit fullscreen");
             Require(Video()==video && provider.ToggleState==ToggleState.On,"Fullscreen replaced video or changed the sidebar preference.");
             Require(status.Text=="Offline demo","Offline playback stopped during the chrome test.");
             Note("Offline playback filled monitor "+Geometry(full)+" in fullscreen and preserved video HWND, sidebar state and windowed size on return.");
@@ -407,6 +424,22 @@ internal static partial class WindowChromeProbe
                             color.SelectedItem="HDR10";
                             await Until(delegate{return ((string)snapshot.Invoke(null,null)).Contains("\"hdrEnabled\":true");},"HDR10 did not resume.");
                             Note(labels[i]+" presented HDR10 and switched to SDR and back during playback.");
+                            if(keys[i]=="d3d12") {
+                                var picture=Find<Border>("MeterHost");
+                                var dlss=(RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"DLSS"));
+                                if(dlss.IsEnabled) {
+                                    var restored=Rect(video);
+                                    dlss.IsChecked=true;
+                                    await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"mode\":\"dlss\""),"DLSS did not activate.");
+                                    await CheckFullscreenFrame(()=>Click("Fullscreen"),()=>Fits(Rect(video),Screen().Full,2),"DLSS HDR enter fullscreen");
+                                    string enlarged=(string)snapshot.Invoke(null,null);
+                                    Require(enlarged.Contains("\"effectivePictureMode\":\"dlss\"") && enlarged.Contains("\"presenterHdr10\":true"),
+                                            "Fullscreen lost DLSS or HDR10.");
+                                    await CheckFullscreenFrame(()=>SendMessage(video,0x203,IntPtr.Zero,IntPtr.Zero),
+                                        ()=>Fits(Rect(video),restored,2),"DLSS HDR exit fullscreen");
+                                    ((RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"Original"))).IsChecked=true;
+                                }
+                            }
                         }
                     }
                     Click("OpenSource");
@@ -466,7 +499,9 @@ internal static partial class WindowChromeProbe
                 throw new Win32Exception(Marshal.GetLastWin32Error());
             CloseHandle(pi.Thread);
             try {
-                if(WaitForSingleObject(pi.Process,30000)!=0) {
+                // The HDR suite starts four backends and exercises NVIDIA fullscreen in addition to the base UI checks.
+                uint timeoutMs=Environment.GetEnvironmentVariable("P5CAST_PROBE_RENDERERS")=="hdr" ? 60000u : 30000u;
+                if(WaitForSingleObject(pi.Process,timeoutMs)!=0) {
                     TerminateProcess(pi.Process,2); WaitForSingleObject(pi.Process,3000);
                     throw new TimeoutException("The private dashboard did not close in time.");
                 }

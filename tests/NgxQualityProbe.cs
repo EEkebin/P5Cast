@@ -200,11 +200,12 @@ internal static partial class EmbeddedProbe {
                     Check((bool)type.GetProperty("PresenterHdr10").GetValue(renderer,null)==hdr,"Unexpected presentation format.");
                     var device=(Device)type.GetProperty("Device").GetValue(renderer,null);
                     // The portable presenter reads this final D3D11 texture without discarding it.
-                    var target=(Texture2D)type.GetField("backBuffer",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(renderer);
+                    var backBuffer=type.GetField("backBuffer",BindingFlags.Instance|BindingFlags.NonPublic);
                     using(var input=new Texture2D(device,new Texture2DDescription{Width=InputW,Height=InputH,Format=hdr?Format.R16G16B16A16_Float:Format.B8G8R8A8_UNorm,
                         ArraySize=1,MipLevels=1,SampleDescription=new SampleDescription(1,0),BindFlags=BindFlags.ShaderResource})) {
                         int[] baseline=null;
                         foreach(string mode in new[]{"original","dlss","dlaa"}) {
+                            var target=(Texture2D)backBuffer.GetValue(renderer);
                             int evaluations=(int)type.GetProperty("VendorEvaluations").GetValue(renderer,null);
                             type.GetMethod("SetPictureMode").Invoke(renderer,new object[]{mode});
                             int[] prior=null;
@@ -220,7 +221,24 @@ internal static partial class EmbeddedProbe {
                             if(mode!="original") Check((int)type.GetProperty("VendorEvaluations").GetValue(renderer,null)-evaluations>=9,"Insufficient NVIDIA evaluations.");
                             if(args[3]!="-") SaveTextCrop(args[3],pixels,hdr,mode);
                             if(mode=="original") baseline=pixels;
-                            else pass&=MeasureQuality(baseline,pixels,prior,hdr,mode);
+                            else {
+                                pass&=MeasureQuality(baseline,pixels,prior,hdr,mode);
+                                // A display resize changes the DLSS target while DLAA keeps its native input size.
+                                foreach(var size in new[]{new Size(OutputW+160,OutputH+90),new Size(OutputW,OutputH)}) {
+                                    var watch=System.Diagnostics.Stopwatch.StartNew();
+                                    type.GetMethod("Resize").Invoke(renderer,new object[]{size});
+                                    UploadQualityFrame(device,input,9,hdr);
+                                    type.GetMethod("Receive").Invoke(renderer,new object[]{input,new Rectangle(0,0,InputW,InputH),false});
+                                    type.GetMethod("Show").Invoke(renderer,new object[]{mode,1f,false,false});
+                                    var output=(Texture2D)backBuffer.GetValue(renderer);
+                                    Check(output.Description.Width==size.Width && output.Description.Height==size.Height &&
+                                          (string)type.GetProperty("EffectivePictureMode").GetValue(renderer,null)==mode &&
+                                          (bool)type.GetProperty("PresenterHdr10").GetValue(renderer,null)==hdr,
+                                          "Resizing lost the selected NVIDIA effect or display format.");
+                                    Console.WriteLine("{0} {1} resize to {2}x{3} and frame submission: {4} ms",
+                                        hdr?"HDR":"SDR",mode,size.Width,size.Height,watch.ElapsedMilliseconds);
+                                }
+                            }
                         }
                     }
                 }

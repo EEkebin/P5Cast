@@ -90,18 +90,21 @@ namespace Cadrivect
             else if(connecting) action="Cancel connection";
             else if(Active) action="Stop playback";
             string state=ending ? "Stopping" : connecting ? "Connecting" : Active ? "Playing" : "Ready";
-            button.IsEnabled=!ending;
+            button.IsEnabled=!ending && (!OperationOpen || connecting);
             button.ToolTip=connecting && !ending ? "Connecting… Click to cancel." : action;
             AutomationProperties.SetName(button,action);
             AutomationProperties.SetItemStatus(button,state);
             glyph.SetState(ending || connecting ? TransportGlyph.Shape.Spinner : Active ? TransportGlyph.Shape.Stop : TransportGlyph.Shape.Play);
-            bool canSelect=!preparing && !Active;
+            bool canSelect=!preparing && !Active && !OperationOpen;
             UI<ComboBox>("VideoRenderer").IsEnabled=canSelect;
             UI<ComboBox>("ConsolePicker").IsEnabled=canSelect;
             UI<TextBox>("ConsoleAddress").IsEnabled=canSelect;
             UI<Button>("AddConsole").IsEnabled=canSelect;
             RefreshWakeButton();
-            UI<ComboBox>("SourceChoice").IsEnabled=!preparing && !Active;
+            UI<ComboBox>("SourceChoice").IsEnabled=canSelect;
+            UI<Button>("DirectClient").IsEnabled=canSelect;
+            foreach(string name in new[]{"StartHost","StopHost","ClientPair","ClientPlay","OpenSetup"})
+                UI<Button>(name).IsEnabled=!OperationOpen;
         }
         void RefreshRendererOutput()
         {
@@ -117,7 +120,7 @@ namespace Cadrivect
         {
             if(rendering!=null && !restoringSwitch) {
                 engine.ConfigureOutput(resolutionIds[UI<ComboBox>("RenderResolution").SelectedIndex],hdrIds[UI<ComboBox>("HdrOutput").SelectedIndex]);
-                TrackSwitch(SwitchControl.Output,"Applying display settings");
+                TrackSwitch(SwitchControl.Output);
             }
         }
         double sourceAspect;
@@ -139,7 +142,8 @@ namespace Cadrivect
                 var snapshot=json.Deserialize<Dictionary<string,object>>(raw);
                 if(source=="Direct") snapshot["requestedVideoKbps"]=sessionVideoKbps;
                 // A selection made while the engine worker starts may precede its session.
-                if(!firstFrame && Field(snapshot,"frameGenerationProvider")!=meter.FrameGenerationProvider)
+                if(!firstFrame && (Field(snapshot,"frameGenerationProvider")!=meter.FrameGenerationProvider ||
+                    Field(snapshot,"mode")!=modeIds[mode] || PlaybackMeter.Number(snapshot,"multiplier")!=factor))
                     engine.Configure(mode,factor,meter.FrameGenerationProvider);
                 if(!firstFrame && Field(snapshot,"dlssModelHint")!=meter.DlssModelHint)
                     engine.SetDlssModel(meter.DlssModelHint);
@@ -204,7 +208,7 @@ namespace Cadrivect
         }
         async Task StartPlayback()
         {
-            if(preparing || Active || requestingRest) return;
+            if(preparing || Active || requestingRest || OperationOpen) return;
             if(source=="Direct" && !(UI<ComboBox>("ConsolePicker").SelectedItem is DirectConsole)) {
                 OpenPair(); Show("Add your PS5 to play."); return;
             }
@@ -213,10 +217,7 @@ namespace Cadrivect
                 source=="Direct"?"Checking your paired PS5…":source=="Demo"?"Starting offline demo…":"Looking for the Remote Play window…");
             try {
                 if(engine==null) engine=new EngineSession();
-                var args=new List<string> {"--surface",surface.Handle.ToInt64().ToString(CultureInfo.InvariantCulture),
-                    "--mode",modeIds[mode],"--multiplier",factor.ToString(),"--display","source","--renderer",SelectedRenderer,
-                    "--resolution",resolutionIds[UI<ComboBox>("RenderResolution").SelectedIndex],
-                    "--hdr",hdrIds[UI<ComboBox>("HdrOutput").SelectedIndex]};
+                var args=new List<string> {"--surface",surface.Handle.ToInt64().ToString(CultureInfo.InvariantCulture)};
                 if(source=="Direct") {
                     var console=UI<ComboBox>("ConsolePicker").SelectedItem as DirectConsole;
                     string address=DirectConsole.Host(UI<TextBox>("ConsoleAddress").Text);
@@ -246,7 +247,9 @@ namespace Cadrivect
                     }
                     TransportProgress("Waiting for video from Sony Remote Play…");
                 }
-                args.AddRange(new[]{"--frame-generation",meter.FrameGenerationProvider,"--dlss-quality",meter.DlssQuality,"--dlss-model",meter.DlssModelHint});
+                args.AddRange(new[]{"--mode",modeIds[mode],"--multiplier",factor.ToString(),"--display","source","--renderer",SelectedRenderer,
+                    "--resolution",resolutionIds[UI<ComboBox>("RenderResolution").SelectedIndex],"--hdr",hdrIds[UI<ComboBox>("HdrOutput").SelectedIndex],
+                    "--frame-generation",meter.FrameGenerationProvider,"--dlss-quality",meter.DlssQuality,"--dlss-model",meter.DlssModelHint});
                 if(meter.WipeHorizontal) args.Add("--wipe-horizontal");
                 args.AddRange(new[]{"--comparison",meter.ComparisonView,"--wipe-position",meter.WipePosition.ToString("R",CultureInfo.InvariantCulture)});
                 rendering=engine.Start(args.ToArray()); preparing=false; UpdateTransport();
@@ -274,6 +277,7 @@ namespace Cadrivect
         }
         async Task StartNetwork(bool pair)
         {
+            if(OperationOpen) return;
             if(Active || preparing || requestingRest) {Show("Stop the current session first."); return;}
             string address=ClientAddress();
             var args=new List<string>{"-Action",pair?"PreparePair":"PreparePlay","-Address",address};

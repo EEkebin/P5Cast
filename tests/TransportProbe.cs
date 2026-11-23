@@ -21,6 +21,17 @@ internal static partial class WindowChromeProbe
     [DllImport("gdi32.dll")] static extern IntPtr CreateRectRgn(int left,int top,int right,int bottom);
     [DllImport("user32.dll")] static extern int GetWindowRgn(IntPtr windowHandle,IntPtr region);
     [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr region);
+    [DllImport("gdi32.dll")] static extern bool PtInRegion(IntPtr region,int x,int y);
+    static bool VideoSurroundsProgressCard() {
+        var card=ScreenRect(Find<FrameworkElement>("OperationCard")); var bounds=Rect(video);
+        int x=(card.Left+card.Right)/2-bounds.Left,y=(card.Top+card.Bottom)/2-bounds.Top;
+        var region=CreateRectRgn(0,0,0,0);
+        Require(region!=IntPtr.Zero,"Could not allocate a test region.");
+        try {
+            return GetWindowRgn(video,region)>=2 && !PtInRegion(region,x,y) &&
+                (PtInRegion(region,1,1) || PtInRegion(region,bounds.Width/2,1) || PtInRegion(region,1,bounds.Height/2));
+        } finally {DeleteObject(region);}
+    }
     static bool VideoClippedForModal() {
         var region=CreateRectRgn(0,0,0,0);
         Require(region!=IntPtr.Zero,"Could not allocate a test region.");
@@ -28,12 +39,21 @@ internal static partial class WindowChromeProbe
         finally {DeleteObject(region);}
     }
     static Task WaitForOperation(string action,int timeout=12000) {
-        return Until(()=>!OperationVisible,action+" left the status modal open.",timeout);
+        return Until(()=>!OperationVisible,action+" left playback progress open.",timeout);
     }
-    static async Task SelectPlaybackMode(RadioButton button) {
+    static void CheckInlineSwitch(string action) {
+        Require(!OperationVisible && Find<FrameworkElement>("Workspace").IsEnabled &&
+            IsWindowVisible(video) && !VideoClippedForModal() && Video()==video,
+            action+" blocked the dashboard or interrupted the video surface.");
+    }
+    static RadioButton PictureButton(string id) {
+        return (RadioButton)FindVisual(Find<Border>("MeterHost"),"RadioButton",
+            e=>AutomationProperties.GetAutomationId(e)=="Picture_"+id);
+    }
+    static void SelectPlaybackMode(RadioButton button) {
         Require(button.IsEnabled,"Playback option is disabled: "+button.Content);
         button.IsChecked=true;
-        await WaitForOperation("Selecting "+button.Content);
+        CheckInlineSwitch("Selecting "+button.Content);
     }
     static void CheckCancelableOperation(string action) {
         var overlay=Find<FrameworkElement>("OperationOverlay");
@@ -42,9 +62,15 @@ internal static partial class WindowChromeProbe
             !string.IsNullOrWhiteSpace(Find<TextBlock>("OperationTitle").Text) &&
             !string.IsNullOrWhiteSpace(Find<TextBlock>("OperationDetail").Text),
             action+" did not open a spinner with a title and progress message.");
+        window.UpdateLayout();
+        var playback=ScreenRect(Find<Border>("VideoHost"));
+        var panel=ScreenRect(overlay);
         Require(overlay.IsAncestorOf(cancel) && cancel.IsEnabled && cancel.IsVisible &&
-            !Find<FrameworkElement>("Workspace").IsEnabled && VideoClippedForModal(),
-            action+" lost the in-window Cancel action, modal input isolation, or native surface occlusion.");
+            Find<FrameworkElement>("Workspace").IsEnabled && Find<FrameworkElement>("TransportBar").IsEnabled &&
+            Find<FrameworkElement>("StatusFooter").IsEnabled && Find<FrameworkElement>("HeaderBar").IsEnabled &&
+            panel.Width>0 && panel.Height>0 && panel.Left>=playback.Left-2 && panel.Right<=playback.Right+2 &&
+            panel.Top>=playback.Top-2 && panel.Bottom<=playback.Bottom+2,
+            action+" covered or disabled controls outside the playback area.");
         Require(Video()==video && window.OwnedWindows.Count==0,action+" changed the playback HWND or opened a separate window.");
         if(SystemParameters.ClientAreaAnimation)
             Require(Find<RotateTransform>("OperationRotation").HasAnimatedProperties,action+" did not animate its spinner.");
@@ -68,7 +94,7 @@ internal static partial class WindowChromeProbe
         TransportState("Ready","Play",true);
         PressTransport();
         CheckCancelableOperation("Starting offline playback");
-        TransportState("Connecting","Spinner",false);
+        TransportState("Connecting","Spinner",true);
         var button=Find<Button>("OpenSource");
         Require(Peer(button).GetName().IndexOf("cancel",StringComparison.OrdinalIgnoreCase)>=0,"Connecting action must offer cancellation.");
         if(SystemParameters.ClientAreaAnimation) {
@@ -89,7 +115,7 @@ internal static partial class WindowChromeProbe
         await Until(()=>Peer(Find<Button>("OpenSource")).GetItemStatus()=="Ready","Cancel did not release the connecting player.");
         TransportState("Ready","Play",true);
         Require(Find<ComboBox>("SourceChoice").IsEnabled,"Cancel left the source locked.");
-        Note("The status modal cancelled startup before the first frame and restored Play.");
+        Note("The playback progress card cancelled startup before the first frame and restored Play.");
     }
     static async Task CheckIdleRendererCancel() {
         var choice=Find<ComboBox>("VideoRenderer");
@@ -102,45 +128,39 @@ internal static partial class WindowChromeProbe
         Require(choice.IsEnabled && Equals(choice.SelectedItem,prior),"Cancelled GPU probe left a different renderer selected.");
         Note("Cancelling an idle renderer switch restored the previous graphics API.");
     }
-    static async Task CheckLiveSwitchModal(MethodInfo snapshot) {
-        var panel=Find<Border>("MeterHost");
-        Func<string,RadioButton> picture=id=>(RadioButton)FindVisual(panel,"RadioButton",e=>AutomationProperties.GetAutomationId(e)=="Picture_"+id);
-        Func<string,bool> active=id=>((string)snapshot.Invoke(null,null)).Contains("\"effectivePictureMode\":\""+id+"\"");
-        var original=picture("original"); var sharp=picture("sharp");
-        Require(original.IsChecked==true && sharp.IsEnabled && active("original"),"The switch fixture needs original, unprocessed playback.");
-        sharp.IsChecked=true;CheckCancelableOperation("Switching picture mode");
-        CancelOperationNow();
-        await WaitForOperation("Cancelled picture switch");
-        Require(original.IsChecked==true && active("original"),"Cancelling the picture switch failed to restore its UI and rendered state.");
-        sharp.IsChecked=true;CheckCancelableOperation("Switching to Sharpen");
-        await WaitForOperation("Switch to Sharpen");
-        Require(active("sharp") && IsWindowVisible(video) && !VideoClippedForModal() && Video()==video,
-            "The switch completed before the live renderer presented Sharpen on the restored surface.");
-        original.IsChecked=true;
-        await WaitForOperation("Switch back to Original");
-        Require(active("original"),"The renderer did not switch back to Original.");
+    static async Task CheckLiveSwitches(MethodInfo snapshot) {
+        var original=PictureButton("original"); var sharp=PictureButton("sharp");
+        var json=new System.Web.Script.Serialization.JavaScriptSerializer();
+        Func<System.Collections.Generic.Dictionary<string,object>> sample=()=>
+            json.Deserialize<System.Collections.Generic.Dictionary<string,object>>((string)snapshot.Invoke(null,null));
+        Require(original.IsChecked==true && sharp.IsEnabled && Equals(sample()["effectivePictureMode"],"original"),
+            "The switch fixture needs original, unprocessed playback.");
+        SelectPlaybackMode(sharp);
+        await Until(()=>Equals(sample()["effectivePictureMode"],"sharp"),"Sharpen did not reach the renderer.");
+        SelectPlaybackMode(original);
+        await Until(()=>Equals(sample()["effectivePictureMode"],"original"),"Original did not reach the renderer.");
+
         var resolution=Find<ComboBox>("RenderResolution");
         int priorIndex=resolution.SelectedIndex;
-        var json=new System.Web.Script.Serialization.JavaScriptSerializer();
-        Func<string> liveResolution=()=>(string)json.Deserialize<System.Collections.Generic.Dictionary<string,object>>(
-            (string)snapshot.Invoke(null,null))["resolution"];
-        string priorResolution=liveResolution();
+        string before=(string)sample()["resolution"];
         resolution.SelectedIndex=priorIndex==1?2:1;
-        CheckCancelableOperation("Changing the output resolution");
-        CancelOperationNow();await WaitForOperation("Cancelled output switch");
-        Require(resolution.SelectedIndex==priorIndex && liveResolution()==priorResolution,"Cancel failed to restore the selected and rendered output settings.");
-        Note("A cancelled picture switch restored Original; an accepted switch reported Sharpen on the same playback surface.");
+        CheckInlineSwitch("Changing the output resolution");
+        await Until(()=>Equals(sample()["resolution"],priorIndex==1?"1080":"720"),"The selected output target did not reach playback.");
+        resolution.SelectedIndex=priorIndex;
+        CheckInlineSwitch("Restoring the output resolution");
+        await Until(()=>Equals(sample()["resolution"],before),"The original output target did not return.");
+        Note("Picture and output changes took effect on the same playback surface with the dashboard available.");
     }
     static async Task CheckCancelPendingStop(MethodInfo snapshot) {
         PressTransport();CheckCancelableOperation("Stopping offline playback");
         var cancel=Find<Button>("CancelOperation");
-        Require(cancel.IsKeyboardFocused,"Pending Stop did not focus Cancel.");
-        cancel.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
-        var focused=Keyboard.FocusedElement as UIElement;
-        Require(focused!=null && Find<FrameworkElement>("OperationOverlay").IsAncestorOf(focused),"Tab escaped the pending Stop dialog.");
+        await Until(VideoSurroundsProgressCard,"The Stop card must leave surrounding native video visible.",800);
+        var header=Find<Button>("MaximizeWindow");
+        Require(header.Focus() && header.IsKeyboardFocused,"Pending Stop trapped focus inside the playback area.");
+        Require(cancel.Focus() && cancel.IsKeyboardFocused,"The playback Cancel action is unreachable.");
         var escape=new KeyEventArgs(Keyboard.PrimaryDevice,PresentationSource.FromVisual(window),Environment.TickCount,Key.Escape)
             {RoutedEvent=Keyboard.PreviewKeyDownEvent};
-        focused.RaiseEvent(escape);
+        cancel.RaiseEvent(escape);
         Require(escape.Handled,"Escape did not cancel pending Stop.");
         await WaitForOperation("Cancelled stop");
         TransportState("Playing","Stop",true);
@@ -191,7 +211,7 @@ internal static partial class WindowChromeProbe
         Click("CloseStatusHistory"); await Until(()=>!sheet.IsVisible,"Close did not dismiss history.");
         TransportState("Playing","Stop",true);
         Note("Play morphed through a cancellable spinner to Stop. History showed real startup events, retained playback, and restored keyboard focus.");
-        await CheckLiveSwitchModal(snapshot);
+        await CheckLiveSwitches(snapshot);
         await CheckCancelPendingStop(snapshot);
     }
 }

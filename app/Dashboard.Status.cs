@@ -32,12 +32,14 @@ namespace Cadrivect
             UI<Button>("StatusHistoryButton").Click+=delegate {SetStatusHistory(!HistoryOpen);};
             UI<Button>("CloseStatusHistory").Click+=delegate {SetStatusHistory(false);};
             UI<Button>("CancelOperation").Click+=delegate {CancelCurrentOperation();};
+            var card=UI<Border>("OperationCard");
+            card.LayoutUpdated+=delegate {if(OperationOpen) surface.ClipForProgress(card);};
             Show(UI<TextBlock>("Status").Text);
         }
 
         void SetStatusHistory(bool open)
         {
-            if(open && (OperationOpen || SetupOpen || StopPromptOpen)) return;
+            if(open && (SetupOpen || StopPromptOpen)) return;
             var sheet=UI<Grid>("StatusHistoryLayer");
             var button=UI<Button>("StatusHistoryButton");
             sheet.Visibility=open?Visibility.Visible:Visibility.Collapsed;

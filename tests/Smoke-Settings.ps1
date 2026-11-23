@@ -73,6 +73,21 @@ try {
     Require ($pictureButtons[8].Parent -eq $pictureButtons[2].Parent) 'NIS and spatial FSR share a row'
     Require ($pictureButtons[3].Parent -eq $pictureButtons[6].Parent -and $pictureButtons[6].Parent -ne $pictureButtons[2].Parent) 'RTX Video SR and temporal FSR share a separate row'
     Require ($pictureButtons[4].Parent -eq $pictureButtons[5].Parent -and $pictureButtons[5].Parent -eq $pictureButtons[7].Parent) 'The DLSS family shares a group'
+    $pictureGroup=$pictureButtons[0].GroupName
+    Require ($pictureButtons.Count -eq 9 -and $pictureGroup -and @($pictureButtons | Where-Object {$_.GroupName -ne $pictureGroup}).Count -eq 0) 'Every picture method belongs to the same single-choice radio group'
+    foreach($index in 1,2,7,0) {
+        $pictureButtons[$index].IsChecked=$true
+        Require ($pictureButtons[$index].IsChecked -and @($pictureButtons | Where-Object {$_.IsChecked}).Count -eq 1) 'Selecting a picture method clears the previous selection across categories'
+        foreach($button in $pictureButtons) {
+            [void]$button.ApplyTemplate()
+            $dot=$button.Template.FindName('RadioDot',$button)
+            Require ($dot -and (($dot.Visibility -eq 'Visible') -eq [bool]$button.IsChecked)) 'Exactly the active picture method displays its radio indicator'
+        }
+    }
+    $viewButtons=$meter.GetType().GetField('views','Instance,NonPublic').GetValue($meter)
+    $toggleOriginal=$meter.GetType().GetMethod('ToggleOriginal')
+    $null=$toggleOriginal.Invoke($meter,@())
+    Require (@($viewButtons | Where-Object {$_.IsEnabled}).Count -eq 1 -and [Windows.Automation.AutomationProperties]::GetAutomationId(($viewButtons | Where-Object {$_.IsChecked})) -eq 'ViewOriginal') 'The comparison shortcut retains Original while every effect is off'
     $fruc=$meter.GetType().GetField('frucGeneration','Instance,NonPublic').GetValue($meter)
     $amd=$meter.GetType().GetField('amdGeneration','Instance,NonPublic').GetValue($meter)
     $frucSetup=$meter.GetType().GetField('frucSetup','Instance,NonPublic').GetValue($meter)

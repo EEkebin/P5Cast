@@ -38,6 +38,7 @@ namespace Cadrivect
 
         async Task ChangeSharing(bool start,params string[] args)
         {
+            if(OperationOpen) return;
             using(var cancellation=new CancellationTokenSource()) {
                 long id=BeginOperation(start?"Starting sharing":"Stopping sharing",
                     start?"Preparing the host software…":"The host is still sharing. Cancel to keep it running.",cancellation.Cancel);
@@ -55,7 +56,6 @@ namespace Cadrivect
 
         long BeginOperation(string title,string detail,Action cancel)
         {
-            if(HistoryOpen) SetStatusHistory(false);
             bool opening=!OperationOpen;
             if(opening) operationReturnFocus=Keyboard.FocusedElement as UIElement;
             activeOperation=++nextOperation;
@@ -65,11 +65,10 @@ namespace Cadrivect
             var action=UI<Button>("CancelOperation");
             action.IsEnabled=cancel!=null;
             UI<Grid>("OperationOverlay").Visibility=Visibility.Visible;
-            SetModalBackgroundEnabled(true);
+            UpdateTransport();
             if(opening && SystemParameters.ClientAreaAnimation)
                 UI<RotateTransform>("OperationRotation").BeginAnimation(RotateTransform.AngleProperty,
                     new DoubleAnimation(0,360,TimeSpan.FromMilliseconds(900)) {RepeatBehavior=RepeatBehavior.Forever});
-            if(action.IsEnabled) action.Focus(); else UI<TextBlock>("OperationTitle").Focus();
             return activeOperation;
         }
 
@@ -84,7 +83,6 @@ namespace Cadrivect
             operationCancel=null;
             UpdateOperation(id,detail);
             UI<Button>("CancelOperation").IsEnabled=false;
-            UI<TextBlock>("OperationTitle").Focus();
         }
 
         void CancelCurrentOperation()
@@ -93,22 +91,22 @@ namespace Cadrivect
             if(cancel==null || !OperationOpen) return;
             operationCancel=null;
             UI<Button>("CancelOperation").IsEnabled=false;
-            UI<TextBlock>("OperationTitle").Focus();
             cancel();
         }
 
         void EndOperation(long id)
         {
             if(id==0 || id!=activeOperation) return;
+            bool hadFocus=UI<Grid>("OperationOverlay").IsKeyboardFocusWithin;
             activeOperation=0;
             operationCancel=null;
             UI<Grid>("OperationOverlay").Visibility=Visibility.Collapsed;
             UI<RotateTransform>("OperationRotation").BeginAnimation(RotateTransform.AngleProperty,null);
-            SetModalBackgroundEnabled(true);
+            surface.ClipForProgress(null);
+            UpdateTransport();
             var previous=operationReturnFocus;
             operationReturnFocus=null;
-            if(closing || !window.IsVisible) return;
-            if(StopPromptOpen) {FocusStopPrompt(); return;}
+            if(!hadFocus || closing || !window.IsVisible || HistoryOpen || StopPromptOpen || SetupOpen) return;
             if(previous!=null && previous.IsVisible && previous.IsEnabled && previous.Focus()) return;
             if(!SetupOpen) UI<Button>("OpenSource").Focus();
         }

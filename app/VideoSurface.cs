@@ -50,9 +50,35 @@ namespace Cadrivect
         [DllImport("user32.dll")] static extern int FillRect(IntPtr dc,ref Rect rect,IntPtr brush);
         [DllImport("gdi32.dll")] static extern IntPtr GetStockObject(int index);
         [DllImport("gdi32.dll")] static extern IntPtr CreateRectRgn(int left,int top,int right,int bottom);
+        [DllImport("gdi32.dll")] static extern IntPtr CreateRoundRectRgn(int left,int top,int right,int bottom,int ellipseWidth,int ellipseHeight);
+        [DllImport("gdi32.dll")] static extern int CombineRgn(IntPtr destination,IntPtr first,IntPtr second,int operation);
         [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr handle);
         [DllImport("user32.dll")] static extern int SetWindowRgn(IntPtr hwnd,IntPtr region,bool redraw);
         bool clippedForModal;
+        Rectangle progressHole;
+        Size clipClientSize;
+        int clipDiameter;
+
+        internal void ClipForProgress(System.Windows.Controls.Border card)
+        {
+            if(Handle==IntPtr.Zero) return;
+            var bounds=Rectangle.Empty;
+            var size=Size.Empty;
+            int diameter=0;
+            Rect client;
+            if(card!=null && card.IsVisible && card.ActualWidth>0 && card.ActualHeight>0 && GetClientRect(Handle,out client)) {
+                var top=card.PointToScreen(new System.Windows.Point());
+                var bottom=card.PointToScreen(new System.Windows.Point(card.ActualWidth,card.ActualHeight));
+                var point=new PixelPoint {X=(int)Math.Floor(top.X),Y=(int)Math.Floor(top.Y)};
+                ScreenToClient(Handle,ref point);
+                bounds=new Rectangle(point.X,point.Y,(int)Math.Ceiling(bottom.X)-(int)Math.Floor(top.X),(int)Math.Ceiling(bottom.Y)-(int)Math.Floor(top.Y));
+                size=new Size(client.Right,client.Bottom);
+                diameter=(int)Math.Round(2*card.CornerRadius.TopLeft*bounds.Width/card.ActualWidth);
+            }
+            if(bounds==progressHole && size==clipClientSize && diameter==clipDiameter) return;
+            progressHole=bounds; clipClientSize=size; clipDiameter=diameter;
+            if(!clippedForModal) ApplyModalClip(Handle,false);
+        }
 
         internal void ClipForModal(bool clip)
         {
@@ -60,11 +86,22 @@ namespace Cadrivect
             clippedForModal=clip;
             if(Handle!=IntPtr.Zero) ApplyModalClip(Handle,clip);
         }
-        static void ApplyModalClip(IntPtr hwnd,bool clip)
+        void ApplyModalClip(IntPtr hwnd,bool clip)
         {
             // Keep the native child and its client size alive until the renderer acknowledges the change.
             IntPtr region=clip ? CreateRectRgn(0,0,0,0) : IntPtr.Zero;
             if(clip && region==IntPtr.Zero) throw new Win32Exception();
+            if(!clip && !progressHole.IsEmpty) {
+                region=CreateRectRgn(0,0,clipClientSize.Width,clipClientSize.Height);
+                // Subtract just the WPF card from the native child. Video stays visible around it.
+                IntPtr hole=CreateRoundRectRgn(progressHole.Left,progressHole.Top,progressHole.Right+1,progressHole.Bottom+1,clipDiameter,clipDiameter);
+                try {
+                    if(region==IntPtr.Zero || hole==IntPtr.Zero || CombineRgn(region,region,hole,4)==0) {
+                        if(region!=IntPtr.Zero) DeleteObject(region);
+                        throw new Win32Exception();
+                    }
+                } finally {if(hole!=IntPtr.Zero) DeleteObject(hole);}
+            }
             if(SetWindowRgn(hwnd,region,true)==0) {
                 if(region!=IntPtr.Zero) DeleteObject(region);
                 throw new Win32Exception();

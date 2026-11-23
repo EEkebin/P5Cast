@@ -278,6 +278,27 @@
       <Grid>
         <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Name="TransportRow" Height="52"/><RowDefinition Name="SettingsRow" Height="Auto"/></Grid.RowDefinitions>
         <Border Name="VideoHost" Background="Black" ClipToBounds="True"/>
+        <Grid Name="OperationOverlay" Visibility="Collapsed" ClipToBounds="True" AutomationProperties.LabeledBy="{Binding ElementName=OperationTitle}">
+          <Border Name="OperationCard" HorizontalAlignment="Center" VerticalAlignment="Top" MaxWidth="470" Margin="10,10,10,0" Padding="12,9" CornerRadius="10"
+                  Background="{DynamicResource Theme.Surface}" BorderBrush="{DynamicResource Theme.Border}" BorderThickness="1">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <Grid Name="OperationSpinner" Width="32" Height="32" VerticalAlignment="Center" Margin="0,0,12,0" IsHitTestVisible="False">
+                <Ellipse Stroke="{DynamicResource Theme.Border}" StrokeThickness="2.5"/>
+                <Path Data="M 16,1.25 A 14.75,14.75 0 0 1 30.75,16" Stroke="{DynamicResource Theme.Accent}" StrokeThickness="2.5"
+                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" RenderTransformOrigin="0.5,0.5">
+                  <Path.RenderTransform><RotateTransform x:Name="OperationRotation"/></Path.RenderTransform>
+                </Path>
+              </Grid>
+              <StackPanel Grid.Column="1">
+                <TextBlock Name="OperationTitle" TextWrapping="Wrap" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource Theme.Text}"
+                           Focusable="True" KeyboardNavigation.IsTabStop="False"/>
+                <TextBlock Name="OperationDetail" TextWrapping="Wrap" Margin="0,5,0,0" Foreground="{DynamicResource Theme.Muted}" AutomationProperties.LiveSetting="Polite"/>
+              </StackPanel>
+              <Button Name="CancelOperation" Grid.Column="2" Content="Cancel" VerticalAlignment="Center" MinWidth="64" Margin="12,0,0,0"/>
+            </Grid>
+          </Border>
+        </Grid>
         <DockPanel Name="TransportBar" Grid.Row="1" LastChildFill="False" VerticalAlignment="Center">
           <Button DockPanel.Dock="Left" Name="OpenSource" Width="46" Height="34" Padding="0" ToolTipService.ShowOnDisabled="True" Style="{StaticResource Primary}"/>
           <ComboBox DockPanel.Dock="Left" Name="SourceChoice" Padding="6,4" VerticalContentAlignment="Center" Width="142" Margin="0,0,10,0"/>
@@ -574,31 +595,6 @@
             </ListBox>
           </Grid>
         </Border>
-    </Grid>
-    <Grid Name="OperationOverlay" Grid.Row="0" Grid.RowSpan="3" Panel.ZIndex="14" Visibility="Collapsed"
-          Background="{DynamicResource Theme.Scrim}" FocusManager.IsFocusScope="True"
-          KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle" KeyboardNavigation.DirectionalNavigation="Contained"
-          AutomationProperties.LabeledBy="{Binding ElementName=OperationTitle}">
-      <Border VerticalAlignment="Center" MaxWidth="410" Margin="18" Padding="22" CornerRadius="14"
-              Background="{DynamicResource Theme.Surface}" BorderBrush="{DynamicResource Theme.Border}" BorderThickness="1">
-        <Grid>
-          <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-          <Grid Name="OperationSpinner" Width="32" Height="32" VerticalAlignment="Top" Margin="0,2,15,0" IsHitTestVisible="False">
-            <Ellipse Stroke="{DynamicResource Theme.Border}" StrokeThickness="2.5"/>
-            <Path Data="M 16,1.25 A 14.75,14.75 0 0 1 30.75,16" Stroke="{DynamicResource Theme.Accent}" StrokeThickness="2.5"
-                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" RenderTransformOrigin="0.5,0.5">
-              <Path.RenderTransform><RotateTransform x:Name="OperationRotation"/></Path.RenderTransform>
-            </Path>
-          </Grid>
-          <StackPanel Grid.Column="1">
-            <TextBlock Name="OperationTitle" TextWrapping="Wrap" FontSize="20" FontWeight="SemiBold" Foreground="{DynamicResource Theme.Text}"
-                       Focusable="True" KeyboardNavigation.IsTabStop="False"/>
-            <TextBlock Name="OperationDetail" TextWrapping="Wrap" Margin="0,5,0,0" Foreground="{DynamicResource Theme.Muted}" AutomationProperties.LiveSetting="Polite"/>
-          </StackPanel>
-          <Button Name="CancelOperation" Grid.Row="1" Grid.ColumnSpan="2" Content="Cancel" HorizontalAlignment="Right" MinWidth="84" Margin="0,16,0,0"/>
-        </Grid>
-      </Border>
     </Grid>
     <Grid Name="StopPanel" Grid.Row="1" Grid.RowSpan="2" Panel.ZIndex="11" Visibility="Collapsed"
           Background="{DynamicResource Theme.Scrim}" AutomationProperties.Name="Disconnect confirmation" FocusManager.IsFocusScope="True"

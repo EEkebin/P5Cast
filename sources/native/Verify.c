@@ -85,22 +85,42 @@ static void verify_audio(void)
     Audio audio = {0};
     audio_settings(2, 48000, &audio);
     CHECK(audio.device && !audio.failed);
-    int16_t silence[240 * 2] = {0};
-    audio_frame(silence, 240, &audio);
+    SDL_PauseAudioDevice(audio.device, 1); // Issue exact device requests below.
+    int16_t tone[240 * 2], out[720 * 2];
+    for (size_t i = 0; i < 240; i++) {tone[i*2] = 24000; tone[i*2+1] = -24000;}
+    audio_frame(tone, 240, &audio);
     DirectMetrics metrics = {0};
     audio_stats(&audio, GetTickCount64(), &metrics);
     CHECK(metrics.queued_us == 5000 && !audio.playing && !metrics.underruns);
-    audio_frame(silence, 240, &audio); audio_frame(silence, 240, &audio);
-    CHECK(audio.playing);
-    for (int i=0; i<100 && SDL_GetQueuedAudioSize(audio.device); i++) SDL_Delay(5);
-    audio_frame(silence, 240, &audio);
-    audio_stats(&audio, GetTickCount64(), &metrics);
-    CHECK(metrics.underruns == 1 && !audio.playing && metrics.queued_us == 5000);
-    for (int i=0; i<100; i++) {
-        audio_frame(silence, 240, &audio);
-        audio_stats(&audio, GetTickCount64(), &metrics);
-        CHECK(metrics.queued_us <= 65000);
+    audio_frame(tone, 240, &audio); audio_frame(tone, 240, &audio);
+    audio_render(&audio, (Uint8 *)out, sizeof(out));
+    CHECK(audio.playing && !audio.queued_frames && out[1438] == 24000);
+    // The device has enough audio through the end of this buffer, even though
+    // the producer sees zero queued. An on-time packet must play immediately.
+    audio_frame(tone, 240, &audio);
+    audio_render(&audio, (Uint8 *)out, sizeof(tone));
+    CHECK(out[0] == 24000 && out[1] == -24000 && audio.underruns == 0);
+    audio_render(&audio, (Uint8 *)out, sizeof(tone));
+    for (int i=0; i<240; i++) {
+        CHECK(out[i*2] == (i < 96 ? 24000 * (95-i) / 96 : 0));
+        CHECK(out[i*2+1] == -out[i*2]);
     }
+    CHECK(audio.underruns == 1 && !audio.playing);
+    audio_frame(tone, 240, &audio); audio_frame(tone, 240, &audio); audio_frame(tone, 240, &audio);
+    audio_render(&audio, (Uint8 *)out, sizeof(tone));
+    CHECK(out[0] == 250 && out[190] == 24000 && out[478] == 24000);
+    for (size_t i = 0; i < 240; i++) {tone[i*2] = -24000; tone[i*2+1] = 24000;}
+    for (int i=0; i<100; i++) {
+        audio_frame(tone, 240, &audio);
+        audio_stats(&audio, GetTickCount64(), &metrics);
+        CHECK(metrics.queued_us <= DIRECT_AUDIO_TARGET_US * 4);
+    }
+    audio_render(&audio, (Uint8 *)out, sizeof(tone));
+    for (int i=0; i<240; ++i) {
+        int expected = i < 96 ? 24000 - 500*(i+1) : -24000;
+        CHECK(out[i*2] == expected && out[i*2+1] == -expected);
+    }
+    puts("Measured 48 kHz stereo: on-time boundary had zero underruns; starvation faded to silence; burst splice limited to 500 counts/sample for a 48000-count step.");
     SDL_CloseAudioDevice(audio.device);
     Audio received = {0};
     ChiakiOpusDecoder decoder;
@@ -115,10 +135,12 @@ static void verify_audio(void)
     chiaki_audio_header_set(&header, 2, 16, 48000, 960);
     sink.header_cb(&header, sink.user);
     CHECK(received.device && !received.failed);
+    SDL_PauseAudioDevice(received.device, 1);
     uint8_t opus_silence[] = {0xf8, 0xff, 0xfe};
     sink.frame_cb(opus_silence, sizeof(opus_silence), sink.user);
     sink.frame_cb(NULL, 0, sink.user);
-    CHECK(received.playing); // The actual Opus decoder queued PCM on the dummy device.
+    audio_render(&received, (Uint8 *)out, sizeof(tone));
+    CHECK(received.playing); // The actual Opus decoder supplied PCM to the playback callback.
     uint64_t start = received.window_start_ms;
     audio_stats(&received, start+1000, &metrics);
     CHECK(metrics.sample_rate == 48000 && metrics.channels == 2 && metrics.audio_bps == 24);
@@ -160,11 +182,19 @@ static void verify_first_audio_volume(void)
             pcm[i*2+1] = block == 0 ? -27000 : -10000;
         }
         audio_frame(pcm, 240, &audio);
-        if (!block) CHECK(SDL_GetQueuedAudioSize(audio.device) == sizeof(pcm) && !audio.playing);
+        if (!block) {
+            DirectMetrics metrics = {0};
+            audio_stats(&audio, GetTickCount64(), &metrics);
+            CHECK(metrics.queued_us == 5000);
+        }
     }
-    CHECK(audio.playing);
-    for (int i = 0; i < 200 && SDL_GetQueuedAudioSize(audio.device); i++) SDL_Delay(5);
-    CHECK(!SDL_GetQueuedAudioSize(audio.device));
+    DirectMetrics stats = {0};
+    for (int i = 0; i < 200; i++) {
+        audio_stats(&audio, GetTickCount64(), &stats);
+        if (stats.underruns > 0) break;
+        SDL_Delay(5);
+    }
+    CHECK(stats.underruns && !stats.queued_us);
     SDL_Delay(25);
     SDL_CloseAudioDevice(audio.device);
     audio_close_volume(&audio); CHECK(!audio.volume_percent);
@@ -173,19 +203,26 @@ static void verify_first_audio_volume(void)
 
     FILE *capture = fopen(filename, "rb");
     CHECK(capture);
-    int16_t stereo[2]; int leading_silence = 0, scaled = 0, full = 0;
+    int16_t stereo[2]; int leading_silence = 0, emitted = 0;
     while (fread(stereo, sizeof(stereo), 1, capture) == 1) {
-        if (stereo[0] == 0 && stereo[1] == 0) {
-            if (!scaled && !full) leading_silence++;
-        } else if (stereo[0] == 3000 && stereo[1] == -2500) {
-            CHECK(!full); scaled++;
-        } else {
-            CHECK(stereo[0] == 12000 && stereo[1] == -10000); full++;
+        if (emitted == 0 && stereo[0] == 0 && stereo[1] == 0) { leading_silence++; continue; }
+        int l = 0, r = 0;
+        if (emitted < 480) {
+            int index = emitted % 240;
+            int gain = emitted < 240 ? 25 : 100, previous = emitted < 240 ? 0 : 25;
+            int numerator = index < 96 ? previous * (95-index) + gain * (index+1) : gain * 96;
+            l = 12000 * numerator / 9600;
+            r = -10000 * numerator / 9600;
+        } else if (emitted < 576) {
+            l = 12000 * (575-emitted) / 96;
+            r = -10000 * (575-emitted) / 96;
         }
+        CHECK(stereo[0] == l && stereo[1] == r);
+        emitted++;
     }
     CHECK(!ferror(capture)); fclose(capture); CHECK(DeleteFileA(filename));
-    CHECK(leading_silence >= 240 && scaled == 240 && full == 240);
-    puts("Measured SDL disk output: first 240 stereo frames silent, next 240 at 25%, last 240 bit-exact at 100%.");
+    CHECK(leading_silence >= 240 && emitted >= 576);
+    puts("Measured SDL disk output: first 240 stereo frames muted, 2 ms gain ramps, exact 25%/100% plateaus, smooth return to silence.");
 }
 
 static void verify_virtual_pad(void)

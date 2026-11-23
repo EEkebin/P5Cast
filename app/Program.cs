@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Markup;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -24,7 +25,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.23.1.0")]
+[assembly: AssemblyVersion("0.24.0.0")]
 
 namespace Cadrivect
 {
@@ -124,17 +125,16 @@ namespace Cadrivect
                 if(surface.ZoomWheel(e.Delta)) e.Handled=true;
             };
             meter=new PlaybackMeter(delegate(int selectedMode,int multiplier) {
-                bool pictureChanged=mode!=selectedMode;
                 pictureSelectionRevision++; mode=selectedMode; factor=multiplier;
                 if(rendering!=null && !restoringSwitch) {
                     engine.Configure(mode,factor,meter.FrameGenerationProvider);
-                    TrackSwitch(SwitchControl.Picture,pictureChanged ? "Applying "+PictureLabels.Modes[mode] : "Changing frame generation");
+                    TrackSwitch(SwitchControl.Picture);
                 }
                 if(window.IsLoaded) SaveSettings();
             },delegate(string view){
                 if(rendering!=null && !restoringSwitch) {
                     engine.SetComparison(view);
-                    TrackSwitch(SwitchControl.View,"Changing comparison view");
+                    TrackSwitch(SwitchControl.View);
                 }
                 UpdateWipeInput();
             });
@@ -166,12 +166,12 @@ namespace Cadrivect
             InitVolume(saved);
             meter.DlssModelHint=Field(saved,"dlssModelHint");
             meter.DlssModelChanged+=delegate(string model) {
-                if(rendering!=null && !restoringSwitch) {engine.SetDlssModel(model); TrackSwitch(SwitchControl.Model,"Applying DLSS model");}
+                if(rendering!=null && !restoringSwitch) {engine.SetDlssModel(model); TrackSwitch(SwitchControl.Model);}
                 if(window.IsLoaded) SaveSettings();
             };
             meter.DlssQuality=Field(saved,"dlssQuality");
             meter.DlssQualityChanged+=delegate(string quality) {
-                if(rendering!=null && !restoringSwitch) {engine.SetDlssQuality(quality); TrackSwitch(SwitchControl.Quality,"Applying DLSS quality");}
+                if(rendering!=null && !restoringSwitch) {engine.SetDlssQuality(quality); TrackSwitch(SwitchControl.Quality);}
                 if(window.IsLoaded) SaveSettings();
             };
             meter.WipeHorizontal=Field(saved,"wipeHorizontal").Equals("True",StringComparison.OrdinalIgnoreCase);
@@ -281,9 +281,9 @@ namespace Cadrivect
             window.PreviewKeyDown+=async delegate(object sender,KeyEventArgs e) {
                 bool chord=(Keyboard.Modifiers & (ModifierKeys.Control|ModifierKeys.Alt))==(ModifierKeys.Control|ModifierKeys.Alt);
                 var key=e.Key==Key.System?e.SystemKey:e.Key;
-                if(OperationOpen || HistoryOpen) {
+                if(HistoryOpen) {
                     if(key==Key.Escape) {
-                        if(OperationOpen) CancelCurrentOperation(); else SetStatusHistory(false);
+                        SetStatusHistory(false);
                         e.Handled=true;
                     } else if(key==Key.F11 || chord) e.Handled=true;
                     return;
@@ -300,6 +300,9 @@ namespace Cadrivect
                     } else if(key==Key.F11 || chord) e.Handled=true;
                     return;
                 }
+                var focused=Keyboard.FocusedElement as ComboBox;
+                if(OperationOpen && key==Key.Escape && operationCancel!=null && !UI<Popup>("VolumePopup").IsOpen && !(focused!=null && focused.IsDropDownOpen)
+                    && !(Keyboard.FocusedElement is TextBox)) {CancelCurrentOperation(); e.Handled=true; return;}
                 if(key==Key.F11 || (chord && key==Key.Enter)) ToggleFullscreen();
                 else if(chord && key==Key.O) ToggleStats();
                 else if(chord && key==Key.Q) {e.Handled=true; await UserStop(); return;}
@@ -498,10 +501,11 @@ namespace Cadrivect
             UI<Button>(name).Click += async delegate {
                 if (busy) return;
                 busy = true;
-                UI<Grid>("Pages").IsEnabled = false;
+                var button=UI<Button>(name);
+                button.IsEnabled=false;
                 try { SaveSettings(); await action(); }
                 catch (Exception e) { Show(e.GetBaseException().Message, true); }
-                finally { UI<Grid>("Pages").IsEnabled = true; busy = false; }
+                finally { busy=false; button.IsEnabled=true; UpdateTransport(); }
             };
         }
 

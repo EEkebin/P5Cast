@@ -198,19 +198,33 @@ internal static partial class WindowChromeProbe
         Note(direction+" layout settled in "+layoutMs+" ms. Playback telemetry confirmed "+bounds.Width+"x"+bounds.Height+
              " surface at "+timer.ElapsedMilliseconds+" ms (250 ms sampling).");
     }
+    static void CheckOriginalOnly() {
+        Require(ViewButton("ViewOriginal").IsChecked==true && ViewButton("ViewOriginal").IsEnabled,
+            "All effects are off, but Original is not selected.");
+        foreach(string id in new[]{"ViewEnhanced","ViewSideBySide","ViewWipe"})
+            Require(!ViewButton(id).IsEnabled && ViewButton(id).IsChecked!=true,id+" is available without a picture or frame effect.");
+    }
     static async Task CheckComparisonViews() {
         var api=AppDomain.CurrentDomain.GetAssemblies().Select(a=>a.GetType("Cadrivect.Engine.EmbeddedPlayback")).First(t=>t!=null);
         var snapshot=api.GetMethod("Snapshot");
         string[] buttons={"ViewSideBySide","ViewWipe","ViewOriginal","ViewEnhanced"};
         string[] views={"side-by-side","wipe","original","enhanced"};
+        var json=new System.Web.Script.Serialization.JavaScriptSerializer();
+        Func<Dictionary<string,object>> sample=()=>json.Deserialize<Dictionary<string,object>>((string)snapshot.Invoke(null,null));
+        CheckOriginalOnly();
+        await Until(()=>Equals(sample()["comparisonView"],"original"),"All-off state did not reach the running player.");
+        SelectPlaybackMode(PictureButton("sharp"));
+        await Until(()=>Equals(sample()["comparisonView"],"enhanced") && Equals(sample()["effectivePictureMode"],"sharp"),
+            "The first effect did not enable and present the enhanced view.");
         for(int i=0;i<buttons.Length;i++) {
             var button=ViewButton(buttons[i]);
             Require(button!=null && button.IsEnabled,"Missing comparison control "+buttons[i]);
             ((ISelectionItemProvider)Peer(button).GetPattern(PatternInterface.SelectionItem)).Select();
+            CheckInlineSwitch("Changing to "+views[i]);
             string expected="\"comparisonView\":\""+views[i]+"\"";
             await Until(delegate{return button.IsChecked==true && ((string)snapshot.Invoke(null,null)).Contains(expected);},
                         "Dashboard selection did not reach the running engine: "+views[i]);
-            await WaitForOperation("Switching comparison to "+views[i]);
+            CheckInlineSwitch("Presenting "+views[i]);
             if(views[i]=="wipe") {
                 var slider=FindVisual(Find<Border>("MeterHost"),"Slider",e=>AutomationProperties.GetAutomationId(e)=="WipePosition");
                 var range=Peer(slider).GetPattern(PatternInterface.RangeValue) as IRangeValueProvider;
@@ -221,7 +235,29 @@ internal static partial class WindowChromeProbe
                 range.SetValue(50);
             }
         }
-        Note("All four comparison views switched on the running offline demo.");
+        SelectPlaybackMode(ViewButton("ViewOriginal"));
+        SelectPlaybackMode(PictureButton("fsr"));
+        await Until(()=>Equals(sample()["comparisonView"],"original") && Equals(sample()["mode"],"fsr"),
+            "Choosing another effect overrode the manually selected Original view.");
+        SelectPlaybackMode(ViewButton("ViewWipe"));
+        SelectPlaybackMode(PictureButton("original"));
+        CheckOriginalOnly();
+        await Until(()=>Equals(sample()["comparisonView"],"original") && Equals(sample()["effectivePictureMode"],"original"),
+            "Turning off the last picture effect did not dismiss the wipe.");
+        var meter=Find<Border>("MeterHost");
+        var interpolate=(RadioButton)FindVisual(meter,"RadioButton",e=>AutomationProperties.GetName(e)=="P5Cast interpolation 2×");
+        var off=(RadioButton)FindVisual(meter,"RadioButton",e=>AutomationProperties.GetName(e)=="Frame generation off");
+        int generated=Convert.ToInt32(sample()["generated"]);
+        SelectPlaybackMode(interpolate);
+        await Until(()=>Equals(sample()["comparisonView"],"enhanced") && Convert.ToInt32(sample()["generated"])>generated,
+            "Frame generation alone did not activate an enhanced picture with generated frames.");
+        foreach(string id in buttons) Require(ViewButton(id).IsEnabled,"Frame generation did not enable "+id);
+        SelectPlaybackMode(ViewButton("ViewSideBySide"));
+        SelectPlaybackMode(off);
+        CheckOriginalOnly();
+        await Until(()=>Equals(sample()["comparisonView"],"original") && Convert.ToInt32(sample()["multiplier"])==1,
+            "Turning off interpolation did not return to original playback.");
+        Note("Original is enforced with all effects off. Comparison views and frame generation switched without blocking playback.");
     }
     static async Task CheckScaling() {
         Click("InterfaceGroup");
@@ -470,11 +506,11 @@ internal static partial class WindowChromeProbe
                         await Until(()=>!Equals(nis.ToolTip,"Checking GPU support."),labels[i]+" NIS probe did not finish.",45000);
                         if(keys[i]=="opengl") Require(!nis.IsEnabled,"OpenGL advertised NIS without an implementation.");
                         else if(nis.IsEnabled) {
-                            await SelectPlaybackMode(nis);
+                            SelectPlaybackMode(nis);
                             await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"effectivePictureMode\":\"nis\"") &&
                                 ((string)snapshot.Invoke(null,null)).Contains("\"activeNisFilter\":\"NVScaler\""),
                                 labels[i]+" failed to run NIS from the Picture drawer.",12000);
-                            await SelectPlaybackMode(((RadioButton)FindVisual(meter,"RadioButton",e=>AutomationProperties.GetAutomationId(e)=="Picture_original")));
+                            SelectPlaybackMode(((RadioButton)FindVisual(meter,"RadioButton",e=>AutomationProperties.GetAutomationId(e)=="Picture_original")));
                             await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"effectivePictureMode\":\"original\""),"Could not switch back to Original.");
                             Note(labels[i]+" ran NVIDIA Image Scaling through the Picture drawer.");
                         }
@@ -487,25 +523,25 @@ internal static partial class WindowChromeProbe
                             bool testFruc=Convert.ToBoolean(caps["frucFrameGeneration"]),testVsr=Convert.ToBoolean(caps["rtxvideo"]);
                             Require(fruc!=null && fruc.IsEnabled==testFruc && vsr!=null && vsr.IsEnabled==testVsr,
                                 "The HDR Picture drawer disagrees with the GPU effect checks on "+labels[i]+".");
-                            if(testVsr) await SelectPlaybackMode(vsr);
-                            if(testFruc) await SelectPlaybackMode(fruc);
+                            if(testVsr) SelectPlaybackMode(vsr);
+                            if(testFruc) SelectPlaybackMode(fruc);
                             await CheckNvidiaOutput(snapshot,true,testVsr,testFruc,labels[i]+" HDR10");
                             color.SelectedItem="SDR";
-                            await WaitForOperation("Applying the playback setting");
+                            CheckInlineSwitch("Applying the playback setting");
                             await CheckNvidiaOutput(snapshot,false,testVsr,testFruc,labels[i]+" SDR");
                             var amd=(RadioButton)FindVisual(meter,"RadioButton",e=>AutomationProperties.GetAutomationId(e)=="AmdFrameGeneration");
                             if(testFruc && amd.IsEnabled) {
-                                await SelectPlaybackMode(amd);
+                                SelectPlaybackMode(amd);
                                 await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"activeFrameGenerationProvider\":\"amd\""),"AMD failed before switching to FRUC.",12000);
-                                await SelectPlaybackMode(fruc);
+                                SelectPlaybackMode(fruc);
                                 Require(amd.IsChecked!=true,"Both vendor providers are selected.");
                             }
                             color.SelectedItem="HDR10";
-                            await WaitForOperation("Applying the playback setting");
+                            CheckInlineSwitch("Applying the playback setting");
                             await CheckNvidiaOutput(snapshot,true,testVsr,testFruc,labels[i]+" restored HDR10");
                             if(testVsr && testFruc) Note(labels[i]+" presented HDR10 with RTX Video SR and advancing NVIDIA FRUC midpoints, including after an SDR round trip.");
-                            if(testFruc) await SelectPlaybackMode((RadioButton)FindVisual(meter,"RadioButton",e=>Equals(((RadioButton)e).Content,"Off")));
-                            if(testVsr) await SelectPlaybackMode((RadioButton)FindVisual(meter,"RadioButton",e=>AutomationProperties.GetAutomationId(e)=="Picture_original"));
+                            if(testFruc) SelectPlaybackMode((RadioButton)FindVisual(meter,"RadioButton",e=>Equals(((RadioButton)e).Content,"Off")));
+                            if(testVsr) SelectPlaybackMode((RadioButton)FindVisual(meter,"RadioButton",e=>AutomationProperties.GetAutomationId(e)=="Picture_original"));
                             Note(labels[i]+" presented HDR10 and switched to SDR and back during playback.");
                             if(keys[i]=="d3d12" || keys[i]=="vulkan") {
                                 var picture=Find<Border>("MeterHost");
@@ -518,7 +554,7 @@ internal static partial class WindowChromeProbe
                                 Func<Dictionary<string,object>> sample=()=>new System.Web.Script.Serialization.JavaScriptSerializer()
                                     .Deserialize<Dictionary<string,object>>((string)snapshot.Invoke(null,null));
                                 if(fsr.IsEnabled) {
-                                    await SelectPlaybackMode(fsr);
+                                    SelectPlaybackMode(fsr);
                                     await Until(()=>Convert.ToInt32(sample()["fsrEvaluations"])>0 &&
                                         !string.IsNullOrEmpty(Convert.ToString(sample()["fsrVersion"])),"AMD temporal upscaling did not process the demo.",12000);
                                     await Until(()=>Equals(fsr.Content,"FSR "+sample()["fsrVersion"]+" · Temporal"),"Temporal FSR chip did not identify the running provider.");
@@ -526,27 +562,27 @@ internal static partial class WindowChromeProbe
                                 }
                                 if(amdFrames.IsEnabled) {
                                     int before=Convert.ToInt32(sample()["generated"]);
-                                    await SelectPlaybackMode(amdFrames);
+                                    SelectPlaybackMode(amdFrames);
                                     await Until(()=>Convert.ToString(sample()["frameGenerationProvider"])=="amd" &&
                                         !string.IsNullOrEmpty(Convert.ToString(sample()["activeFrameGenerationVersion"])) &&
                                         Convert.ToInt32(sample()["generated"])>before,"AMD frame generation did not submit an intermediate frame.",12000);
                                     Note(labels[i]+" dashboard AMD frame generation: "+sample()["activeFrameGenerationVersion"]);
-                                    await SelectPlaybackMode(((RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"Off"))));
+                                    SelectPlaybackMode(((RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"Off"))));
                                 }
-                                await SelectPlaybackMode(((RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"Original"))));
+                                SelectPlaybackMode(((RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"Original"))));
                                 if(dlss.IsEnabled) {
                                     var restored=Rect(video);
-                                    await SelectPlaybackMode(dlss);
+                                    SelectPlaybackMode(dlss);
                                     await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"mode\":\"dlss\""),"DLSS did not activate.");
                                     var quality=(ComboBox)FindVisual(picture,"ComboBox",e=>AutomationProperties.GetAutomationId(e)=="DlssQuality");
                                     Require(quality.IsEnabled && quality.Items.Cast<string>().SequenceEqual(new[]{"Auto","Quality","Balanced","Performance","Ultra Performance"}),
                                             "DLSS mode choices are incomplete.");
                                     var model=(ComboBox)FindVisual(picture,"ComboBox",e=>AutomationProperties.GetAutomationId(e)=="DlssModelHint");
                                     model.SelectedIndex=2;
-                                    await WaitForOperation("Applying the playback setting");
+                                    CheckInlineSwitch("Applying the playback setting");
                                     await Until(()=>Convert.ToString(sample()["dlssModelHint"])=="m","DLSS 4.5 model preference did not reach the player.");
                                     quality.SelectedItem="Balanced";
-                                    await WaitForOperation("Applying the playback setting");
+                                    CheckInlineSwitch("Applying the playback setting");
                                     await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"dlssQuality\":\"balanced\""),"The dashboard failed to apply Balanced.");
                                     await CheckFullscreenFrame(()=>Click("Fullscreen"),()=>Fits(Rect(video),Screen().Full,2),"DLSS HDR enter fullscreen");
                                     await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"activeDlssQuality\":\"balanced\"") &&
@@ -558,12 +594,12 @@ internal static partial class WindowChromeProbe
                                         ()=>Fits(Rect(video),restored,2),"DLSS HDR exit fullscreen");
                                     var dlaa=(RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"DLAA"));
                                     if(dlaa.IsEnabled) {
-                                        await SelectPlaybackMode(dlaa);
+                                        SelectPlaybackMode(dlaa);
                                         await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"effectivePictureMode\":\"dlaa\""),"DLAA did not activate.");
                                         await CheckPictureSize(new System.Web.Script.Serialization.JavaScriptSerializer()
                                             .Deserialize<Dictionary<string,object>>((string)snapshot.Invoke(null,null)));
                                     }
-                                    await SelectPlaybackMode(((RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"Original"))));
+                                    SelectPlaybackMode(((RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"Original"))));
                                     Require(!quality.IsVisible && !quality.IsEnabled,"DLSS selector should only be available for DLSS.");
                                     Note("Balanced selected through the dashboard, verified by live HDR playback telemetry.");
                                 }

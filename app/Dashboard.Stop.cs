@@ -109,6 +109,7 @@ namespace Cadrivect
         }
         async Task RequestDisconnect(bool exit)
         {
+            if(OperationOpen && transportOperation==0) return;
             if(pendingStop!=null) {if(exit) closeAfterStop=true; return;}
             if(requestingRest) {if(exit) SetStopAction(true); return;}
             if(stopping) return;

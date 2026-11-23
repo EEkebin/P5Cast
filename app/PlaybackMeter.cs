@@ -23,7 +23,8 @@ namespace Cadrivect
             "NVIDIA Image Scaling. Enlarges and sharpens each frame independently, or sharpens at native resolution."};
         const string Ink="Theme.Text", Muted="Theme.Muted", Line="Theme.Border";
         const string Mint="Theme.Accent", Amber="Theme.Generated";
-        static readonly ControlTemplate ChipTemplate=MakeChipTemplate();
+        static readonly ControlTemplate ChipTemplate=MakeChipTemplate(false);
+        static readonly ControlTemplate PictureTemplate=MakeChipTemplate(true);
         static readonly ControlTemplate GroupTemplate=MakeGroupTemplate();
         readonly Action<int,int> change;
         static readonly string[] ViewIds={"enhanced","original","side-by-side","wipe"};
@@ -84,6 +85,7 @@ namespace Cadrivect
         internal event Action<double> WipePositionChanged;
         internal double WipePosition {get {return divider.Value/100;} set {divider.Value=value*100;}}
         int selectedView,previousView;
+        bool comparisonsAvailable=true;
         readonly TextBlock comparisonGuide;
         public string ComparisonView {get {return ViewIds[selectedView];}}
         readonly RadioButton[] modes=new RadioButton[ModeIds.Length], factors=new RadioButton[4];
@@ -161,18 +163,25 @@ namespace Cadrivect
             string group=Guid.NewGuid().ToString("N");
             for(int i=0;i<modes.Length;i++)
             {
-                var button=new RadioButton {GroupName="Picture"+group,Content=ModeLabels[i],Template=ChipTemplate};
-                StyleChip(button); modes[i]=button; int index=i;
+                var button=new RadioButton {GroupName="Picture"+group,Content=ModeLabels[i],Template=PictureTemplate};
+                StyleChip(button); button.ClearValue(HeightProperty); button.MinHeight=28;
+                modes[i]=button; int index=i;
                 AutomationProperties.SetAutomationId(button,"Picture_"+ModeIds[i]);
                 button.Checked+=delegate {
                     if(syncing) return;
                     selectedMode=index; RefreshQualityChoice(); SendSettings();
                 };
             }
-            AddPictureRow(picture,null,"original","sharp");
-            AddPictureRow(picture,"Spatial upscaling","nis","fsr");
-            AddPictureRow(picture,"Video & temporal upscaling","rtxvideo","fsr-temporal");
-            AddPictureRow(picture,"NVIDIA DLSS","dlss","dlaa","dlss-nr");
+            var modeGroup=new StackPanel();
+            var modeHeading=Label("Picture mode · Choose one",Ink,12,FontWeights.SemiBold);
+            modeHeading.Margin=new Thickness(0,4,0,3);
+            AutomationProperties.SetLabeledBy(modeGroup,modeHeading);
+            picture.Children.Add(modeHeading);
+            picture.Children.Add(modeGroup);
+            AddPictureRow(modeGroup,null,"original","sharp");
+            AddPictureRow(modeGroup,"Spatial upscaling","nis","fsr");
+            AddPictureRow(modeGroup,"Video & temporal upscaling","rtxvideo","fsr-temporal");
+            AddPictureRow(modeGroup,"NVIDIA DLSS","dlss","dlaa","dlss-nr");
             qualityGroup=new StackPanel {Margin=new Thickness(0,7,0,0)};
             picture.Children.Add(qualityGroup);
             var qualityHeader=new DockPanel {Margin=new Thickness(0,0,0,3)};
@@ -278,6 +287,7 @@ namespace Cadrivect
             AutomationProperties.SetAutomationId(horizontalSplit,"WipeHorizontal");
             picture.Children.Add(horizontalSplit);
             comparisonGuide=Label("",Muted,11,FontWeights.Normal);
+            comparisonGuide.TextWrapping=TextWrapping.Wrap;
             comparisonGuide.Margin=new Thickness(0,4,0,0); picture.Children.Add(comparisonGuide);
             divider=new Slider {Minimum=0,Maximum=100,Value=50,SmallChange=1,LargeChange=10,IsMoveToPointEnabled=true,AutoToolTipPlacement=AutoToolTipPlacement.TopLeft,
                 ToolTip="Drag the divider in the picture or use the arrow keys here."};
@@ -299,8 +309,9 @@ namespace Cadrivect
                 AutomationProperties.SetAutomationId(button,viewControlIds[i]);
                 button.Checked+=delegate {
                     if(syncing) return;
-                    SelectView(index);
-                    if(compare!=null) compare(ComparisonView);
+                    int before=selectedView;
+                    RefreshComparison(index);
+                    if(before!=selectedView && compare!=null) compare(ComparisonView);
                 };
                 viewGrid.Children.Add(button);
             }
@@ -443,7 +454,7 @@ namespace Cadrivect
             Grid.SetColumn(metric,1); row.Children.Add(metric); values.Add(id,metric); body.Children.Add(row);
             return label;
         }
-        static ControlTemplate MakeChipTemplate()
+        static ControlTemplate MakeChipTemplate(bool pictureMode)
         {
             var surface=new FrameworkElementFactory(typeof(Border),"Surface");
             surface.SetValue(Border.CornerRadiusProperty,new CornerRadius(5));
@@ -452,13 +463,36 @@ namespace Cadrivect
             var content=new FrameworkElementFactory(typeof(ContentPresenter));
             content.SetValue(ContentPresenter.HorizontalAlignmentProperty,HorizontalAlignment.Center);
             content.SetValue(ContentPresenter.VerticalAlignmentProperty,VerticalAlignment.Center);
-            surface.AppendChild(content);
+            if(pictureMode) {
+                var row=new FrameworkElementFactory(typeof(DockPanel));
+                row.SetValue(FrameworkElement.MarginProperty,new Thickness(6,0,4,0));
+                var indicator=new FrameworkElementFactory(typeof(Grid));
+                indicator.SetValue(DockPanel.DockProperty,Dock.Left);
+                indicator.SetValue(FrameworkElement.HeightProperty,12.0); indicator.SetValue(FrameworkElement.WidthProperty,12.0);
+                indicator.SetValue(FrameworkElement.VerticalAlignmentProperty,VerticalAlignment.Center);
+                indicator.SetValue(FrameworkElement.MarginProperty,new Thickness(0,0,5,0));
+                var ring=new FrameworkElementFactory(typeof(Ellipse),"RadioRing");
+                ring.SetResourceReference(Shape.StrokeProperty,Muted);
+                var dot=new FrameworkElementFactory(typeof(Ellipse),"RadioDot");
+                dot.SetValue(FrameworkElement.MarginProperty,new Thickness(3));
+                dot.SetResourceReference(Shape.FillProperty,Mint); dot.SetValue(UIElement.VisibilityProperty,Visibility.Hidden);
+                indicator.AppendChild(ring); indicator.AppendChild(dot); row.AppendChild(indicator);
+                var label=new FrameworkElementFactory(typeof(TextBlock));
+                label.SetValue(TextBlock.TextProperty,new TemplateBindingExtension(ContentControl.ContentProperty));
+                label.SetValue(TextBlock.TextWrappingProperty,TextWrapping.Wrap);
+                label.SetValue(FrameworkElement.VerticalAlignmentProperty,VerticalAlignment.Center);
+                row.AppendChild(label); surface.AppendChild(row);
+            } else surface.AppendChild(content);
             var template=new ControlTemplate(typeof(ToggleButton)) {VisualTree=surface};
             var hover=new Trigger {Property=UIElement.IsMouseOverProperty,Value=true};
             hover.Setters.Add(new Setter(Border.BorderBrushProperty,new DynamicResourceExtension("Theme.StrongBorder"),"Surface")); template.Triggers.Add(hover);
             var selected=new Trigger {Property=ToggleButton.IsCheckedProperty,Value=true};
             selected.Setters.Add(new Setter(Border.BackgroundProperty,new DynamicResourceExtension("Theme.Selected"),"Surface"));
             selected.Setters.Add(new Setter(Border.BorderBrushProperty,new DynamicResourceExtension("Theme.StrongBorder"),"Surface"));
+            if(pictureMode) {
+                selected.Setters.Add(new Setter(UIElement.VisibilityProperty,Visibility.Visible,"RadioDot"));
+                selected.Setters.Add(new Setter(Shape.StrokeProperty,new DynamicResourceExtension(Mint),"RadioRing"));
+            }
             selected.Setters.Add(new Setter(Control.ForegroundProperty,new DynamicResourceExtension(Mint))); template.Triggers.Add(selected);
             var focus=new Trigger {Property=UIElement.IsKeyboardFocusedProperty,Value=true};
             focus.Setters.Add(new Setter(Border.BorderBrushProperty,new DynamicResourceExtension(Mint),"Surface")); template.Triggers.Add(focus);
@@ -475,7 +509,10 @@ namespace Cadrivect
         void SendSettings()
         {
             pendingSettings=DateTime.UtcNow.AddSeconds(2);
+            int before=selectedView;
+            RefreshComparison();
             if(change!=null) change(selectedMode,selectedFactor);
+            if(before!=selectedView && compare!=null) compare(ComparisonView);
         }
         RadioButton AddGenerationProvider(Panel parent,string group,string provider,string label,string id)
         {
@@ -493,13 +530,22 @@ namespace Cadrivect
             var choice=FrameGenerationProvider=="amd" ? amdGeneration : FrameGenerationProvider=="fruc" ? frucGeneration : factors[selectedFactor-1];
             choice.IsChecked=true;
         }
-        void SelectView(int index)
+        void RefreshComparison(int? requested=null)
         {
+            bool available=selectedMode!=0 || selectedFactor>1;
+            if(available==comparisonsAvailable && !requested.HasValue) return;
+            int index=available ? requested ?? (comparisonsAvailable ? selectedView : 0) : 1;
+            comparisonsAvailable=available;
+            for(int i=0;i<views.Length;i++)
+                views[i].IsEnabled=i==1 || available;
             if(index==1 && selectedView!=1) previousView=selectedView;
-            selectedView=index; views[index].IsChecked=true;
+            selectedView=index;
+            bool wasSyncing=syncing; syncing=true;
+            try {views[index].IsChecked=true;}
+            finally {syncing=wasSyncing;}
             horizontalSplit.Visibility=index==3 ? Visibility.Visible : Visibility.Collapsed;
             UpdateComparisonGuide();
-            comparisonGuide.Visibility=index>=2 ? Visibility.Visible : Visibility.Collapsed;
+            comparisonGuide.Visibility=!available || index>=2 ? Visibility.Visible : Visibility.Collapsed;
             divider.Visibility=index==3 ? Visibility.Visible : Visibility.Collapsed;
         }
         internal void RestorePlaybackControls(int picture,int multiplier,string provider,string view)
@@ -509,24 +555,25 @@ namespace Cadrivect
                 selectedMode=picture; selectedFactor=multiplier; FrameGenerationProvider=provider;
                 modes[picture].IsChecked=true; SyncGenerationChoice(); RefreshQualityChoice();
                 int index=Array.IndexOf(ViewIds,view);
-                if(index>=0) SelectView(index);
+                RefreshComparison(index>=0 ? (int?)index : null);
                 pendingSettings=DateTime.MinValue;
             } finally {syncing=false;}
         }
         internal Dictionary<string,object> Capabilities { get {return gpu;} }
         void UpdateComparisonGuide()
         {
-            comparisonGuide.Text=selectedView==3 && WipeHorizontal ? "Top: Original    ·    Bottom: Enhanced" : "Left: Original    ·    Right: Enhanced";
+            comparisonGuide.Text=!comparisonsAvailable ? "Choose a picture effect or enable frame generation to compare." :
+                selectedView==3 && WipeHorizontal ? "Top: Original    ·    Bottom: Enhanced" : "Left: Original    ·    Right: Enhanced";
         }
         public void ToggleOriginal()
         {
-            views[selectedView==1 ? previousView : 1].IsChecked=true;
+            if(comparisonsAvailable) views[selectedView==1 ? previousView : 1].IsChecked=true;
         }
         public void Reset(int modeIndex,int multiplier)
         {
             selectedMode=Math.Max(0,Math.Min(modes.Length-1,modeIndex)); selectedFactor=Math.Max(1,Math.Min(4,multiplier));
             syncing=true;
-            try {modes[selectedMode].IsChecked=true; SyncGenerationChoice(); SelectView(selectedView);}
+            try {modes[selectedMode].IsChecked=true; SyncGenerationChoice(); RefreshComparison();}
             finally {syncing=false;}
             liveFsrVersion=null; hdr=false; lastSample=-1; pendingSettings=DateTime.MinValue; dial.SetRates(double.NaN,double.NaN,double.NaN,double.NaN);
             sourceValue.Text=generatedValue.Text="—"; targetValue.Text="Target —";
@@ -681,6 +728,7 @@ namespace Cadrivect
                 modes[6].Content=PictureLabels.TemporalFsr(liveFsrVersion ?? Text(gpu,"fsrVersion"));
             }
             int mode=Array.IndexOf(ModeIds,requested); double factor=Number(snapshot,"multiplier"); bool? comparing=Flag(snapshot,"compare");
+            int priorView=selectedView;
             syncing=true;
             try {
                 if(DateTime.UtcNow>=pendingSettings || (mode==selectedMode && factor==selectedFactor && Text(snapshot,"frameGenerationProvider")==FrameGenerationProvider)) {
@@ -689,9 +737,11 @@ namespace Cadrivect
                         selectedFactor=(int)factor;
                         FrameGenerationProvider=Text(snapshot,"frameGenerationProvider"); SyncGenerationChoice();
                     }
+                    RefreshComparison();
                     pendingSettings=DateTime.MinValue;
                 }
             } finally {syncing=false;}
+            if(priorView!=selectedView && compare!=null) compare(ComparisonView);
             int quality=Array.IndexOf(QualityIds,Text(snapshot,"activeDlssQuality"));
             activeQuality.Text=requested=="dlss" && effective=="dlaa" ? "Native · DLAA" :
                 effective=="dlss" && quality>0 ? "Active · "+QualityLabels[quality] : "";

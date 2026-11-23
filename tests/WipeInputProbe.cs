@@ -21,9 +21,12 @@ internal static partial class WindowChromeProbe
     {
         var json=new JavaScriptSerializer();
         Func<Dictionary<string,object>> sample=()=>json.Deserialize<Dictionary<string,object>>((string)snapshot.Invoke(null,null));
+        var original=PictureButton("original");
+        bool startedOriginal=original.IsChecked==true;
+        if(startedOriginal) SelectPlaybackMode(PictureButton("sharp"));
         var button=ViewButton("ViewWipe");
         Require(button!=null && button.IsEnabled,"Wipe view is missing.");
-        await SelectPlaybackMode(button);
+        SelectPlaybackMode(button);
         await Until(()=>Equals(sample()["comparisonView"],"wipe"),"Wipe view did not start.");
         bool fullscreen=backend=="d3d12";
         if(fullscreen) {
@@ -54,8 +57,12 @@ internal static partial class WindowChromeProbe
             await Until(()=>Find<Border>("HeaderBar").IsVisible,"Double-click away from the divider did not exit fullscreen.");
         }
         orientation.IsChecked=initialOrientation;
-        await SelectPlaybackMode(ViewButton("ViewEnhanced"));
+        SelectPlaybackMode(ViewButton("ViewEnhanced"));
         await Until(()=>Equals(sample()["comparisonView"],"enhanced"),"Wipe view did not exit.");
+        if(startedOriginal) {
+            SelectPlaybackMode(original);
+            await Until(()=>Equals(sample()["effectivePictureMode"],"original"),"Wipe test failed to restore the initial picture.");
+        }
         Note(backend+" passed native dragging, cancellation and inset handle recovery on both axes.");
     }
 

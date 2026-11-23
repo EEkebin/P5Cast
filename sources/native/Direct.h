@@ -8,6 +8,7 @@
 
 #define DIRECT_MAX_AU (16u * 1024u * 1024u)
 #define DIRECT_AUDIO_TARGET_US 15000u
+#define DIRECT_AUDIO_CAPACITY 8192u /* frames; holds a 100 ms Opus block at 48 kHz */
 typedef struct {
     HANDLE pipe, stop;
     SRWLOCK writer;
@@ -24,6 +25,11 @@ typedef struct {
     uint32_t rate, channels, underruns;
     uint64_t compressed_bytes, window_start_ms;
     ChiakiAudioSink decoder_sink;
+    int16_t pcm[DIRECT_AUDIO_CAPACITY * 2], last_output[2], ramp_start[2];
+    size_t read_frame, queued_frames;
+    uint32_t ramp_left;
+    LONG gain_percent;
+    bool gain_initialized;
     bool playing;
     volatile LONG failed;
 } Audio;
@@ -57,6 +63,7 @@ void audio_close_volume(Audio *audio);
 void audio_decoder_sink(Audio *audio, ChiakiOpusDecoder *decoder, ChiakiAudioSink *sink);
 void audio_settings(uint32_t channels, uint32_t rate, void *user);
 void audio_frame(int16_t *pcm, size_t samples, void *user);
+void SDLCALL audio_render(void *user, Uint8 *stream, int length);
 void audio_stats(Audio *audio, uint64_t now_ms, DirectMetrics *metrics);
 void gamepad_init(Gamepad *gamepad);
 bool gamepad_tick(Gamepad *gamepad);

@@ -76,7 +76,7 @@ namespace Cadrivect
         void SetModalBackgroundEnabled(bool enabled)
         {
             bool dialog=!enabled || SetupOpen || StopPromptOpen;
-            bool status=OperationOpen || HistoryOpen;
+            bool status=HistoryOpen;
             enabled=!dialog && !status;
             if(!enabled) surface.EndPointerGesture();
             surface.ClipForModal(status);

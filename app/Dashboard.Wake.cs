@@ -10,7 +10,7 @@ namespace Cadrivect
 
         void RefreshWakeButton()
         {
-            UI<Button>("WakeConsole").IsEnabled=!closing && !preparing && !Active &&
+            UI<Button>("WakeConsole").IsEnabled=!closing && !preparing && !Active && !OperationOpen &&
                 UI<ComboBox>("ConsolePicker").SelectedItem is DirectConsole;
         }
 
@@ -27,7 +27,7 @@ namespace Cadrivect
         async Task WakeWithoutPlaying()
         {
             var console=UI<ComboBox>("ConsolePicker").SelectedItem as DirectConsole;
-            if(console==null || preparing || Active || closing) return;
+            if(console==null || preparing || Active || closing || OperationOpen) return;
             preparing=true; stopRequested=false; UpdateTransport();
             BeginConnection("Waking PS5","Checking your paired PS5…");
             try {

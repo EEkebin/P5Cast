@@ -13,26 +13,23 @@ namespace Cadrivect
 
         Dictionary<string,object> lastPlaybackSettings;
         SwitchControl switchedControls;
-        long switchOperation;
         int switchRevision;
-        bool restoringSwitch,switchCancelled;
+        bool restoringSwitch;
         readonly Stopwatch switchElapsed=new Stopwatch();
 
-        void TrackSwitch(SwitchControl control,string title)
+        void TrackSwitch(SwitchControl control)
         {
-            if(!firstFrame || lastPlaybackSettings==null || stopping || closing || restoringSwitch || switchCancelled) return;
+            if(!firstFrame || lastPlaybackSettings==null || stopping || closing || restoringSwitch) return;
             int revision=engine.MarkSettings();
             if(revision==0) return;
             switchedControls|=control;
             switchRevision=revision;
             switchElapsed.Restart();
-            if(switchOperation==0)
-                switchOperation=BeginOperation(title,"Waiting for the player to show the change…",CancelPlaybackSwitch);
         }
 
         void TrackPresentedSwitch(Dictionary<string,object> snapshot)
         {
-            if(switchOperation!=0) {
+            if(switchRevision!=0) {
                 if(PlaybackMeter.Number(snapshot,"settingsRevision")<switchRevision) {
                     if(switchElapsed.Elapsed.TotalSeconds<20) return;
                     EndSwitchTracking();
@@ -42,30 +39,18 @@ namespace Cadrivect
                 string error=Field(snapshot,"settingsError");
                 if(error.Length>0) {
                     // These are the settings the renderer actually accepted.
-                    RestoreSwitchSettings(snapshot,false);
+                    RestoreSwitchSettings(snapshot);
                     Show(error,true);
                 } else {
                     string notice=Field(snapshot,"effectNotice");
                     if(notice.Length>0 && notice!=Field(lastPlaybackSettings,"effectNotice")) Show(notice,true);
-                    else if(switchCancelled) Show("Previous playback settings restored.");
                 }
                 EndSwitchTracking();
             }
             lastPlaybackSettings=snapshot;
         }
 
-        void CancelPlaybackSwitch()
-        {
-            if(switchOperation==0 || switchCancelled) return;
-            switchCancelled=true;
-            CommitOperation(switchOperation,"Restoring the previous playback settings…");
-            RestoreSwitchSettings(lastPlaybackSettings,true);
-            switchRevision=engine.MarkSettings();
-            switchElapsed.Restart();
-            if(switchRevision==0) EndSwitchTracking();
-        }
-
-        void RestoreSwitchSettings(Dictionary<string,object> snapshot,bool send)
+        void RestoreSwitchSettings(Dictionary<string,object> snapshot)
         {
             if(snapshot==null) return;
             restoringSwitch=true;
@@ -75,23 +60,19 @@ namespace Cadrivect
                     preferredHdr=Array.IndexOf(hdrIds,color);
                     UI<ComboBox>("HdrOutput").SelectedIndex=preferredHdr;
                     UI<ComboBox>("RenderResolution").SelectedIndex=Array.IndexOf(resolutionIds,size);
-                    if(send) engine.ConfigureOutput(size,color);
                 }
                 if((switchedControls&SwitchControl.Model)!=0) {
                     meter.DlssModelHint=Field(snapshot,"dlssModelHint");
-                    if(send) engine.SetDlssModel(meter.DlssModelHint);
                 }
                 if((switchedControls&SwitchControl.Quality)!=0) {
                     meter.DlssQuality=Field(snapshot,"dlssQuality");
-                    if(send) engine.SetDlssQuality(meter.DlssQuality);
                 }
                 if((switchedControls&(SwitchControl.Picture|SwitchControl.View|SwitchControl.Output))!=0) {
                     mode=Array.IndexOf(modeIds,Field(snapshot,"mode"));
                     factor=(int)PlaybackMeter.Number(snapshot,"multiplier");
                     string provider=Field(snapshot,"frameGenerationProvider"),view=Field(snapshot,"comparisonView");
                     meter.RestorePlaybackControls(mode,factor,provider,view);
-                    if(send && (switchedControls&(SwitchControl.Output|SwitchControl.Picture))!=0) engine.Configure(mode,factor,provider);
-                    if(send && (switchedControls&SwitchControl.View)!=0) engine.SetComparison(view);
+                    if(view!=meter.ComparisonView) engine.SetComparison(meter.ComparisonView);
                     UpdateWipeInput();
                 }
                 if(window.IsLoaded) SaveSettings();
@@ -100,9 +81,8 @@ namespace Cadrivect
 
         void EndSwitchTracking()
         {
-            if(switchOperation!=0) EndOperation(switchOperation);
-            switchOperation=0; switchRevision=0; switchedControls=0;
-            switchCancelled=false; switchElapsed.Reset(); lastPlaybackSettings=null;
+            switchRevision=0; switchedControls=0;
+            switchElapsed.Reset(); lastPlaybackSettings=null;
         }
 
         async Task ChangeRenderer(ComboBox picker,SelectionChangedEventArgs change)

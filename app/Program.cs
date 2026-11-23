@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.3.1.0")]
+[assembly: AssemblyVersion("0.4.0.0")]
 
 namespace Cadrivect
 {
@@ -62,6 +62,13 @@ namespace Cadrivect
         readonly string[] modeIds = { "original", "sharp", "fsr", "rtxvideo", "dlss", "dlaa" };
         readonly string[] hdrIds = { "auto","off","hdr10" };
         readonly string[] resolutionIds = { "native","720","1080","1440","4k" };
+        readonly int[] directRates={2,5,15,30,50,75,100};
+        readonly int[] networkRates={0,35,65,100,150,250,500};
+        readonly string[] audioLayouts={"","stereo","5.1-surround","7.1-surround"};
+        readonly string[][] settingsGroups={
+            new[]{"Console","Stream","Display","Discord"},new[]{"Sharing","Devices"},new[]{"Network","Quality"}
+        };
+        int sessionVideoKbps;
         bool refreshingDisplays;
         readonly Brush mint = new SolidColorBrush(Color.FromRgb(143,230,208));
         readonly Brush dark = new SolidColorBrush(Color.FromRgb(16,39,37));
@@ -98,6 +105,7 @@ namespace Cadrivect
             },delegate(bool enabled){comparing=enabled; if(rendering!=null) engine.Compare(enabled);});
             UI<Border>("MeterHost").Child=meter;
             var saved = ReadSettings();
+            InitDiscord(saved);
             var output=UI<ComboBox>("PlaybackDisplay");
             RefreshDisplays(Field(saved,"display"));
             var hostScreen=UI<ComboBox>("HostDisplay");
@@ -134,15 +142,29 @@ namespace Cadrivect
             timer.Tick+=delegate {Tick();};
             UI<ComboBox>("DirectFps").ItemsSource=new[]{"60 FPS","30 FPS"};
             UI<ComboBox>("DirectFps").SelectedIndex=ParseIndex(saved,"directFps",0,2);
+            var directRate=UI<ComboBox>("DirectBitrate");
+            directRate.ItemsSource=directRates.Select(rate=>rate+" Mbps").ToArray();
+            directRate.SelectedIndex=RateIndex(saved,"directMbps",directRates,100);
+            directRate.SelectionChanged+=delegate {if(!Active && !preparing) meter.SetRequestedVideoKbps(source=="Direct"?DirectKbps():0);};
+            var relayRate=UI<ComboBox>("NetworkBitrate");
+            relayRate.ItemsSource=networkRates.Select(rate=>rate==0?"Use video preset":rate+" Mbps").ToArray();
+            relayRate.SelectedIndex=RateIndex(saved,"relayMbps",networkRates,500);
+            UI<ComboBox>("NetworkAudio").ItemsSource=new[]{"Use client settings","Stereo","5.1 surround","7.1 surround"};
+            UI<ComboBox>("NetworkAudio").SelectedIndex=ParseIndex(saved,"audioLayout",0,audioLayouts.Length);
+            foreach(var group in settingsGroups)
+                foreach(var key in group) UI<Button>(key+"Group").Click+=delegate {SelectGroup(group,key);};
+            SelectGroup(settingsGroups[1],"Sharing"); SelectGroup(settingsGroups[2],"Network");
+            InitStopChoices(saved);
             object rawAddresses;
             if(saved.TryGetValue("consoleAddresses",out rawAddresses) && rawAddresses is Dictionary<string,object>)
                 foreach(var row in (Dictionary<string,object>)rawAddresses) consoleAddresses[row.Key]=Convert.ToString(row.Value);
             UI<ComboBox>("ConsolePicker").SelectionChanged+=delegate {
                 var c=UI<ComboBox>("ConsolePicker").SelectedItem as DirectConsole;
+                RefreshStopChoice();
                 string remembered;
                 if(c!=null) UI<TextBox>("ConsoleAddress").Text=consoleAddresses.TryGetValue(c.Mac,out remembered)?remembered:c.Address??"";
             };
-            ReloadConsoles(Field(saved,"consoleMac"));
+            ReloadConsoles(Field(saved,"consoleMac")); RefreshStopChoice();
             UI<TextBox>("HostAddress").Text = Field(saved, "address");
             var addresses = BindAddresses().ToList();
             UI<ComboBox>("BindIP").ItemsSource = addresses;
@@ -158,17 +180,18 @@ namespace Cadrivect
             UI<Button>("AddConsole").Click+=delegate {OpenPair();};
             UI<Button>("CancelPair").Click+=delegate {SetPage("Play");};
             UI<Button>("OpenSource").Click+=async delegate {
-                if(Active || preparing) StopPlayback(); else await StartPlayback();
+                if(Active || preparing) await UserStop(); else await StartPlayback();
             };
             UI<Button>("Fullscreen").Click+=delegate {ToggleFullscreen();};
             UI<Button>("ShowStats").Click+=delegate {ToggleStats();};
-            window.PreviewKeyDown+=delegate(object sender,KeyEventArgs e) {
+            window.PreviewKeyDown+=async delegate(object sender,KeyEventArgs e) {
                 bool chord=(Keyboard.Modifiers & (ModifierKeys.Control|ModifierKeys.Alt))==(ModifierKeys.Control|ModifierKeys.Alt);
                 var key=e.Key==Key.System?e.SystemKey:e.Key;
                 if(key==Key.F11 || (chord && key==Key.Enter)) ToggleFullscreen();
                 else if(chord && key==Key.O) ToggleStats();
-                else if(chord && key==Key.Q) StopPlayback();
+                else if(chord && key==Key.Q) {e.Handled=true; await UserStop(); return;}
                 else if(chord && key==Key.B && rendering!=null) {comparing=!comparing; engine.Compare(comparing);}
+                else if(key==Key.Escape && UI<StackPanel>("StopPanel").IsVisible && !requestingRest) SetPage("Play");
                 else if(key==Key.Escape && UI<StackPanel>("PairPanel").IsVisible) SetPage("Play");
                 else if(key==Key.Escape && fullscreen) ToggleFullscreen();
                 else return;
@@ -218,7 +241,7 @@ namespace Cadrivect
                 if(!closing) {SaveSettings(); closing=true; StopPlayback();}
                 if(rendering!=null || preparing) e.Cancel=true;
             };
-            window.Closed+=delegate {timer.Stop();};
+            window.Closed+=delegate {timer.Stop(); if(discord!=null) discord.Dispose();};
         }
         static void StopOwned(Process p)
         {
@@ -341,6 +364,7 @@ namespace Cadrivect
         void SetPage(string value)
         {
             page = value;
+            UI<StackPanel>("StopPanel").Visibility=Visibility.Collapsed;
             pendingRevocation=null;
             UI<StackPanel>("PairPanel").Visibility=Visibility.Collapsed;
             UI<TextBox>("PairCode").Clear(); UI<TextBox>("PsnAccount").Clear();
@@ -352,11 +376,33 @@ namespace Cadrivect
             }
         }
 
+        static int RateIndex(Dictionary<string,object> saved,string key,int[] rates,int fallback)
+        {
+            int rate;
+            int index=int.TryParse(Field(saved,key),out rate)?Array.IndexOf(rates,rate):-1;
+            return index>=0?index:Array.IndexOf(rates,fallback);
+        }
+        int DirectKbps() {return directRates[UI<ComboBox>("DirectBitrate").SelectedIndex]*1000;}
+        void SelectGroup(string[] group,string selected)
+        {
+            foreach(var key in group) {
+                bool on=key==selected;
+                UI<FrameworkElement>(key+"Settings").Visibility=on?Visibility.Visible:Visibility.Collapsed;
+                var button=UI<Button>(key+"Group");
+                button.Background=on?dark:grey; button.Foreground=on?mint:light;
+                button.BorderBrush=on?mint:grey;
+                button.FontWeight=on?FontWeights.SemiBold:FontWeights.Normal;
+                System.Windows.Automation.AutomationProperties.SetItemStatus(button,on?"Selected":"");
+            }
+        }
         void SetSource(string value)
         {
             source = value;
             meter.SetSource(value);
-            UI<Border>("DirectCard").Visibility=value=="Direct"?Visibility.Visible:Visibility.Collapsed;
+            bool direct=value=="Direct";
+            UI<Button>("ConsoleGroup").Visibility=UI<Button>("StreamGroup").Visibility=direct?Visibility.Visible:Visibility.Collapsed;
+            SelectGroup(settingsGroups[0],direct?"Console":"Display");
+            meter.SetRequestedVideoKbps(direct?DirectKbps():0);
             UpdateTransport();
         }
         void OpenPair()
@@ -447,7 +493,8 @@ namespace Cadrivect
                 Directory.CreateDirectory(Path.GetDirectoryName(preferences));
                 var hostTarget=UI<ComboBox>("HostDisplay").SelectedItem as DisplayTarget;
                 var console=UI<ComboBox>("ConsolePicker").SelectedItem as DirectConsole;
-                var settings = new { pictureDefaults=1, mode=mode, multiplier=factor-1,
+                var settings = new { discordPresence=UI<CheckBox>("SharePresence").IsChecked==true,
+                    discordGame=UI<CheckBox>("ShareGame").IsChecked==true,discordProject=UI<CheckBox>("ShareProject").IsChecked==true,stopChoices=stopChoices,directMbps=DirectKbps()/1000, relayMbps=networkRates[UI<ComboBox>("NetworkBitrate").SelectedIndex],audioLayout=UI<ComboBox>("NetworkAudio").SelectedIndex,pictureDefaults=1, mode=mode, multiplier=factor-1,
                     consoleMac=console==null?"":console.Mac,consoleAddresses=consoleAddresses,directFps=UI<ComboBox>("DirectFps").SelectedIndex,
                     display=SelectedDisplayName(), resolution=UI<ComboBox>("RenderResolution").SelectedIndex,hdr=UI<ComboBox>("HdrOutput").SelectedIndex,
                     maximized=(fullscreen?previousWindowState:window.WindowState)==WindowState.Maximized,

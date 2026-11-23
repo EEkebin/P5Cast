@@ -6,6 +6,7 @@
 #include <ctype.h>
 #include <io.h>
 #include <fcntl.h>
+#include <ws2tcpip.h>
 
 typedef struct {
     ChiakiSession session;
@@ -13,9 +14,10 @@ typedef struct {
     Audio audio;
     Gamepad gamepad;
     ChiakiOpusDecoder opus;
+    RestControl rest;
     uint8_t pin[4];
-    bool has_pin;
-    volatile LONG status, rumble, rtt_us;
+    bool has_pin, report_peer;
+    volatile LONG status, rumble, rtt_us, connected;
 } Direct;
 
 static void finish(Direct *core, LONG status)
@@ -29,6 +31,16 @@ static void session_event(ChiakiEvent *event, void *user)
     Direct *core = user;
     switch (event->type) {
         case CHIAKI_EVENT_CONNECTED: {
+            InterlockedExchange(&core->connected, 1);
+            // Only the owning dashboard's redirected stream receives this numeric endpoint.
+            struct addrinfo *peer = core->session.connect_info.host_addrinfo_selected;
+            if (core->report_peer && peer) {
+                char address[NI_MAXHOST];
+                if (!getnameinfo(peer->ai_addr, (socklen_t)peer->ai_addrlen, address, sizeof(address), NULL, 0, NI_NUMERICHOST)) {
+                    fprintf(stdout, "PEER %s\n", address);
+                    fflush(stdout);
+                }
+            }
             uint64_t rtt = core->session.rtt_us;
             if (rtt && rtt != 1000 && rtt < UINT32_MAX) InterlockedExchange(&core->rtt_us, (LONG)rtt);
             break;
@@ -42,6 +54,7 @@ static void session_event(ChiakiEvent *event, void *user)
             InterlockedExchange(&core->rumble, 0x10000 | (event->rumble.left << 8) | event->rumble.right);
             break;
         case CHIAKI_EVENT_QUIT:
+            InterlockedExchange(&core->connected, 0);
             finish(core, chiaki_quit_reason_is_error(event->quit.reason) ? 23 : 0);
             break;
         default: break;
@@ -105,9 +118,8 @@ static int run(Direct *core, const char *pipe_name, ChiakiConnectInfo *info)
     SecureZeroMemory(info->regist_key, sizeof(info->regist_key));
     SecureZeroMemory(info->morning, sizeof(info->morning));
     chiaki_opus_decoder_init(&core->opus, &log);
-    chiaki_opus_decoder_set_cb(&core->opus, audio_settings, audio_frame, &core->audio);
     ChiakiAudioSink sink;
-    chiaki_opus_decoder_get_sink(&core->opus, &sink);
+    audio_decoder_sink(&core->audio, &core->opus, &sink);
     chiaki_session_set_audio_sink(&core->session, &sink);
     ChiakiCtrlDisplaySink display = {0};
     display.user = core;
@@ -120,16 +132,18 @@ static int run(Direct *core, const char *pipe_name, ChiakiConnectInfo *info)
     if (chiaki_session_start(&core->session) == CHIAKI_ERR_SUCCESS) {
         uint64_t next_stats = GetTickCount64() + 1000;
         while (WaitForSingleObject(core->video.stop, 4) == WAIT_TIMEOUT) {
+            rest_tick(&core->rest, InterlockedCompareExchange(&core->connected, 0, 0) != 0,
+                      &core->session, chiaki_session_goto_bed);
             if (gamepad_tick(&core->gamepad)) chiaki_session_set_controller_state(&core->session, &core->gamepad.current);
             LONG rumble = InterlockedExchange(&core->rumble, 0);
             if (rumble && core->gamepad.pad) SDL_GameControllerRumble(core->gamepad.pad, ((rumble >> 8) & 255) * 257, (rumble & 255) * 257, 500);
             if (InterlockedCompareExchange(&core->audio.failed, 0, 0)) { finish(core, 26); break; }
             if (GetTickCount64() >= next_stats) {
-                uint32_t stats[4];
-                audio_stats(&core->audio, &stats[0], &stats[1]);
-                stats[2] = (uint32_t)InterlockedCompareExchange(&core->rtt_us, 0, 0);
-                stats[3] = DIRECT_AUDIO_TARGET_US;
-                video_stats(&core->video, stats);
+                DirectMetrics stats = {0};
+                audio_stats(&core->audio, GetTickCount64(), &stats);
+                stats.rtt_us = (uint32_t)InterlockedCompareExchange(&core->rtt_us, 0, 0);
+                stats.target_us = DIRECT_AUDIO_TARGET_US;
+                video_stats(&core->video, &stats);
                 next_stats = GetTickCount64() + 1000;
             }
         }
@@ -145,25 +159,31 @@ static int run(Direct *core, const char *pipe_name, ChiakiConnectInfo *info)
 #undef main
 int main(int argc, char **argv)
 {
-    if (argc == 2 && !strcmp(argv[1], "--version")) { puts("CadrivectDirect 1 / libchiaki 1.10.1 / CDV1"); return 0; }
+    if (argc == 2 && !strcmp(argv[1], "--version")) { puts("CadrivectDirect / libchiaki 1.10.1 / CDV1 + CDV2"); return 0; }
     if (argc == 3 && !strcmp(argv[1], "--register")) return register_console(argv[2]);
-    if (argc < 4 || argc > 5 || strlen(argv[3]) != 1 || argv[3][0] < '1' || argv[3][0] > '3') return 20;
-    if (argc == 5 && strcmp(argv[4], "30") && strcmp(argv[4], "60")) return 20;
+    if (argc < 4 || argc > 7 || strlen(argv[3]) != 1 || (argc == 7 && strcmp(argv[6], "--rest-control"))) return 20;
+    ChiakiConnectInfo info = {0};
+    if (!video_profile(&info.video_profile, argv[3][0] - '0', argc >= 5 ? argv[4] : NULL, argc >= 6 ? argv[5] : NULL)) return 20;
     Direct core = {0};
     core.rtt_us = -1;
     core.video.pipe = INVALID_HANDLE_VALUE;
     core.video.codec = argv[3][0] - '0';
+    core.video.extended_stats = argc >= 6;
     core.video.stop = CreateEventW(NULL, TRUE, FALSE, NULL);
     if (!core.video.stop) return 22;
-    ChiakiConnectInfo info = {0};
     info.host = argv[2];
     info.ps5 = true;
     info.packet_loss_max = 0.05;
     info.enable_idr_on_fec_failure = true;
-    chiaki_connect_video_profile_preset(&info.video_profile, CHIAKI_VIDEO_RESOLUTION_PRESET_1080p,
-        argc == 5 && !strcmp(argv[4], "30") ? CHIAKI_VIDEO_FPS_PRESET_30 : CHIAKI_VIDEO_FPS_PRESET_60);
-    info.video_profile.codec = (ChiakiCodec)(core.video.codec - 1);
-    int status = read_auth(&info, &core) ? run(&core, argv[1], &info) : 20;
+    int status = 20;
+    if (read_auth(&info, &core)) {
+        if (argc == 7) {
+            rest_open(&core.rest, argv[1]);
+            core.report_peer = GetFileType(GetStdHandle(STD_OUTPUT_HANDLE)) == FILE_TYPE_PIPE;
+        }
+        status = run(&core, argv[1], &info);
+    }
+    rest_close(&core.rest);
     if (core.audio.device) SDL_CloseAudioDevice(core.audio.device);
     if (core.gamepad.pad) SDL_GameControllerClose(core.gamepad.pad);
     SDL_Quit();

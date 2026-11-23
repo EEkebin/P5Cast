@@ -15,6 +15,23 @@ using Rectangle=System.Drawing.Rectangle;
 
 internal sealed class DirectVideo : IDisposable
 {
+    internal sealed class AudioTelemetry
+    {
+        public readonly double QueueMs=-1, TargetMs=-1, RttMs=-1, BitrateKbps=-1;
+        public readonly long Underruns=-1, SampleRate=-1, Channels=-1;
+        public AudioTelemetry() { }
+        public AudioTelemetry(BinaryReader input,bool extended) {
+            QueueMs=Scaled(input,1000); Underruns=Value(input); RttMs=Scaled(input,1000); TargetMs=Scaled(input,1000);
+            if(extended) {
+                // CDV2 appends measured Opus payload bits/s, negotiated sample rate and channel count.
+                BitrateKbps=Scaled(input,1000); SampleRate=Value(input); Channels=Value(input);
+                if(SampleRate==0) SampleRate=-1;
+                if(Channels==0) Channels=-1;
+            }
+        }
+        static long Value(BinaryReader input) { uint raw=input.ReadUInt32(); return raw==uint.MaxValue ? -1L:raw; }
+        static double Scaled(BinaryReader input,double divisor) { long raw=Value(input); return raw<0 ? -1:raw/divisor; }
+    }
     [StructLayout(LayoutKind.Sequential)]
     internal struct Picture {
         public IntPtr Y,U,V;
@@ -36,7 +53,8 @@ internal sealed class DirectVideo : IDisposable
     double arrival;
     volatile bool closed,stopping;
     volatile string error="",codec="";
-    int audioUs=-1,audioTarget=-1,rttUs=-1,underruns=-1,decodeUs=-1,rateKbps;
+    volatile AudioTelemetry audio=new AudioTelemetry();
+    int decodeUs=-1,rateKbps;
     int codecId;
     public bool Closed { get { lock(gate) return closed && pending==IntPtr.Zero; } }
     public string Error { get { return error; } }
@@ -44,10 +62,11 @@ internal sealed class DirectVideo : IDisposable
     public Size StreamSize { get { lock(gate) return new Size(picture.Width,picture.Height); } }
     public double BitrateMbps { get { return Volatile.Read(ref rateKbps)/1000.0; } }
     public double DecodeMs { get {return Millis(ref decodeUs);} }
-    public double AudioQueueMs { get {return Millis(ref audioUs);} }
-    public double AudioTargetMs { get {return Millis(ref audioTarget);} }
-    public double NetworkRttMs { get {return Millis(ref rttUs);} }
-    public long AudioUnderruns { get {return Volatile.Read(ref underruns);} }
+    public AudioTelemetry Audio { get {return audio;} }
+    public double AudioQueueMs { get {return audio.QueueMs;} }
+    public double AudioTargetMs { get {return audio.TargetMs;} }
+    public double NetworkRttMs { get {return audio.RttMs;} }
+    public long AudioUnderruns { get {return audio.Underruns;} }
     static double Millis(ref int us) {int value=Volatile.Read(ref us); return value<0 ? -1 : value/1000.0;}
     public DirectVideo(string name,string runtimeDir)
     {
@@ -63,7 +82,8 @@ internal sealed class DirectVideo : IDisposable
         try {
             pipe.EndWaitForConnection(pipe.BeginWaitForConnection(null,null));
             var reader=new BinaryReader(pipe);
-            if(reader.ReadUInt32()!=0x31564443) throw new InvalidDataException("Unexpected direct video stream.");
+            uint version=reader.ReadUInt32();
+            if(version!=0x31564443 && version!=0x32564443) throw new InvalidDataException("Unexpected direct video stream.");
             codecId=reader.ReadInt32();
             if(codecId<1 || codecId>3) throw new InvalidDataException("Unknown console codec.");
             codec=codecId==1 ? "H.264" : codecId==2 ? "HEVC" : "HEVC HDR";
@@ -73,10 +93,7 @@ internal sealed class DirectVideo : IDisposable
             while(!stopping) {
                 int length=reader.ReadInt32();
                 if(length==0) {
-                    Volatile.Write(ref audioUs,reader.ReadInt32());
-                    Volatile.Write(ref underruns,reader.ReadInt32());
-                    Volatile.Write(ref rttUs,reader.ReadInt32());
-                    Volatile.Write(ref audioTarget,reader.ReadInt32());
+                    audio=new AudioTelemetry(reader,version==0x32564443);
                     continue;
                 }
                 if(length<0 || length>16*1024*1024) throw new InvalidDataException("Invalid console video packet size.");

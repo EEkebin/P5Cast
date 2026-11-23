@@ -7,7 +7,8 @@ param(
     [guid] $ClientId,
     [ValidateSet('720','1080','1440','4K')][string] $Resolution,
     [ValidateRange(10,240)][int] $Fps,
-    [ValidateRange(1,250)][int] $Mbps,
+    [ValidateRange(1,500)][int] $Mbps,
+    [ValidateSet('stereo','5.1-surround','7.1-surround')][string] $AudioLayout,
     [ValidateSet('auto','H.264','HEVC','AV1')][string] $Codec,
     [ValidatePattern('^\\\\\.\\DISPLAY[1-9][0-9]*$')][string] $DisplayDevice,
     [switch] $Hdr,
@@ -293,6 +294,7 @@ function Start-RelayClient {
         if ($Resolution) { $arguments += "--$Resolution" }
         if ($Fps) { $arguments += @('--fps',"$Fps") }
         if ($Mbps) { $arguments += @('--bitrate',([string]($Mbps*1000))) }
+        if ($AudioLayout) { $arguments += @('--audio-config',$AudioLayout) }
         if ($Codec) { $arguments += @('--video-codec',$Codec) }
         if ($Hdr) { $arguments += '--hdr' }
         if ($Windowed -or $Action -eq 'PreparePlay') { $arguments += @('--display-mode','windowed') }

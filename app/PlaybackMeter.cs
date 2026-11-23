@@ -6,6 +6,8 @@ using System.Windows.Automation;
 using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Data;
+using System.Windows.Markup;
 using System.Windows.Media;
 using System.Windows.Shapes;
 
@@ -20,6 +22,22 @@ namespace Cadrivect
         static readonly Brush Ink=ColorBrush("#E9F3F1"), Muted=ColorBrush("#A5B9BB"), Line=ColorBrush("#304147"), Dark=ColorBrush("#141F24");
         static readonly Brush[] Series={ColorBrush("#ADBBC0"),ColorBrush("#8DBAF6"),ColorBrush("#8FE6D0"),ColorBrush("#EABC8E")};
         static readonly ControlTemplate ChipTemplate=MakeChipTemplate();
+        static readonly ControlTemplate GroupTemplate=MakeGroupTemplate();
+        static readonly Style ScrollBarStyle=(Style)XamlReader.Parse(
+            @"<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='ScrollBar'>
+                <Setter Property='Width' Value='9'/>
+                <Setter Property='Template'><Setter.Value><ControlTemplate TargetType='ScrollBar'>
+                  <Border Background='#141F24' Padding='2,3'>
+                    <Track Name='PART_Track' Orientation='Vertical' IsDirectionReversed='True'>
+                      <Track.DecreaseRepeatButton><RepeatButton Command='ScrollBar.PageUpCommand' Opacity='0'/></Track.DecreaseRepeatButton>
+                      <Track.Thumb><Thumb MinHeight='18'><Thumb.Template><ControlTemplate TargetType='Thumb'>
+                        <Border Background='#52696E' CornerRadius='3' Width='5' HorizontalAlignment='Center'/>
+                      </ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
+                      <Track.IncreaseRepeatButton><RepeatButton Command='ScrollBar.PageDownCommand' Opacity='0'/></Track.IncreaseRepeatButton>
+                    </Track>
+                  </Border>
+                </ControlTemplate></Setter.Value></Setter>
+              </Style>");
         readonly Action<int,int> change;
         readonly Action<bool> compare;
         readonly RadioButton[] modes=new RadioButton[6], factors=new RadioButton[4];
@@ -30,7 +48,8 @@ namespace Cadrivect
         readonly FrameRateDial dial=new FrameRateDial();
         Dictionary<string,object> gpu;
         int selectedMode,selectedFactor=1;
-        bool syncing,hdr;
+        bool syncing,hdr,directSelected;
+        int requestedVideoKbps;
         long lastSample=-1;
         DateTime pendingSettings,pendingCompare;
 
@@ -39,32 +58,26 @@ namespace Cadrivect
             this.change=change; this.compare=compare;
             UseLayoutRounding=true; SnapsToDevicePixels=true; Background=Dark;
             Foreground=Ink; FontFamily=new FontFamily("Segoe UI"); FontSize=12;
-            var body=new StackPanel {Margin=new Thickness(16,14,16,14)};
+            var layout=new DockPanel();
+            var fixedMeter=new StackPanel {Margin=new Thickness(16,14,16,0)};
+            DockPanel.SetDock(fixedMeter,Dock.Top); layout.Children.Add(fixedMeter);
+            var sections=new StackPanel {Margin=new Thickness(16,0,12,14)};
             var title=Heading("Frame rate"); title.Margin=new Thickness(0);
             var heading=new DockPanel();
             targetValue=Label("Target —",Muted,11,FontWeights.SemiBold);
             targetValue.ToolTip="The white tick marks the requested output frame rate.";
             DockPanel.SetDock(targetValue,Dock.Right);
-            heading.Children.Add(targetValue); heading.Children.Add(title); body.Children.Add(heading);
-            dial.Height=133; dial.Margin=new Thickness(0,2,0,6); body.Children.Add(dial);
-            var legend=new UniformGrid {Rows=1,Columns=2}; body.Children.Add(legend);
+            heading.Children.Add(targetValue); heading.Children.Add(title); fixedMeter.Children.Add(heading);
+            dial.Height=133; dial.Margin=new Thickness(0,2,0,6); fixedMeter.Children.Add(dial);
+            var legend=new UniformGrid {Rows=1,Columns=2}; fixedMeter.Children.Add(legend);
             sourceLabel=Label("Source",Muted,11,FontWeights.Normal);
             sourceValue=RateReadout(legend,sourceLabel,Series[1],"Frames received each second from the selected source.");
             addedValue=RateReadout(legend,Label("Added",Muted,11,FontWeights.Normal),Series[3],"Extra frames P5Cast created and sent to the screen each second.");
-            Separator(body);
-            body.Children.Add(Heading("Stream"));
-            AddMetric(body,"size","Input → output","Incoming frame size and presentation surface size in pixels.");
-            AddMetric(body,"format","Video format","Source codec and active output color mode.");
-            AddMetric(body,"bitrate","Video bitrate","Measured incoming compressed video rate.");
-            AddMetric(body,"decode","Video decode","Time spent decoding the latest video frame.");
-            submitLabel=AddMetric(body,"submit","Receive → submit","Local receipt of a compressed frame to submission for presentation.");
-            AddMetric(body,"queue","Audio queue","Duration of queued local audio.");
-            AddMetric(body,"rtt","Handshake RTT","Round-trip estimate from session setup.");
-            Separator(body);
-            body.Children.Add(Heading("Picture"));
+            Separator(fixedMeter);
+            var picture=AddGroup(sections,"Picture","PictureGroup");
             string group=Guid.NewGuid().ToString("N");
             var modeGrid=new UniformGrid {Rows=3,Columns=2,Margin=new Thickness(-2,1,-2,0)};
-            body.Children.Add(modeGrid);
+            picture.Children.Add(modeGrid);
             for(int i=0;i<6;i++)
             {
                 var button=new RadioButton {GroupName="Picture"+group,Content=ModeLabels[i],Template=ChipTemplate};
@@ -76,9 +89,9 @@ namespace Cadrivect
                 modeGrid.Children.Add(button);
             }
             var interpolation=Label("Frame interpolation",Muted,11,FontWeights.SemiBold);
-            interpolation.Margin=new Thickness(0,9,0,2); body.Children.Add(interpolation);
+            interpolation.Margin=new Thickness(0,9,0,2); picture.Children.Add(interpolation);
             var factorGrid=new UniformGrid {Rows=1,Columns=4,Margin=new Thickness(-2,0,-2,0)};
-            body.Children.Add(factorGrid);
+            picture.Children.Add(factorGrid);
             for(int i=0;i<4;i++)
             {
                 int factor=i+1;
@@ -90,20 +103,45 @@ namespace Cadrivect
             }
             compareButton=new ToggleButton {Content="Compare original",Template=ChipTemplate,
                 ToolTip="Temporarily show the original picture with interpolation off."};
-            StyleChip(compareButton); compareButton.Margin=new Thickness(0,8,0,0); body.Children.Add(compareButton);
+            StyleChip(compareButton); compareButton.Margin=new Thickness(0,8,0,0); picture.Children.Add(compareButton);
             compareButton.Click+=delegate {
                 if(syncing) return;
                 pendingCompare=DateTime.UtcNow.AddSeconds(2); if(compare!=null) compare(compareButton.IsChecked==true);
             };
             notice=Label("",Series[3],11,FontWeights.Normal); notice.TextWrapping=TextWrapping.Wrap; notice.Margin=new Thickness(0,5,0,0);
-            notice.Visibility=Visibility.Collapsed; body.Children.Add(notice);
-            Content=new ScrollViewer {Content=body,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};
+            notice.Visibility=Visibility.Collapsed; picture.Children.Add(notice);
+            Separator(sections);
+            var diagnostics=AddGroup(sections,"Stream diagnostics","StreamDiagnosticsGroup");
+            Subheading(diagnostics,"Video");
+            AddMetric(diagnostics,"size","Input → output","Incoming frame size and presentation surface size in pixels.");
+            AddMetric(diagnostics,"format","Video format","Source codec and active output color mode.");
+            AddMetric(diagnostics,"requested","Requested bitrate","Configured bitrate requested from the PS5 when connecting.");
+            AddMetric(diagnostics,"bitrate","Received bitrate","Measured compressed video arriving from the PS5.");
+            AddMetric(diagnostics,"decode","Video decode","Time spent decoding the latest video frame.");
+            submitLabel=AddMetric(diagnostics,"submit","Receive → submit","Time from local frame receipt or capture to submission for presentation.");
+            Subheading(diagnostics,"Audio");
+            AddMetric(diagnostics,"audioFormat","Stream format","Negotiated sample rate and channel count for the incoming audio.");
+            AddMetric(diagnostics,"audioBitrate","Received bitrate","Measured compressed audio arriving from the PS5.");
+            AddMetric(diagnostics,"queue","Audio queue","Audio buffered locally, excluding the Windows mixer and device buffers.");
+            AddMetric(diagnostics,"audioTarget","Queue target","Requested local audio preroll.");
+            AddMetric(diagnostics,"underruns","Queue underruns","Observed audio queue underruns during the session.");
+            Subheading(diagnostics,"Network");
+            AddMetric(diagnostics,"rtt","Handshake RTT","Round-trip estimate from session setup.");
+            var scrolling=new ScrollViewer {Content=sections,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};
+            scrolling.Resources.Add(typeof(ScrollBar),ScrollBarStyle);
+            layout.Children.Add(scrolling);
+            Content=layout;
             Reset(0,1);
         }
         public void SetSource(string source)
         {
+            directSelected=source=="Direct";
             sourceLabel.Text=source=="Direct"?"From PS5":source=="Sony"?"From Sony app":"From demo";
+            submitLabel.Text=directSelected ? "Receive → submit" : source=="Sony" ? "Capture → submit" : "Frame → submit";
+            ShowRequested(directSelected);
         }
+        public void SetRequestedVideoKbps(int kbps) {requestedVideoKbps=Math.Max(0,kbps); ShowRequested(directSelected);}
+        void ShowRequested(bool direct) {values["requested"].Text=direct && requestedVideoKbps>0 ? Metric(requestedVideoKbps/1000.0," Mb/s","0.##") : "—";}
         static TextBlock RateReadout(Panel legend,TextBlock caption,Brush color,string detail)
         {
             var cell=new DockPanel {Margin=new Thickness(0,1,9,2),ToolTip=detail};
@@ -131,6 +169,49 @@ namespace Cadrivect
         {
             body.Children.Add(new Border {Height=1,Background=Line,Margin=new Thickness(0,10,0,9)});
         }
+        static StackPanel AddGroup(Panel parent,string title,string id)
+        {
+            var content=new StackPanel();
+            var group=new Expander {Header=title,Content=content,IsExpanded=true,Template=GroupTemplate};
+            AutomationProperties.SetName(group,title); AutomationProperties.SetAutomationId(group,id);
+            parent.Children.Add(group); return content;
+        }
+        static void Subheading(Panel parent,string title)
+        {
+            var label=Label(title,Series[2],12,FontWeights.SemiBold);
+            label.Margin=new Thickness(0,8,0,2); parent.Children.Add(label);
+        }
+        static ControlTemplate MakeGroupTemplate()
+        {
+            var surface=new FrameworkElementFactory(typeof(Border),"Surface");
+            surface.SetValue(Border.BackgroundProperty,Brushes.Transparent); surface.SetValue(Border.CornerRadiusProperty,new CornerRadius(4));
+            surface.SetValue(Border.PaddingProperty,new Thickness(0,2,4,4));
+            var row=new FrameworkElementFactory(typeof(DockPanel)); surface.AppendChild(row);
+            var arrow=new FrameworkElementFactory(typeof(Path),"Arrow");
+            arrow.SetValue(DockPanel.DockProperty,Dock.Right); arrow.SetValue(FrameworkElement.VerticalAlignmentProperty,VerticalAlignment.Center);
+            arrow.SetValue(Shape.StrokeProperty,Muted); arrow.SetValue(Shape.StrokeThicknessProperty,1.6);
+            arrow.SetValue(Path.DataProperty,Geometry.Parse("M 3,1 L 8,6 L 3,11")); row.AppendChild(arrow);
+            var caption=new FrameworkElementFactory(typeof(ContentPresenter)); row.AppendChild(caption);
+            var titleTemplate=new ControlTemplate(typeof(ToggleButton)) {VisualTree=surface};
+            var open=new Trigger {Property=ToggleButton.IsCheckedProperty,Value=true};
+            open.Setters.Add(new Setter(Path.DataProperty,Geometry.Parse("M 1,3 L 6,8 L 11,3"),"Arrow")); titleTemplate.Triggers.Add(open);
+            var hover=new Trigger {Property=UIElement.IsMouseOverProperty,Value=true};
+            hover.Setters.Add(new Setter(Border.BackgroundProperty,ColorBrush("#213237"),"Surface")); titleTemplate.Triggers.Add(hover);
+
+            var stack=new FrameworkElementFactory(typeof(StackPanel));
+            var toggle=new FrameworkElementFactory(typeof(ToggleButton));
+            toggle.SetValue(Control.TemplateProperty,titleTemplate); toggle.SetValue(Control.ForegroundProperty,Ink);
+            toggle.SetValue(Control.FontSizeProperty,15.0); toggle.SetValue(Control.FontWeightProperty,FontWeights.SemiBold);
+            toggle.SetValue(ContentControl.ContentProperty,new TemplateBindingExtension(HeaderedContentControl.HeaderProperty));
+            toggle.SetBinding(ToggleButton.IsCheckedProperty,new Binding("IsExpanded") {RelativeSource=RelativeSource.TemplatedParent,Mode=BindingMode.TwoWay});
+            stack.AppendChild(toggle);
+            var body=new FrameworkElementFactory(typeof(ContentPresenter),"Body"); body.SetValue(ContentPresenter.ContentSourceProperty,"Content");
+            stack.AppendChild(body);
+            var template=new ControlTemplate(typeof(Expander)) {VisualTree=stack};
+            var collapsed=new Trigger {Property=Expander.IsExpandedProperty,Value=false};
+            collapsed.Setters.Add(new Setter(UIElement.VisibilityProperty,Visibility.Collapsed,"Body")); template.Triggers.Add(collapsed);
+            return template;
+        }
         TextBlock AddMetric(Panel body,string id,string name,string detail)
         {
             var row=new Grid {Margin=new Thickness(0,2,0,2),ToolTip=detail};
@@ -139,6 +220,7 @@ namespace Cadrivect
             var label=Label(name,Muted,11,FontWeights.Normal); row.Children.Add(label);
             var metric=Label("—",Ink,11,FontWeights.SemiBold); metric.Margin=new Thickness(5,0,0,0);
             metric.TextAlignment=TextAlignment.Right; metric.TextTrimming=TextTrimming.CharacterEllipsis;
+            AutomationProperties.SetAutomationId(metric,"Metric_"+id);
             Grid.SetColumn(metric,1); row.Children.Add(metric); values.Add(id,metric); body.Children.Add(row);
             return label;
         }
@@ -185,6 +267,7 @@ namespace Cadrivect
             hdr=false; lastSample=-1; pendingSettings=pendingCompare=DateTime.MinValue; dial.SetRates(double.NaN,double.NaN,double.NaN,double.NaN);
             sourceValue.Text=addedValue.Text="—"; targetValue.Text="Target —";
             foreach(var label in values.Values) label.Text="—";
+            ShowRequested(directSelected);
             notice.Visibility=Visibility.Collapsed; RefreshAvailability();
         }
         public void SetCapabilities(Dictionary<string,object> gpu)
@@ -252,11 +335,19 @@ namespace Cadrivect
             values["bitrate"].Text=Metric(Number(snapshot,"bitrateMbps")," Mb/s","0.0");
             values["decode"].Text=Metric(Number(snapshot,"decodeMs")," ms","0.0");
             string kind=Text(snapshot,"sourceKind");
+            double requestedKbps=Number(snapshot,"requestedVideoKbps");
+            if(requestedKbps>0 && requestedKbps<=int.MaxValue) requestedVideoKbps=(int)Math.Round(requestedKbps);
+            ShowRequested(kind==null ? directSelected : kind=="direct");
             submitLabel.Text=kind=="window" ? "Capture → submit" : kind=="demo" ? "Frame → submit" : "Receive → submit";
             values["submit"].Text=Metric(Number(snapshot,"lastPcSubmitMs")," ms","0.0");
             values["queue"].Text=Metric(Number(snapshot,"audioQueueMs")," ms","0.#");
-            ((Grid)values["queue"].Parent).ToolTip="Buffered locally. Target "+Metric(Number(snapshot,"audioTargetMs")," ms","0.#")+
-                " · Underruns "+Metric(Number(snapshot,"audioUnderruns"),"","0")+".";
+            values["audioBitrate"].Text=Metric(Number(snapshot,"audioBitrateKbps")," kb/s","0.#");
+            double sampleRate=Number(snapshot,"audioSampleRate"),channels=Number(snapshot,"audioChannels");
+            string format=sampleRate>0 ? Metric(sampleRate/1000.0," kHz","0.###") : "";
+            if(channels>0) format+=(format.Length==0 ? "" : " · ")+(channels==1 ? "Mono":channels==2 ? "Stereo":Metric(channels," ch","0"));
+            values["audioFormat"].Text=format.Length==0 ? "—" : format;
+            values["audioTarget"].Text=Metric(Number(snapshot,"audioTargetMs")," ms","0.#");
+            values["underruns"].Text=Metric(Number(snapshot,"audioUnderruns"),"","0");
             values["rtt"].Text=Metric(Number(snapshot,"handshakeRttMs")," ms","0.0");
             if(hdrFlag.HasValue && hdr!=hdrFlag.Value) {hdr=hdrFlag.Value; RefreshAvailability();}
             string requested=Text(snapshot,"mode"), effective=Text(snapshot,"effectivePictureMode");

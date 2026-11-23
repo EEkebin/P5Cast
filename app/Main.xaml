@@ -85,22 +85,48 @@
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <Grid Name="Pages" Margin="14,10">
         <StackPanel Name="PlayPage">
-          <Border Name="DirectCard" Margin="0,0,0,8">
-            <StackPanel>
-              <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="2*"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <Button Grid.Column="3" Name="AddConsole" Content="Add console" VerticalAlignment="Bottom" Margin="8,0,0,0"/>
-                <StackPanel Margin="0,0,12,0"><TextBlock Text="Paired console" Margin="0,0,0,5"/><ComboBox Name="ConsolePicker" Padding="6,5"/></StackPanel>
-                <StackPanel Grid.Column="1" Margin="0,0,12,0"><TextBlock Text="Console address" Margin="0,0,0,5"/><TextBox Name="ConsoleAddress" ToolTip="Local IP address or DNS name of your PS5"/></StackPanel>
-                <StackPanel Grid.Column="2"><TextBlock Text="Stream target" Margin="0,0,0,5"/><ComboBox Name="DirectFps" Padding="6,5"/></StackPanel>
-              </Grid>
-
-            </StackPanel>
-          </Border>
-              <Grid Margin="0,4,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <StackPanel Margin="0,0,12,0"><TextBlock Text="Playback display" Foreground="#B3C1C4" Margin="0,0,0,5"/><ComboBox Name="PlaybackDisplay" Padding="5" ToolTip="Switch the active player to this display."/></StackPanel>
-                <StackPanel Grid.Column="1" Margin="0,0,12,0"><TextBlock Text="Resolution" Foreground="#B3C1C4" Margin="0,0,0,5"/><ComboBox Name="RenderResolution" Padding="5"/></StackPanel>
-                <StackPanel Grid.Column="2" Margin="0,0,10,0"><TextBlock Text="Color output" Foreground="#B3C1C4" Margin="0,0,0,5"/><ComboBox Name="HdrOutput" Padding="5"/></StackPanel>
-              </Grid>
+          <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+            <Button Name="ConsoleGroup" Content="Console"/><Button Name="StreamGroup" Content="Stream quality"/><Button Name="DisplayGroup" Content="Display"/><Button Name="DiscordGroup" Content="Discord"/>
+          </StackPanel>
+          <Grid Name="ConsoleSettings">
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <StackPanel Margin="0,0,12,0"><TextBlock Text="Paired console" Margin="0,0,0,5"/><ComboBox Name="ConsolePicker"/></StackPanel>
+            <StackPanel Grid.Column="1" Margin="0,0,12,0"><TextBlock Text="Console address" Margin="0,0,0,5"/><TextBox Name="ConsoleAddress" ToolTip="Local IP address or DNS name of your PS5"/></StackPanel>
+            <Button Grid.Column="2" Name="AddConsole" Content="Add console" VerticalAlignment="Bottom"/>
+            <WrapPanel Grid.Row="1" Grid.ColumnSpan="3" Margin="0,8,0,0"><TextBlock Text="When I press Stop" VerticalAlignment="Center" Margin="0,0,9,0"/><ComboBox Name="StopBehavior" Width="182" ToolTip="Remembered separately for each paired console."/></WrapPanel>
+          </Grid>
+          <StackPanel Name="StreamSettings" Visibility="Collapsed">
+            <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+              <StackPanel Margin="0,0,12,0"><TextBlock Text="Requested video bitrate" Margin="0,0,0,5"/><ComboBox Name="DirectBitrate" ToolTip="Requested at connection time. The console adjusts the actual bitrate."/></StackPanel>
+              <StackPanel Grid.Column="1"><TextBlock Text="Frame rate" Margin="0,0,0,5"/><ComboBox Name="DirectFps"/></StackPanel>
+            </Grid>
+            <TextBlock Style="{StaticResource Detail}" Margin="0,6,0,0" Text="Changes apply on your next connection. The PS5 sets the Opus audio bitrate."/>
+          </StackPanel>
+          <Grid Name="DisplaySettings" Visibility="Collapsed"><Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+            <StackPanel Margin="0,0,12,0"><TextBlock Text="Playback display" Margin="0,0,0,5"/><ComboBox Name="PlaybackDisplay"/></StackPanel>
+            <StackPanel Grid.Column="1" Margin="0,0,12,0"><TextBlock Text="Render resolution" Margin="0,0,0,5"/><ComboBox Name="RenderResolution"/></StackPanel>
+            <StackPanel Grid.Column="2"><TextBlock Text="Color output" Margin="0,0,0,5"/><ComboBox Name="HdrOutput"/></StackPanel>
+          </Grid>
+          <StackPanel Name="DiscordSettings" Visibility="Collapsed">
+            <WrapPanel>
+              <CheckBox Name="SharePresence" Content="Show PS5 activity on Discord" Foreground="#E8F0F1" Margin="0,0,18,7"/>
+              <CheckBox Name="ShareProject" Content="Include private GitHub link" Foreground="#E8F0F1" Margin="0,0,0,7"/>
+            </WrapPanel>
+            <WrapPanel>
+              <CheckBox Name="ShareGame" Content="Show game title" Foreground="#E8F0F1" VerticalAlignment="Center" Margin="0,0,15,0"/>
+              <TextBlock Text="Title override" VerticalAlignment="Center" Margin="0,0,6,0"/>
+              <TextBox Name="GameTitle" Width="166" MaxLength="100" ToolTip="Optional title for this session. Direct can read the title if the PS5 supplies it."/>
+            </WrapPanel>
+            <TextBlock Name="DiscordState" Foreground="#B3C1C4" Margin="0,5,0,2"/>
+            <TextBlock Foreground="#B3C1C4" Text="To broadcast, join a Discord voice channel, choose Share Your Screen → Applications → P5Cast, and enable sound."/>
+          </StackPanel>
+        </StackPanel>
+        <StackPanel Name="StopPanel" Visibility="Collapsed">
+          <TextBlock Name="StopTitle" Text="Stop playing?" Style="{StaticResource Heading}" Margin="0,0,0,7"/>
+          <CheckBox Name="RestOnStop" Content="Put PS5 into rest mode" Foreground="#E8F0F1" Margin="0,0,0,6"/>
+          <CheckBox Name="RememberStop" Content="Remember my choice for this console" Foreground="#E8F0F1" Margin="0,0,0,9"/>
+          <StackPanel Orientation="Horizontal"><Button Name="ConfirmStop" Content="Stop session" Style="{StaticResource Primary}"/><Button Name="CancelStop" Content="Keep playing"/></StackPanel>
         </StackPanel>
         <StackPanel Name="PairPanel" Visibility="Collapsed">
           <TextBlock Text="Add console" Style="{StaticResource Heading}" Margin="0,0,0,2"/>
@@ -113,47 +139,36 @@
           <StackPanel Orientation="Horizontal" Margin="0,8,0,0"><Button Name="PairConsole" Content="Pair console" Style="{StaticResource Primary}"/><Button Name="CancelPair" Content="Cancel"/></StackPanel>
         </StackPanel>
         <StackPanel Name="HostPage" Visibility="Collapsed">
-          <TextBlock Text="Host a session" FontSize="34" FontWeight="SemiBold" Margin="0,0,0,4"/>
-          <TextBlock Style="{StaticResource Detail}" Text="Share this PC’s desktop and audio with a paired client. Sharing continues until you select Stop sharing." Margin="0,0,0,18"/>
-          <Border Style="{StaticResource Card}"><StackPanel>
-            <TextBlock Text="Listen on this PC" Style="{StaticResource Heading}"/>
-            <TextBlock Text="Home network or private VPN address" Style="{StaticResource Detail}" Margin="0,0,0,6"/>
-            <ComboBox Name="BindIP" Padding="6" MaxWidth="460" HorizontalAlignment="Left" MinWidth="260"/>
-            <TextBlock Text="Share this display" Style="{StaticResource Detail}" Margin="0,9,0,4"/>
-            <ComboBox Name="HostDisplay" Padding="6" MinWidth="260" HorizontalAlignment="Left"/>
-            <WrapPanel Margin="0,14,0,0"><Button Name="StartHost" Style="{StaticResource Primary}" Content="Start sharing"/><Button Name="StopHost" Content="Stop sharing"/><Button Name="HostStatus" Content="Check status"/></WrapPanel>
-            <TextBlock Name="HostState" Style="{StaticResource Detail}" Margin="0,12,0,0" Text="Check status to see the current host state."/>
-          </StackPanel></Border>
-          <Border Style="{StaticResource Card}"><StackPanel>
-            <TextBlock Text="Pair a client" Style="{StaticResource Heading}"/>
-            <TextBlock Style="{StaticResource Detail}" Text="On the other device, open Client and request pairing. Enter its four-digit PIN here." Margin="0,0,0,10"/>
-            <StackPanel Orientation="Horizontal"><TextBox Name="Pin" MaxLength="4" Width="88" Margin="0,0,10,0"/><Button Name="ApprovePin" Content="Approve PIN"/></StackPanel>
-          </StackPanel></Border>
-          <Expander Header="Manage paired clients" Foreground="#C7D8D8" Margin="0,0,0,14">
-            <WrapPanel Margin="4,10,0,0">
-              <Button Name="LoadPeers" Content="Load devices"/>
-              <ComboBox Name="Peers" DisplayMemberPath="Name" SelectedValuePath="Id" MinWidth="158" MaxWidth="260" Margin="0,0,8,0" Padding="6"/>
-              <Button Name="RemovePeer" Content="Revoke access"/>
-            </WrapPanel>
-          </Expander>
-          <Button Name="Controllers" Content="Controller driver setup ↗" HorizontalAlignment="Left"/>
+          <StackPanel Orientation="Horizontal" Margin="0,0,0,12"><Button Name="SharingGroup" Content="Sharing"/><Button Name="DevicesGroup" Content="Paired devices"/></StackPanel>
+          <StackPanel Name="SharingSettings">
+            <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+              <StackPanel Margin="0,0,12,0"><TextBlock Text="Listen on this network address" Margin="0,0,0,5"/><ComboBox Name="BindIP"/></StackPanel>
+              <StackPanel Grid.Column="1"><TextBlock Text="Display to share" Margin="0,0,0,5"/><ComboBox Name="HostDisplay"/></StackPanel>
+            </Grid>
+            <WrapPanel Margin="0,8,0,0"><Button Name="StartHost" Content="Start sharing" Style="{StaticResource Primary}"/><Button Name="StopHost" Content="Stop sharing"/><Button Name="HostStatus" Content="Check status"/></WrapPanel>
+            <TextBlock Name="HostState" Style="{StaticResource Detail}" Margin="0,4,0,0" Text="Sharing continues until you select Stop sharing."/>
+          </StackPanel>
+          <StackPanel Name="DevicesSettings" Visibility="Collapsed">
+            <TextBlock Text="Pair a client using its four-digit PIN" Margin="0,0,0,4"/>
+            <WrapPanel><TextBox Name="Pin" MaxLength="4" Width="86" Margin="0,0,8,0"/><Button Name="ApprovePin" Content="Approve PIN"/><Button Name="Controllers" Content="Controller driver setup &#8599;"/></WrapPanel>
+            <WrapPanel Margin="0,8,0,0"><Button Name="LoadPeers" Content="Load devices"/><ComboBox Name="Peers" DisplayMemberPath="Name" SelectedValuePath="Id" Width="166" Margin="0,0,8,0"/><Button Name="RemovePeer" Content="Revoke access"/></WrapPanel>
+          </StackPanel>
         </StackPanel>
         <StackPanel Name="ClientPage" Visibility="Collapsed">
-          <TextBlock Text="Connect to your host" FontSize="34" FontWeight="SemiBold" Margin="0,0,0,4"/>
-          <TextBlock Style="{StaticResource Detail}" Text="Play from another Windows PC. Use the host’s LAN address at home, or its private VPN address when you’re away." Margin="0,0,0,18"/>
-          <Border Style="{StaticResource Card}"><StackPanel>
-            <TextBlock Text="Host address" Style="{StaticResource Heading}"/>
-            <TextBox Name="HostAddress" Width="300" HorizontalAlignment="Left"/>
-            <WrapPanel Margin="0,15,0,0"><Button Name="ClientPair" Content="Pair with host"/><Button Name="ClientPlay" Style="{StaticResource Primary}" Content="Start stream"/></WrapPanel>
-          </StackPanel></Border>
-          <Border Style="{StaticResource Card}"><StackPanel>
-            <TextBlock Text="Stream quality" Style="{StaticResource Heading}"/>
-            <ComboBox Name="Quality" HorizontalAlignment="Left" MinWidth="320" Padding="6" Margin="0,0,0,10"/>
-            <CheckBox Name="ClientHdr" Foreground="#E8F0F1" Content="Request an HDR stream" Margin="0,0,0,10"/>
-            <TextBlock Style="{StaticResource Detail}" Text="HDR streaming requires support on both displays and the client decoder." Margin="0,0,0,12"/>
-
-          </StackPanel></Border>
-          <Button Name="DirectClient" Content="Play directly from my PS5" HorizontalAlignment="Left"/>
+          <StackPanel Orientation="Horizontal" Margin="0,0,0,12"><Button Name="NetworkGroup" Content="Connection"/><Button Name="QualityGroup" Content="Stream quality"/></StackPanel>
+          <StackPanel Name="NetworkSettings">
+            <TextBlock Text="Host PC address" Margin="0,0,0,4"/>
+            <WrapPanel><TextBox Name="HostAddress" Width="215" Margin="0,0,8,0" ToolTip="Use the host's LAN or private VPN address."/><Button Name="ClientPair" Content="Pair with host"/><Button Name="ClientPlay" Style="{StaticResource Primary}" Content="Start stream"/></WrapPanel>
+            <Button Name="DirectClient" Content="Play directly from my PS5" HorizontalAlignment="Left" Margin="0,8,0,0"/>
+          </StackPanel>
+          <StackPanel Name="QualitySettings" Visibility="Collapsed">
+            <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+              <StackPanel Margin="0,0,12,0"><TextBlock Text="Video preset" Margin="0,0,0,4"/><ComboBox Name="Quality"/></StackPanel>
+              <StackPanel Grid.Column="2"><TextBlock Text="Audio output" Margin="0,0,0,4"/><ComboBox Name="NetworkAudio"/></StackPanel>
+              <StackPanel Grid.Column="1" Margin="0,0,12,0"><TextBlock Text="Video bitrate" Margin="0,0,0,4"/><ComboBox Name="NetworkBitrate"/></StackPanel>
+            </Grid>
+            <CheckBox Name="ClientHdr" Foreground="#E8F0F1" Content="Request HDR" Margin="0,8,0,0"/>
+          </StackPanel>
         </StackPanel>
       </Grid>
         </ScrollViewer></Border>

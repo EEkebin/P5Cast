@@ -142,7 +142,8 @@ internal static class OverlayProbe
                     var json=new JavaScriptSerializer(); string live=Path.ChangeExtension(report,".live.json");
                     var snapshot=json.Deserialize<Dictionary<string,object>>(File.ReadAllText(live));
                     Check(Convert.ToInt32(snapshot["targetPresentedFps"])==60 && Convert.ToInt32(snapshot["audioQueueMs"])==12 &&
-                          Convert.ToDouble(snapshot["handshakeRttMs"])>3 && Convert.ToInt32(snapshot["generated"])>0,"Live telemetry snapshot did not update.");
+                          snapshot["audioBitrateKbps"]==null && snapshot["audioSampleRate"]==null && snapshot["audioChannels"]==null &&
+                          Convert.ToDouble(snapshot["handshakeRttMs"])>3 && Convert.ToInt32(snapshot["generated"])>0,"Legacy CDV1 telemetry or generated frame count is incorrect.");
                     Rect before,after; GetWindowRect(playerHwnd,out before);
                     SendMessage(playerHwnd,0x0312,new IntPtr(3),IntPtr.Zero);
                     Thread.Sleep(250); GetWindowRect(playerHwnd,out after);

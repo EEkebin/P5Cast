@@ -4,8 +4,12 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Runtime.CompilerServices;
+using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using Microsoft.Win32;
@@ -14,6 +18,72 @@ namespace Cadrivect
 {
     internal sealed class DirectConsole
     {
+        static readonly ConditionalWeakTable<Process,RestControl> restControls=new ConditionalWeakTable<Process,RestControl>();
+        sealed class RestControl : IDisposable
+        {
+            public readonly string Pipe;
+            readonly string prefix;
+            readonly EventWaitHandle[] events=new EventWaitHandle[3];
+            Task pending;
+            public RestControl(string pipe,int pid)
+            {
+                Pipe=pipe;
+                prefix="Local\\P5Cast.Rest."+pid.ToString(System.Globalization.CultureInfo.InvariantCulture)+"."+pipe+".";
+                var acl=new EventWaitHandleSecurity();
+                acl.SetAccessRuleProtection(true,false);
+                using(var user=WindowsIdentity.GetCurrent())
+                    acl.AddAccessRule(new EventWaitHandleAccessRule(user.User,EventWaitHandleRights.FullControl,AccessControlType.Allow));
+                try {
+                    string[] names={"request","accepted","rejected"};
+                    for(int i=0;i<names.Length;i++) {
+                        bool created;
+                        events[i]=new EventWaitHandle(false,EventResetMode.ManualReset,prefix+names[i],out created,acl);
+                        if(!created) throw new IOException("The console session controls are already in use.");
+                    }
+                } catch {Dispose(); throw;}
+            }
+            public Task Request(Process owned)
+            {
+                lock(this) {
+                    if(pending==null) {
+                        if(owned.HasExited) throw new InvalidOperationException("The Direct session has ended.");
+                        pending=Task.Run((Func<Task>)Send);
+                    }
+                    return pending;
+                }
+            }
+            async Task Send()
+            {
+                // Duplicate handles stay valid if the helper exits immediately after acknowledging.
+                using(var request=EventWaitHandle.OpenExisting(prefix+"request",EventWaitHandleRights.Modify))
+                using(var accepted=EventWaitHandle.OpenExisting(prefix+"accepted",EventWaitHandleRights.Synchronize))
+                using(var rejected=EventWaitHandle.OpenExisting(prefix+"rejected",EventWaitHandleRights.Synchronize)) {
+                    request.Set();
+                    try {
+                        int result=WaitHandle.WaitAny(new WaitHandle[]{accepted,rejected},4000);
+                        if(result==WaitHandle.WaitTimeout) throw new TimeoutException("The Direct session did not acknowledge the rest request.");
+                        if(result!=0) throw new InvalidOperationException("The Direct session could not queue the PS5 rest request.");
+                    } finally {request.Reset();}
+                }
+                // libchiaki's acknowledgement confirms local queueing. Keep the session alive while its control thread sends.
+                await Task.Delay(1500).ConfigureAwait(false);
+            }
+            public void Dispose()
+            {
+                foreach(var handle in events) if(handle!=null) handle.Dispose();
+            }
+        }
+        public static Task RequestRestAsync(string pipe,Process owned)
+        {
+            RestControl control;
+            if(owned==null || !restControls.TryGetValue(owned,out control) || pipe!=control.Pipe)
+                throw new InvalidOperationException("The Direct session is no longer active.");
+            return control.Request(owned);
+        }
+        public static Task<string> ReadGameTitleAsync(string address)
+        {
+            return DirectGameTitle.ReadAsync(address);
+        }
         public string Name { get; set; }
         public string Mac { get; set; }
         public string Address { get; set; }
@@ -145,13 +215,26 @@ namespace Cadrivect
             try {if(!p.HasExited) {p.Kill(); p.WaitForExit(2000);}} catch(InvalidOperationException) {}
             catch(System.ComponentModel.Win32Exception) {if(!p.HasExited) throw;}
         }
-        public Process Connect(string pipe,string host,int codec,int fps)
+        public Process Connect(string pipe,string host,int codec,int fps,int videoKbps=0)
         {
-            string arguments=pipe+" "+Host(host)+" "+codec+" "+fps;
+            if(videoKbps!=0 && (videoKbps<2000 || videoKbps>100000))
+                throw new ArgumentOutOfRangeException("videoKbps","Choose a video bitrate from 2 to 100 Mbps or the console profile default.");
+            if(string.IsNullOrEmpty(pipe) || pipe.Length>120 || pipe.Any(c=>!(c>='A' && c<='Z' || c>='a' && c<='z' || c>='0' && c<='9' || c=='-' || c=='_')))
+                throw new ArgumentException("Invalid Direct session pipe.");
+            string address=Host(host);
+            string arguments=pipe+" "+address+" "+codec+" "+fps+" "+videoKbps.ToString(System.Globalization.CultureInfo.InvariantCulture)+" --rest-control";
             byte[] secret=Keys(); Process p=null;
             try {
                 if(secret.Length!=32 && secret.Length!=36) throw new InvalidDataException("This registration needs to be paired again.");
-                p=Begin(arguments,false); WriteSecrets(p,secret); return p;
+                p=Begin(arguments,true);
+                var control=new RestControl(pipe,p.Id);
+                try {
+                    restControls.Add(p,control);
+                    p.Exited+=delegate {control.Dispose();};
+                    DirectGameTitle.Track(address,p);
+                    p.EnableRaisingEvents=true;
+                    WriteSecrets(p,secret); return p;
+                } catch {control.Dispose(); throw;}
             }
             catch {if(p!=null){StopHelper(p); p.Dispose();} throw;}
             finally {Clear(secret);}

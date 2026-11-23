@@ -97,14 +97,22 @@ internal static class EmbeddedProbe
             using(var pipe=new NamedPipeClientStream(".",name,PipeDirection.Out)) {
                 pipe.Connect(10000);
                 using(var writer=new BinaryWriter(pipe)) {
-                    writer.Write(0x31564443); writer.Write(1); writer.Write(0); writer.Write(17000); writer.Write(0); writer.Write(4100); writer.Write(20000);
+                    writer.Write(0x32564443); writer.Write(1); WriteAudio(writer,192750,48000,2);
+                    bool unavailable=false;
                     int frame=0; while(!end.WaitOne(33)) {
-                        if(pause.WaitOne(0)) continue;
+                        if(pause.WaitOne(0)) {
+                            if(!unavailable) { WriteAudio(writer,-1,-1,-1); writer.Flush(); unavailable=true; }
+                            continue;
+                        }
                         var packet=packets[frame++%packets.Length]; writer.Write(packet.Length); writer.Write(packet); writer.Flush();
                     }
                 }
             }
         } catch(IOException) { }
+    }
+    static void WriteAudio(BinaryWriter writer,int bitrate,int rate,int channels) {
+        writer.Write(0); writer.Write(17000); writer.Write(0); writer.Write(4100); writer.Write(20000);
+        writer.Write(bitrate); writer.Write(rate); writer.Write(channels);
     }
     static Thread Start(Type api,string[] options,Action<int> completed) {
         var thread=new Thread(delegate() { completed((int)api.GetMethod("Run").Invoke(null,new object[]{options})); });
@@ -189,10 +197,13 @@ internal static class EmbeddedProbe
                 } else if(stage==2 && (bool)data["compare"] && (string)data["effectivePictureMode"]=="original") {
                     api.GetMethod("Compare").Invoke(null,new object[]{false}); start=captured; stage=3;
                 } else if(stage==3 && !(bool)data["compare"] && captured>start+8 && elapsed>2300) {
-                    Check(Convert.ToInt32(data["targetPresentedFps"])==60 && Convert.ToInt32(data["audioQueueMs"])==17,
+                    Check(Convert.ToInt32(data["targetPresentedFps"])==60 && Convert.ToInt32(data["audioQueueMs"])==17 &&
+                          Convert.ToDouble(data["audioBitrateKbps"])==192.75 && Convert.ToInt32(data["audioSampleRate"])==48000 && Convert.ToInt32(data["audioChannels"])==2,
                           "Embedded target or audio telemetry missing.");
                     pause.Set(); pauseStart=elapsed; stage=4;
                 } else if(stage==4 && elapsed>pauseStart+650) {
+                    Check(data["audioBitrateKbps"]==null && data["audioSampleRate"]==null && data["audioChannels"]==null,
+                          "The CDV2 unavailable fields retained stale audio metrics.");
                     start=captured; beforeRepaint=Convert.ToInt32(data["presented"]); window.Width+=53; stage=5;
                 } else if(stage==5 && Convert.ToInt32(data["presented"])>beforeRepaint) {
                     Check(captured==start,"Paused source unexpectedly supplied a new frame during resize.");
@@ -220,7 +231,8 @@ internal static class EmbeddedProbe
                 if(stage==0 && Convert.ToInt32(data["captured"])>5) {
                     api.GetMethod("ConfigureOutput").Invoke(null,new object[]{"720","auto"}); stage=1;
                 } else if(stage==1 && (string)data["resolution"]=="720" && (string)data["hdrMode"]=="auto" && Convert.ToInt32(data["elapsedMs"])>2200) {
-                    Check(Convert.ToInt32(data["inputWidth"])==960 && Convert.ToInt32(data["renderWidth"])<=1280 && data["audioQueueMs"]==null,
+                    Check(Convert.ToInt32(data["inputWidth"])==960 && Convert.ToInt32(data["renderWidth"])<=1280 && data["audioQueueMs"]==null &&
+                          data["audioBitrateKbps"]==null && data["audioSampleRate"]==null && data["audioChannels"]==null,
                           "Offline demo sizing or source metadata is wrong.");
                     api.GetMethod("Stop").Invoke(null,null); stage=2;
                 }

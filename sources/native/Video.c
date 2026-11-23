@@ -3,6 +3,25 @@
 #include <stdlib.h>
 #include <string.h>
 
+bool video_profile(ChiakiConnectVideoProfile *profile, int codec, const char *fps, const char *kbps)
+{
+    if (codec < 1 || codec > 3 || (fps && strcmp(fps, "30") && strcmp(fps, "60"))) return false;
+    uint32_t requested = 0;
+    if (kbps) {
+        if (!*kbps || strlen(kbps) > 6) return false;
+        for (const char *c = kbps; *c; c++) {
+            if (*c < '0' || *c > '9') return false;
+            requested = requested * 10 + (*c - '0');
+        }
+        if (requested != 0 && (requested < 2000 || requested > 100000)) return false;
+    }
+    chiaki_connect_video_profile_preset(profile, CHIAKI_VIDEO_RESOLUTION_PRESET_1080p,
+        fps && !strcmp(fps, "30") ? CHIAKI_VIDEO_FPS_PRESET_30 : CHIAKI_VIDEO_FPS_PRESET_60);
+    if (requested) profile->bitrate = requested;
+    profile->codec = (ChiakiCodec)(codec - 1);
+    return true;
+}
+
 // Each write can be canceled when the player exits or stops consuming frames.
 static bool write_all(Video *video, const void *data, DWORD size)
 {
@@ -25,16 +44,17 @@ static bool write_all(Video *video, const void *data, DWORD size)
 
 bool video_header(Video *video)
 {
-    const uint32_t header[] = {0x31564443u, (uint32_t)video->codec}; // CDV1 on Windows x64.
+    const uint32_t header[] = {video->extended_stats ? 0x32564443u : 0x31564443u, (uint32_t)video->codec};
     video->waiting_for_key = true;
     return write_all(video, header, sizeof(header));
 }
 
-void video_stats(Video *video, const uint32_t stats[4])
+void video_stats(Video *video, const DirectMetrics *stats)
 {
     if (!TryAcquireSRWLockExclusive(&video->writer)) return;
-    const uint32_t packet[] = {0, stats[0], stats[1], stats[2], stats[3]};
-    write_all(video, packet, sizeof(packet));
+    const uint32_t packet[] = {0, stats->queued_us, stats->underruns, stats->rtt_us, stats->target_us,
+                               stats->audio_bps, stats->sample_rate, stats->channels};
+    write_all(video, packet, video->extended_stats ? sizeof(packet) : 5 * sizeof(uint32_t));
     ReleaseSRWLockExclusive(&video->writer);
 }
 

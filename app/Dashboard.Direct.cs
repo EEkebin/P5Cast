@@ -48,8 +48,13 @@ namespace Cadrivect
         }
         void UpdateTransport()
         {
-            UI<Button>("OpenSource").Content=stopping?"Stopping…":preparing?"Cancel":Active?"Stop":source=="Demo"?"Play demo":"Connect";
-            UI<Button>("OpenSource").IsEnabled=!stopping;
+            bool waitingForConsole=directCore!=null && !firstFrame;
+            UI<Button>("OpenSource").Content=stopping?"Stopping…":preparing || waitingForConsole?"Cancel":Active?"Stop":source=="Demo"?"Play demo":"Connect";
+            UI<Button>("OpenSource").IsEnabled=!stopping && !requestingRest;
+            bool canSelect=!preparing && !Active;
+            UI<ComboBox>("ConsolePicker").IsEnabled=canSelect;
+            UI<TextBox>("ConsoleAddress").IsEnabled=canSelect;
+            UI<Button>("AddConsole").IsEnabled=canSelect;
             UI<ComboBox>("SourceChoice").IsEnabled=!preparing && !Active;
         }
         void UpdateOutput()
@@ -58,6 +63,7 @@ namespace Cadrivect
         }
         void Tick()
         {
+            TickDiscord();
             if(rendering==null) return;
             if(stopping) {engine.Stop(); return;}
             if(directCore!=null && directCore.HasExited) {
@@ -66,10 +72,12 @@ namespace Cadrivect
             }
             string raw=engine.Snapshot();
             if(!string.IsNullOrEmpty(raw) && raw!="{}") {
-                var snapshot=json.Deserialize<Dictionary<string,object>>(raw); meter.Update(snapshot);
+                var snapshot=json.Deserialize<Dictionary<string,object>>(raw);
+                if(source=="Direct") snapshot["requestedVideoKbps"]=sessionVideoKbps;
+                meter.Update(snapshot);
                 if(!firstFrame && Field(snapshot,"presented")!="0" && Field(snapshot,"presented")!="") {
                     string label=source=="Demo"?"Offline demo":source=="Direct"?"PS5 connected":"Sony Remote Play";
-                    firstFrame=true; Show(label);
+                    firstFrame=true; UpdateTransport(); Show(label);
                 }
             }
         }
@@ -84,7 +92,9 @@ namespace Cadrivect
         void Finish()
         {
             preparing=stopping=comparing=false;
-            meter.Reset(mode,factor); surface.Clear(); UpdateTransport();
+            playingMac=playingPipe=null; EndDiscordSession();
+            if(UI<StackPanel>("StopPanel").Visibility==Visibility.Visible) SetPage("Play");
+            meter.Reset(mode,factor); meter.SetRequestedVideoKbps(source=="Direct"?DirectKbps():0); surface.Clear(); UpdateTransport();
             if(closing) window.Dispatcher.BeginInvoke(new Action(window.Close));
         }
         async Task StartPlayback()
@@ -110,7 +120,9 @@ namespace Cadrivect
                     int codec=hdr==2 || (hdr==0 && display.AdvancedColorEnabled && mode!=3)?3:2;
                     string pipe="Cadrivect-Video-"+Guid.NewGuid().ToString("N");
                     args.AddRange(new[]{"--direct-pipe",pipe,"--direct-runtime",runtime,"--target-fps",fps.ToString()});
-                    directCore=console.Connect(pipe,address,codec,fps);
+                    sessionVideoKbps=DirectKbps();
+                    directCore=console.Connect(pipe,address,codec,fps,sessionVideoKbps);
+                    playingMac=console.Mac; playingPipe=pipe; titleAddress=address;
                     Show("Connecting to "+console.Name+"…");
                 } else if(source=="Demo") {
                     args.AddRange(new[]{"--demo","--target-fps","60"}); Show("Starting offline demo…");
@@ -146,11 +158,16 @@ namespace Cadrivect
             string address=ClientAddress();
             var args=new List<string>{"-Action",pair?"PreparePair":"PreparePlay","-Address",address};
             int preset=UI<ComboBox>("Quality").SelectedIndex;
+            int requestedRate=networkRates[UI<ComboBox>("NetworkBitrate").SelectedIndex];
             if(!pair && preset>0) {
                 var resolutions=new[]{"","1080","1440","4K","4K"};
-                var rates=new[]{"","60","120","60","120"}; var mbps=new[]{"","35","65","80","120"};
-                args.AddRange(new[]{"-Resolution",resolutions[preset],"-Fps",rates[preset],"-Mbps",mbps[preset]});
+                var rates=new[]{"","60","120","60","120"}; var mbps=new[]{0,35,65,80,120};
+                args.AddRange(new[]{"-Resolution",resolutions[preset],"-Fps",rates[preset]});
+                if(requestedRate==0) requestedRate=mbps[preset];
             }
+            if(!pair && requestedRate>0) args.AddRange(new[]{"-Mbps",requestedRate.ToString(CultureInfo.InvariantCulture)});
+            int layout=UI<ComboBox>("NetworkAudio").SelectedIndex;
+            if(!pair && layout>0) args.AddRange(new[]{"-AudioLayout",audioLayouts[layout]});
             if(!pair && UI<CheckBox>("ClientHdr").IsChecked==true) args.Add("-Hdr");
             preparing=true; UpdateTransport(); Show("Preparing the network client…");
             try {

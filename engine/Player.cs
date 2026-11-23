@@ -482,11 +482,14 @@ internal static class Player
     static string Telemetry(Renderer renderer,DirectVideo direct,int targetFps,int factor,double age,bool demo)
     {
         Size input=renderer.InputSize;
+        var audio=direct==null ? null:direct.Audio;
         return ",\"inputWidth\":"+input.Width+",\"inputHeight\":"+input.Height+",\"targetFps\":"+Number(targetFps==0 ? -1:targetFps)
                +",\"targetPresentedFps\":"+Number(targetFps==0 ? -1:targetFps*factor)+",\"lastPcSubmitMs\":"+Number(age)
                +",\"sourceKind\":"+JsonString(demo ? "demo":direct==null ? "window":"direct")
-               +",\"audioQueueMs\":"+Number(direct==null ? -1:direct.AudioQueueMs)+",\"audioTargetMs\":"+Number(direct==null ? -1:direct.AudioTargetMs)
-               +",\"audioUnderruns\":"+Number(direct==null ? -1:direct.AudioUnderruns)+",\"handshakeRttMs\":"+Number(direct==null ? -1:direct.NetworkRttMs)
+               +",\"audioQueueMs\":"+Number(audio==null ? -1:audio.QueueMs)+",\"audioTargetMs\":"+Number(audio==null ? -1:audio.TargetMs)
+               +",\"audioBitrateKbps\":"+Number(audio==null ? -1:audio.BitrateKbps)+",\"audioSampleRate\":"+Number(audio==null ? -1:audio.SampleRate)
+               +",\"audioChannels\":"+Number(audio==null ? -1:audio.Channels)
+               +",\"audioUnderruns\":"+Number(audio==null ? -1:audio.Underruns)+",\"handshakeRttMs\":"+Number(audio==null ? -1:audio.RttMs)
                +",\"decodeMs\":"+Number(direct==null ? -1:direct.DecodeMs)
                +(direct==null ? "" : ",\"codec\":"+JsonString(direct.CodecName)+",\"bitrateMbps\":"+Number(direct.BitrateMbps));
     }

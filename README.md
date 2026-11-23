@@ -16,8 +16,14 @@ The installer places the app in `%LOCALAPPDATA%\Programs\P5Cast` and adds **P5Ca
 
 | Source | How to connect | Audio and controls |
 | --- | --- | --- |
-| **Direct to PS5** | Choose a paired console and enter its reachable LAN address. Select a stream target of 30 or 60 fps, then **Connect**. The native helper requests a 1080p console stream. | The native helper decodes stereo Opus, plays it on the Windows audio device and sends input from the first SDL-compatible controller. |
+| **Direct to PS5** | Choose a paired console and enter its reachable LAN address. Choose 30 or 60 FPS under **Stream quality**, then **Connect**. The native helper requests a 1080p console stream. | The native helper decodes stereo Opus, plays it on the Windows audio device and sends input from the first SDL-compatible controller. |
 | **Sony Remote Play** | Open Sony’s installed PC app, connect to the console using its existing pairing, and leave its window restored. Select **Sony Remote Play → Connect** in P5Cast. | Sony’s app plays audio and handles controller input. P5Cast captures its client area and processes the video. [Sony’s PC setup](https://remoteplay.dl.playstation.net/remoteplay/lang/en/1100001.html) |
+
+Under **Play**, **Console** contains pairing, address and stop behavior. **Stream quality** sets the next Direct connection's target frame rate and requested video bitrate. **Display** controls the local monitor, resolution and HDR. The sidebar keeps the FPS dial visible above collapsible **Picture** and **Stream diagnostics** sections.
+
+Direct defaults to a **100 Mbps video request**, the top setting offered by the pinned chiaki-ng client. Choose a lower target for slower links. The PS5 varies its compressed output with the scene and connection. It also chooses the Opus audio bitrate. In **Stream diagnostics**, compare requested and received video rates and inspect received audio bitrate, sample rate, channels and queue duration. [Upstream PS5 bitrate settings](https://github.com/streetpea/chiaki-ng/blob/v1.10.1/gui/src/qml/SettingsDialog.qml#L1400-L1420)
+
+Press **Stop** in an active Direct session to choose whether to put the PS5 into rest mode. Both checkboxes start unchecked. **Remember my choice** applies to the selected console. To change it, open **Console → When I press Stop**. Closing the app or losing the connection simply disconnects. Rest mode requires a running Direct session and the dashboard reports a command failure if it cannot submit the request.
 
 **Pair a console for Direct.** On the PS5, enable **Settings → System → Remote Play → Enable Remote Play**. In P5Cast, choose **Direct to PS5 → Add console**. Enter the console’s address and the Base64 PSN Account ID for the profile you play on. On the console, select **Link Device** and enter its eight-digit code in P5Cast. The app prefills the account ID when it can identify a single account from previous registrations. Select **Pair console**, choose the saved console, and **Connect**. The Account ID represents eight bytes and differs from your online display name. The upstream registration guide describes how to obtain it. [Registration and Account ID guide](https://chiaki-ng.github.io/chiaki-ng/setup/configuration/#registering-your-playstation)
 
@@ -51,8 +57,8 @@ For Direct, **Video bitrate** measures incoming compressed video. **Video decode
 
 1. On the PC running the game, open **Host**, choose a private LAN or VPN IPv4 address and the display to share, then select **Start sharing**. Sunshine shares the selected desktop and system audio. Stop and restart sharing to change the captured monitor.
 2. On another Windows PC, open **P5Cast Client** or the **Client** tab. Enter the host address, select **Pair with host**, and enter the client’s PIN under **Approve PIN** on the host. This pairing is between the two computers.
-3. Select a stream profile and **Start stream**. For HDR, use an HDR-capable host display and client display, enable **Request an HDR stream**, and use Auto, HEVC or AV1. The dashboard hosts Moonlight’s client surface. Third-party Moonlight clients can launch the host’s **P5Cast** application entry.
-4. Use **Stop sharing** to end the host service. **Manage paired clients** lists paired devices and supports revocation. A same-PC preview keeps sound on the host to avoid playing it twice.
+3. Under **Client → Stream quality**, choose the video preset, a requested video bitrate up to 500 Mbps, and a stereo or surround audio layout. The initial bitrate selection is 500 Mbps. Select **Use video preset** to use the preset bandwidth or the saved client setting. Under **Connection**, select **Start stream**. For HDR, use an HDR-capable host display and client display, enable **Request an HDR stream**, and use Auto, HEVC or AV1. The dashboard hosts Moonlight’s client surface. Third-party Moonlight clients can launch the host’s **P5Cast** application entry.
+4. Use **Stop sharing** to end the host service. **Host → Paired devices** lists paired devices and supports revocation. A same-PC preview keeps sound on the host to avoid playing it twice.
 
 Upgraded hosts also publish their previous application name so existing Moonlight shortcuts still work.
 
@@ -64,6 +70,12 @@ The dashboard and Direct3D player are P5Cast code. `CadrivectDirect.exe` is a ba
 
 The release includes unsigned P5Cast binaries, signed NVIDIA runtimes, and the SharpDX, FidelityFX, NVIDIA Optical Flow and NVIDIA RTX SDK notices. This software contains source code provided by NVIDIA Corporation. New Direct pairing data, FFmpeg and NVIDIA caches live under `%LOCALAPPDATA%\Cadrivect`. Existing dashboard preferences, cached streaming tools and Sunshine pairings use `%LOCALAPPDATA%\LumaRelay`.
 
+## Share on Discord
+
+For **Go Live**, start a Direct PS5 session and join a voice channel in Discord desktop. Choose **Share Your Screen → Applications → P5Cast**, enable sound, and start the broadcast in Discord. Direct audio plays in a child process of P5Cast. Sony’s app plays its own audio in a separate process. Discord controls broadcast quality independently of the PS5 connection. [Discord screen-sharing guide](https://support.discord.com/hc/en-us/articles/360040816151-Go-Live-and-Screen-Share)
+
+For **Rich Presence**, open **Play → Discord** and enable **Show PS5 activity on Discord**. Discord desktop must be running with activity sharing enabled. P5Cast uses the public application ID and local desktop RPC. Activity starts after the first PS5 picture and clears at disconnect. **Show game title** checks the connected Direct console periodically. A **Title override** applies to this session. When the title is unavailable the activity describes remote play. The optional private GitHub button links to the project for collaborators with access. [Discord Rich Presence documentation](https://docs.discord.com/developers/discord-social-sdk/development-guides/setting-rich-presence)
+
 ## Build and test
 
 Use Windows 11 x64, .NET Framework 4.8, Windows PowerShell 5.1, a hardware Direct3D 11 adapter and Git for Windows. First builds download the pinned compilers, source packages and SDK inputs. The package contains the native core and graphics runtimes. The following tests use synthetic video and do not need a PS5.
@@ -71,6 +83,7 @@ Use Windows 11 x64, .NET Framework 4.8, Windows PowerShell 5.1, a hardware Direc
 ```powershell
 .\Build.ps1
 .\P5Cast.exe
+.\tests\Smoke-Settings.ps1
 .\tests\Smoke-Decoder.ps1
 .\tests\Smoke-Embedded.ps1
 .\engine\hdrtest\Verify.ps1

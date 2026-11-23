@@ -4,6 +4,9 @@ $ErrorActionPreference = 'Stop'
 
 # Load just the launch functions. This test never starts a streaming application.
 $relay = Join-Path $PSScriptRoot '..\streaming\Relay.ps1'
+$command=Get-Command $relay
+$range=$command.Parameters['Mbps'].Attributes | Where-Object { $_ -is [Management.Automation.ValidateRangeAttribute] }
+if ($range.MaxRange -ne 500) { throw 'The relay must accept Moonlight stream bitrates up to 500 Mbps.' }
 $parseErrors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($relay,[ref]$null,[ref]$parseErrors)
 if ($parseErrors.Count) { throw $parseErrors[0] }
@@ -69,12 +72,24 @@ internal static class Probe {
     if(!$plan.muted -or $plan.pairing -or $plan.arguments -notcontains '--hdr' -or $plan.arguments -notcontains 'windowed' -or (Test-Path -LiteralPath $result)) {
         throw 'Embedded local stream preparation did not preserve mute, HDR and windowed launch settings.'
     }
+    if($plan.arguments -contains '--audio-config') { throw 'Omitting the audio layout must preserve the Moonlight preference.' }
+    $Mbps=500
+    foreach ($AudioLayout in 'stereo','5.1-surround','7.1-surround') {
+        $plan=Start-RelayClient
+        $layoutIndex=[Array]::IndexOf($plan.arguments,'--audio-config')
+        $bitrateIndex=[Array]::IndexOf($plan.arguments,'--bitrate')
+        if($layoutIndex -lt 0 -or $plan.arguments[$layoutIndex+1] -ne $AudioLayout -or
+           $bitrateIndex -lt 0 -or $plan.arguments[$bitrateIndex+1] -ne '500000') {
+            throw "Stream plan failed to forward the $AudioLayout layout or 500 Mbps bitrate."
+        }
+    }
     $Action='PreparePair'
     $pair=Start-RelayClient
-    if(!$pair.pairing -or $pair.muted -or $pair.arguments[-1] -notmatch '^[0-9]{4}$' -or !$pair.message.Contains($pair.arguments[-1]) -or (Test-Path -LiteralPath $result)) {
+    if(!$pair.pairing -or $pair.muted -or $pair.arguments -contains '--audio-config' -or $pair.arguments -contains '--bitrate' -or
+       $pair.arguments[-1] -notmatch '^[0-9]{4}$' -or !$pair.message.Contains($pair.arguments[-1]) -or (Test-Path -LiteralPath $result)) {
         throw 'Embedded pairing plan did not provide its PIN without launching the client.'
     }
-    $Action='Play'; $Hdr=$false; $Codec=$null
+    $Action='Play'; $Hdr=$false; $Codec=$null; $AudioLayout=$null; $Mbps=0
     $environmentKeys = @('ML_AUDIO','SDL_AUDIODRIVER','SDL_AUDIO_DRIVER')
     $prior = @($environmentKeys | ForEach-Object { [string][Environment]::GetEnvironmentVariable($_,'Process') })
     foreach ($case in @(@{address='127.0.0.1';expected=@('sdl','dummy','dummy')},@{address='192.0.2.123';expected=$prior})) {
@@ -91,7 +106,7 @@ internal static class Probe {
         if (($Address -eq '127.0.0.1') -ne ($reply.clientAudio -eq 'muted')) { throw 'Incorrect client audio status.' }
         Remove-Item -LiteralPath $result
     }
-    'Passed fresh and upgraded host entries, local-address detection, unverified runtime refusal, child-only mute, and remote audio inheritance.'
+    'Passed host entries, local-address and mute handling, 500 Mbps, and all three Moonlight audio layouts.'
 } finally {
     $tempRoot=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
     if ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($dir)) -eq $tempRoot -and [IO.Path]::GetFileName($dir) -match '^Cadrivect-audio-test-[a-f0-9]{32}$') {

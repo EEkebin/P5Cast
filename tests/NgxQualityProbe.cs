@@ -333,7 +333,46 @@ internal static partial class EmbeddedProbe {
         Console.WriteLine("{0} 1080p to 1440p: all four manual NGX modes, Auto, native DLAA, and returning to Balanced passed.",
                           hdr ? "HDR" : "SDR");
     }
-    static bool CheckFullHdFit(Type type,object renderer,Device device,FieldInfo backBuffer,bool hdr) {
+    static void CheckFixedTargets(Type type,object renderer,bool hdr,bool videoSr) {
+        var smallWindow=new Size(960,540);
+        var source=new Size(1920,1080);
+        type.GetMethod("Resize").Invoke(renderer,new object[]{smallWindow});
+        foreach(var size in new[]{new Size(3840,2160),new Size(2560,1440)}) {
+            type.GetMethod("SetOutput").Invoke(renderer,new object[]{size,hdr?"hdr10":"off"});
+            foreach(string mode in new[]{"rtxvideo","fsr-temporal","fsr","nis","original"}) {
+                if(mode=="rtxvideo" && !videoSr) continue;
+                type.GetMethod("SetPictureMode").Invoke(renderer,new object[]{mode});
+                type.GetMethod("Show").Invoke(renderer,new object[]{mode,1f,false,false});
+                var expected=mode=="original"?source:size;
+                Check((Size)type.GetProperty("InputSize").GetValue(renderer,null)==source &&
+                    (Size)type.GetProperty("RenderSize").GetValue(renderer,null)==expected &&
+                    (Size)type.GetProperty("DisplayedPictureSize").GetValue(renderer,null)==smallWindow &&
+                    (string)type.GetProperty("EffectivePictureMode").GetValue(renderer,null)==mode,
+                    mode+" did not maintain independent input, processing and display sizes.");
+                if(mode=="original") continue;
+                const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;
+                Texture2DDescription texture;
+                if(mode=="nis") {
+                    var nis=type.GetField("nis",flags).GetValue(renderer);
+                    var view=(ShaderResourceView)nis.GetType().GetProperty("Output").GetValue(nis,null);
+                    using(var image=view.ResourceAs<Texture2D>()) texture=image.Description;
+                } else {
+                    string field=mode=="fsr"?(hdr?"hdrFsrScaled":"scaled"):"neuralCurrent";
+                    var image=type.GetField(field,flags).GetValue(renderer);
+                    texture=((Texture2D)image.GetType().GetField("Texture").GetValue(image)).Description;
+                }
+                Check(texture.Width==expected.Width && texture.Height==expected.Height,mode+" GPU output texture has the wrong dimensions.");
+                Console.WriteLine("{0} {1}: GPU texture 1920x1080 -> {2}x{3} in a 960x540 picture.",hdr?"HDR":"SDR",mode,texture.Width,texture.Height);
+            }
+        }
+        foreach(var target in new[]{new Size(1280,720),Size.Empty}) {
+            type.GetMethod("SetOutput").Invoke(renderer,new object[]{target,hdr?"hdr10":"off"});
+            type.GetMethod("SetPictureMode").Invoke(renderer,new object[]{"fsr"});
+            type.GetMethod("Show").Invoke(renderer,new object[]{"fsr",1f,false,false});
+            Check((Size)type.GetProperty("RenderSize").GetValue(renderer,null)==source,"A small target reduced the source resolution.");
+        }
+    }
+    static bool CheckFullHdFit(Type type,object renderer,Device device,FieldInfo backBuffer,bool hdr,bool videoSr) {
         var fullHd=new Size(1920,1080);
         bool pass=true;
         using(var input=new Texture2D(device,new Texture2DDescription{Width=fullHd.Width,Height=fullHd.Height,
@@ -366,6 +405,7 @@ internal static partial class EmbeddedProbe {
                 }
             }
             CheckDlssPresets(type,renderer,device,input,backBuffer,hdr);
+            CheckFixedTargets(type,renderer,hdr,videoSr);
         }
         return pass;
     }
@@ -518,7 +558,7 @@ internal static partial class EmbeddedProbe {
                             if(hdr) CheckHdrVsr(type,renderer,device,input,(Texture2D)backBuffer.GetValue(renderer),baseline);
                         }
                     }
-                    pass&=CheckFullHdFit(type,renderer,device,backBuffer,hdr);
+                    pass&=CheckFullHdFit(type,renderer,device,backBuffer,hdr,videoSr);
                 }
                 window.Close();
             }

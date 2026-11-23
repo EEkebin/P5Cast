@@ -67,6 +67,7 @@ internal sealed partial class Renderer : IDisposable
     int wipeGripState;
     float wipeGripScale=1;
     public Rectangle PictureViewport { get; private set; }
+    public Size DisplayedPictureSize { get { return viewport.Size; } }
     readonly IntPtr hwnd;
     readonly bool clearOnDispose;
     Size renderLimit;
@@ -343,10 +344,11 @@ internal sealed partial class Renderer : IDisposable
         }
         if(!renderLimit.IsEmpty)
         {
-            double limit=Math.Min(ratio,Math.Min((double)renderLimit.Width/srcSize.Width,(double)renderLimit.Height/srcSize.Height));
-            next=new Size(Math.Max(1,(int)Math.Round(srcSize.Width*limit)),Math.Max(1,(int)Math.Round(srcSize.Height*limit)));
+            // An explicit target belongs to the effect. The viewport only fits its finished image.
+            double scale=Math.Min((double)renderLimit.Width/srcSize.Width,(double)renderLimit.Height/srcSize.Height);
+            next=new Size(Math.Max(1,(int)Math.Round(srcSize.Width*scale)),Math.Max(1,(int)Math.Round(srcSize.Height*scale)));
         }
-        // A smaller window or resolution cap only affects the final display fit.
+        // Keep native processing when the requested output would shrink the source.
         upscaleTarget=next.Width>srcSize.Width && next.Height>srcSize.Height ? next : srcSize;
     }
     Size ProcessingSize(string mode)

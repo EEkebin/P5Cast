@@ -89,7 +89,7 @@ namespace Cadrivect
         readonly RadioButton[] modes=new RadioButton[ModeIds.Length], factors=new RadioButton[4];
         readonly TextBlock sourceValue,generatedValue,targetValue;
         readonly Dictionary<string,TextBlock> values=new Dictionary<string,TextBlock>();
-        readonly TextBlock submitLabel,notice,pictureScale,pictureSize;
+        readonly TextBlock submitLabel,notice,pictureScale,pictureSize,displayedSize;
         readonly FrameRateDial dial=new FrameRateDial();
         internal const int DefaultDialMaximum=240;
         const int MinDialMaximum=120,MaxDialMaximum=1000;
@@ -222,6 +222,10 @@ namespace Cadrivect
             AutomationProperties.SetAutomationId(pictureSize,"Metric_size");
             AutomationProperties.SetAutomationId(pictureScale,"Metric_scale");
             picture.Children.Add(pictureSize);
+            displayedSize=Label("",Muted,11,FontWeights.Normal);
+            displayedSize.Visibility=Visibility.Collapsed;
+            AutomationProperties.SetAutomationId(displayedSize,"Metric_displayedSize");
+            picture.Children.Add(displayedSize);
             Subheading(picture,"Frame generation");
             picture.Children.Add(Label("P5Cast interpolation",Muted,11,FontWeights.Normal));
             var factorGrid=new UniformGrid {Rows=1,Columns=4,Margin=new Thickness(-2,0,-2,0)};
@@ -527,6 +531,7 @@ namespace Cadrivect
             liveFsrVersion=null; hdr=false; lastSample=-1; pendingSettings=DateTime.MinValue; dial.SetRates(double.NaN,double.NaN,double.NaN,double.NaN);
             sourceValue.Text=generatedValue.Text="—"; targetValue.Text="Target —";
             pictureSize.Text="Waiting for video"; pictureScale.Text=""; activeQuality.Text="";
+            displayedSize.Visibility=Visibility.Collapsed;
             foreach(var label in values.Values) label.Text="—";
             values["format"].ToolTip=null;
             ShowRequested(directSelected);
@@ -606,6 +611,10 @@ namespace Cadrivect
         {
             double iw=Number(data,"inputWidth"),ih=Number(data,"inputHeight");
             double ow=Number(data,"outputWidth"),oh=Number(data,"outputHeight");
+            double dw=Number(data,"displayedWidth"),dh=Number(data,"displayedHeight");
+            bool fitted=ow>0 && oh>0 && dw>0 && dh>0 && (dw!=ow || dh!=oh);
+            displayedSize.Visibility=fitted ? Visibility.Visible : Visibility.Collapsed;
+            if(fitted) displayedSize.Text="On screen · "+Dimensions(dw,dh);
             if(!(iw>0 && ih>0 && ow>0 && oh>0)) {
                 pictureSize.Text="Waiting for video"; pictureScale.Text=""; return;
             }

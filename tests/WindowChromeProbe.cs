@@ -168,6 +168,11 @@ internal static partial class WindowChromeProbe
             : (Convert.ToDouble(frame["outputWidth"])/Convert.ToDouble(frame["inputWidth"])).ToString("0.##")+"× upscale";
         var sizeMetric=PictureMetric("Metric_size"); var scaleMetric=PictureMetric("Metric_scale");
         await Until(()=>sizeMetric.Text==dimensions && scaleMetric.Text==scale,"Picture readout did not show "+dimensions+" / "+scale+".");
+        var displayed=PictureMetric("Metric_displayedSize");
+        bool fitted=!Equals(frame["displayedWidth"],frame["outputWidth"]) || !Equals(frame["displayedHeight"],frame["outputHeight"]);
+        string screen="On screen · "+frame["displayedWidth"]+"×"+frame["displayedHeight"];
+        await Until(()=>fitted ? displayed.Visibility==Visibility.Visible && displayed.Text==screen :
+            displayed.Visibility==Visibility.Collapsed,"On-screen picture dimensions did not match the renderer.");
     }
     static async Task CheckFullscreenFrame(Action toggle,Func<bool> hasGeometry,string direction) {
         var api=AppDomain.CurrentDomain.GetAssemblies().Select(a=>a.GetType("Cadrivect.Engine.EmbeddedPlayback")).First(t=>t!=null);

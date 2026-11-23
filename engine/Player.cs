@@ -572,11 +572,13 @@ internal static class Player
         Size output=renderer.RenderSize;
         Size surface=renderer.OutputSize;
         var picture=renderer.PictureViewport;
+        var displayed=renderer.DisplayedPictureSize;
         var audio=direct==null ? null:direct.Audio;
         return ",\"presenterHdr10\":"+(renderer.PresenterHdr10 ? "true":"false")
                +",\"outputWidth\":"+output.Width+",\"outputHeight\":"+output.Height
                +",\"renderWidth\":"+output.Width+",\"renderHeight\":"+output.Height
                +",\"surfaceWidth\":"+surface.Width+",\"surfaceHeight\":"+surface.Height
+               +",\"displayedWidth\":"+displayed.Width+",\"displayedHeight\":"+displayed.Height
                +",\"displayRefreshHz\":"+Number(renderer.DisplayRefreshHz>0 ? renderer.DisplayRefreshHz : -1)
                +",\"pictureX\":"+picture.X+",\"pictureY\":"+picture.Y+",\"pictureWidth\":"+picture.Width+",\"pictureHeight\":"+picture.Height
                +",\"displayBitsPerColor\":"+Number(renderer.DisplayBitsPerColor>0 ? renderer.DisplayBitsPerColor : -1)

@@ -414,7 +414,7 @@
                         <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/></DataTemplate></ComboBox.ItemTemplate>
                       </ComboBox>
                     </StackPanel>
-                    <StackPanel Margin="0,0,10,6"><TextBlock Text="Upscaling limit" Margin="0,0,0,5"/><ComboBox Name="RenderResolution" ToolTip="Maximum resolution an upscaler can produce. A lower limit preserves the source resolution."/></StackPanel>
+                    <StackPanel Margin="0,0,10,6"><TextBlock Text="Upscaling target" Margin="0,0,0,5"/><ComboBox Name="RenderResolution" ToolTip="Fit playback area follows the window. A fixed target processes video at that size before fitting it on screen. Smaller targets preserve the source resolution."/></StackPanel>
                     <StackPanel Margin="0,0,10,6"><TextBlock Text="Color output" Margin="0,0,0,5"/><ComboBox Name="HdrOutput"/></StackPanel>
                   </UniformGrid>
                   <TextBlock Name="RendererHint" Style="{StaticResource Detail}" TextWrapping="Wrap"/>

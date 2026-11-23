@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.15.3.0")]
+[assembly: AssemblyVersion("0.16.0.0")]
 
 namespace Cadrivect
 {
@@ -61,7 +61,7 @@ namespace Cadrivect
         readonly string preferences = Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA") ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LumaRelay", "dashboard.json");
         readonly string[] names = { "Direct", "Sony", "Demo" };
         readonly string[] titles = { "Direct to PS5", "Sony Remote Play", "Offline demo" };
-        readonly string[] modeIds = { "original", "sharp", "fsr", "rtxvideo", "dlss", "dlaa" };
+        readonly string[] modeIds = { "original", "sharp", "fsr", "rtxvideo", "dlss", "dlaa", "fsr-temporal" };
         readonly string[] hdrIds = { "auto","off","hdr10" };
         readonly string[] rendererIds = { "auto","d3d11","d3d12","vulkan","opengl" };
         internal static string RendererName(string id)
@@ -125,8 +125,8 @@ namespace Cadrivect
                 if(surface.ZoomWheel(e.Delta)) e.Handled=true;
             };
             meter=new PlaybackMeter(delegate(int selectedMode,int multiplier) {
-                mode=selectedMode; factor=multiplier;
-                if(rendering!=null) engine.Configure(mode,factor);
+                pictureSelectionRevision++; mode=selectedMode; factor=multiplier;
+                if(rendering!=null) engine.Configure(mode,factor,meter.FrameGenerationProvider);
             },delegate(string view){
                 if(rendering!=null) engine.SetComparison(view);
                 UpdateWipeInput();
@@ -139,6 +139,11 @@ namespace Cadrivect
             };
             UI<Border>("MeterHost").Child=meter;
             var saved = ReadSettings();
+            meter.DlssModelHint=Field(saved,"dlssModelHint");
+            meter.DlssModelChanged+=delegate(string model) {
+                if(rendering!=null) engine.SetDlssModel(model);
+                if(window.IsLoaded) SaveSettings();
+            };
             meter.DlssQuality=Field(saved,"dlssQuality");
             meter.DlssQualityChanged+=delegate(string quality) {
                 if(rendering!=null) engine.SetDlssQuality(quality);
@@ -170,7 +175,15 @@ namespace Cadrivect
             var rendererChoice=UI<ComboBox>("VideoRenderer");
             rendererChoice.ItemsSource=rendererIds.Select(RendererName).ToArray();
             rendererChoice.SelectedIndex=Math.Max(0,Array.IndexOf(rendererIds,Field(saved,"renderer")));
-            rendererChoice.SelectionChanged+=delegate {RefreshRendererOutput();};
+            rendererChoice.SelectionChanged+=async delegate {
+                RefreshRendererOutput();
+                if(window.IsLoaded && !Active && !preparing) {
+                    int preferredMode=mode;
+                    if(mode>=3) {mode=0; meter.Reset(mode,factor);}
+                    meter.SetCapabilities(null);
+                    await ReadGpu(preferredMode);
+                }
+            };
             RefreshRendererOutput();
             UI<ComboBox>("RenderResolution").ItemsSource=new[]{"Fit playback area","720p","1080p","1440p","4K"};
             UI<ComboBox>("RenderResolution").SelectedIndex=ParseIndex(saved,"resolution",0,resolutionIds.Length);
@@ -182,8 +195,9 @@ namespace Cadrivect
             UI<ComboBox>("Quality").ItemsSource = new[] { "Use Moonlight settings", "1080p · 60 FPS · 35 Mbps", "1440p · 120 FPS · 65 Mbps", "4K · 60 FPS · 80 Mbps", "4K · 120 FPS · 120 Mbps" };
             UI<ComboBox>("Quality").SelectedIndex = ParseIndex(saved,"quality",0,5);
             bool savedPicture=Field(saved,"pictureDefaults")=="1";
-            int requested=savedPicture?ParseIndex(saved,"mode",0,6):0;
+            int requested=savedPicture?ParseIndex(saved,"mode",0,modeIds.Length):0;
             mode=requested<3?requested:0;
+            meter.FrameGenerationProvider=Field(saved,"frameGenerationProvider")=="amd" ? "amd":"p5cast";
             factor=savedPicture?ParseIndex(saved,"multiplier",0,4)+1:1;
             meter.Reset(mode,factor);
             window.Loaded+=async delegate {
@@ -313,23 +327,41 @@ namespace Cadrivect
             var picker=UI<ComboBox>("ConsolePicker"); picker.ItemsSource=rows;
             picker.SelectedItem=rows.FirstOrDefault(c=>c.Mac==mac)??rows.FirstOrDefault();
         }
+        int gpuProbeGeneration, pictureSelectionRevision;
         async Task ReadGpu(int requested)
         {
+            int generation=++gpuProbeGeneration, revision=pictureSelectionRevision;
+            bool restoreAmd=meter.FrameGenerationProvider=="amd" && factor==2;
+            if(meter.FrameGenerationProvider=="amd") {
+                meter.FrameGenerationProvider="p5cast"; factor=1; meter.Reset(mode,factor);
+            }
+            bool completed=false;
             string file=Path.Combine(Path.GetTempPath(),"cadrivect-gpu-"+Guid.NewGuid().ToString("N")+".json");
             try {
-                var info=new ProcessStartInfo(Path.Combine(Program.Root,"engine","bin","CadrivectPlayer.exe"),"--capabilities --report "+Quote(file))
+                var info=new ProcessStartInfo(Path.Combine(Program.Root,"engine","bin","CadrivectPlayer.exe"),"--capabilities --renderer "+SelectedRenderer+" --report "+Quote(file))
                     {UseShellExecute=false,CreateNoWindow=true};
                 using(var proc=Process.Start(info)) {
-                    if(!await Task.Run(()=>proc.WaitForExit(20000))) {StopOwned(proc); return;}
+                    if(!await Task.Run(()=>proc.WaitForExit(40000))) {StopOwned(proc); return;}
                     if(proc.ExitCode!=0 || !File.Exists(file)) return;
                 }
                 var gpu=json.Deserialize<Dictionary<string,object>>(File.ReadAllText(file));
-                if(closing) return;
+                if(closing || generation!=gpuProbeGeneration) return;
                 meter.SetCapabilities(gpu);
-                if(mode==0 && !Active && !preparing && requested>=3 && Field(gpu,modeIds[requested]).Equals("true",StringComparison.OrdinalIgnoreCase))
-                { mode=requested; meter.Reset(mode,factor); }
+                completed=true;
+                if(!Active && !preparing && revision==pictureSelectionRevision) {
+                    if(restoreAmd && Field(gpu,"amdFrameGeneration").Equals("true",StringComparison.OrdinalIgnoreCase)) {
+                        meter.FrameGenerationProvider="amd"; factor=2;
+                    }
+                    if(mode==0 && requested>=3 && Field(gpu,modeIds[requested]).Equals("true",StringComparison.OrdinalIgnoreCase))
+                        mode=requested;
+                    meter.Reset(mode,factor);
+                }
             } catch(IOException) {} catch(System.ComponentModel.Win32Exception) {} catch(ArgumentException) {} catch(InvalidOperationException) {}
-            finally {try {File.Delete(file);} catch(IOException) {}}
+            finally {
+                if(!completed && !closing && generation==gpuProbeGeneration)
+                    meter.SetCapabilities(new Dictionary<string,object> {{"probeFailure","GPU support check could not finish for this graphics API."}});
+                try {File.Delete(file);} catch(IOException) {}
+            }
         }
 
         string SelectedIP() { return Convert.ToString(UI<ComboBox>("BindIP").SelectedItem); }
@@ -550,9 +582,9 @@ namespace Cadrivect
                 Directory.CreateDirectory(Path.GetDirectoryName(preferences));
                 var hostTarget=UI<ComboBox>("HostDisplay").SelectedItem as DisplayTarget;
                 var console=UI<ComboBox>("ConsolePicker").SelectedItem as DirectConsole;
-                var settings = new { dlssQuality=meter.DlssQuality,wipeHorizontal=meter.WipeHorizontal,sidebarOpen=stats,sidebarWidth=sidebarWidth,settingsOpen=settingsOpen,settingsHeight=settingsHeight,
+                var settings = new { dlssQuality=meter.DlssQuality,dlssModelHint=meter.DlssModelHint,wipeHorizontal=meter.WipeHorizontal,sidebarOpen=stats,sidebarWidth=sidebarWidth,settingsOpen=settingsOpen,settingsHeight=settingsHeight,
                     discordPresence=UI<CheckBox>("SharePresence").IsChecked==true,
-                    discordGame=UI<CheckBox>("ShareGame").IsChecked==true,discordProject=UI<CheckBox>("ShareProject").IsChecked==true,stopChoices=stopChoices,directMbps=DirectKbps()/1000, relayMbps=networkRates[UI<ComboBox>("NetworkBitrate").SelectedIndex],audioLayout=UI<ComboBox>("NetworkAudio").SelectedIndex,pictureDefaults=1, mode=mode, multiplier=factor-1,
+                    discordGame=UI<CheckBox>("ShareGame").IsChecked==true,discordProject=UI<CheckBox>("ShareProject").IsChecked==true,stopChoices=stopChoices,directMbps=DirectKbps()/1000, relayMbps=networkRates[UI<ComboBox>("NetworkBitrate").SelectedIndex],audioLayout=UI<ComboBox>("NetworkAudio").SelectedIndex,pictureDefaults=1, mode=mode, multiplier=factor-1, frameGenerationProvider=meter.FrameGenerationProvider,
                     consoleMac=console==null?"":console.Mac,consoleAddresses=consoleAddresses,directStreamHeight=DirectStreamHeight(),directFps=UI<ComboBox>("DirectFps").SelectedIndex,
                     display=SelectedDisplayName(), uiScale=PreferredScalePercent, resolution=UI<ComboBox>("RenderResolution").SelectedIndex,hdr=preferredHdr,renderer=SelectedRenderer,
                     maximized=(fullscreen?previousWindowState:window.WindowState)==WindowState.Maximized,

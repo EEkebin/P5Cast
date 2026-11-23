@@ -1,0 +1,50 @@
+[
+  {
+    "path": "3rdpartynotice.md",
+    "sha256": "3B69B1A1011622557A81B55A9A211DD797D01B8160924A5EC51B4C3432D33A4F"
+  },
+  {
+    "path": "Kits/FidelityFX/api/include/ffx_api_loader.h",
+    "sha256": "18D1901DBBC881E8131B91C65AD44BB3B4A1DE6C31435D5B75236F16727BA80E"
+  },
+  {
+    "path": "Kits/FidelityFX/api/include/ffx_api_types.h",
+    "sha256": "53F07C113A9BA493F297656E4481B6539AED0AFC9F3CC8DA682AA477D270C46C"
+  },
+  {
+    "path": "Kits/FidelityFX/api/include/ffx_api.h",
+    "sha256": "4D9DCF243EF5EFBF03340A02F16B51A22053243A22E8A9A0B3CE91C26982B4BF"
+  },
+  {
+    "path": "Kits/FidelityFX/api/include/dx12/ffx_api_dx12.h",
+    "sha256": "C9AFBC3C4C673723E9E5369A666F0FF54560543B5A93537F8FF453BF1C3BF530"
+  },
+  {
+    "path": "Kits/FidelityFX/docs/license.md",
+    "sha256": "32357259B965D6A8001E9E508BA60EDA6034027C5923A7D226FFBAFF813C2BFB"
+  },
+  {
+    "path": "Kits/FidelityFX/signedbin/amd_fidelityfx_loader_dx12.dll",
+    "sha256": "E2191D3C0828BE45EB8AFFD4E3EC0378F2293ADC345B772A7170EDCF3B021ECB"
+  },
+  {
+    "path": "Kits/FidelityFX/signedbin/amd_fidelityfx_upscaler_dx12.dll",
+    "sha256": "AAD4FCCCCB29084A655F9A4F9F613BD22C8C03FB4A0F8840148CC6543B4CCACE"
+  },
+  {
+    "path": "Kits/FidelityFX/upscalers/include/ffx_upscale.h",
+    "sha256": "13091E7FE5FD9C82B1FB7C044B9F08F664D9653F599D2EA500738709236FCA4D"
+  },
+  {
+    "sha256": "09AC1855BC4C2F711243D6982909385072CA3F8D30DB44D1A82EE5BD637832AD",
+    "path": "Kits/FidelityFX/api/include/vk/ffx_api_vk.h"
+  },
+  {
+    "sha256": "38A56A01FB3565C0757D9F5C1E4E69DE4B65E5F2E5769B323B200DC1F142BAB9",
+    "path": "Kits/FidelityFX/signedbin/amd_fidelityfx_loader_vk.dll"
+  },
+  {
+    "sha256": "4A7E895AF6E0B615D40A84D59EB8C2B1054AD91CDD0C739567940270D51BDAB7",
+    "path": "Kits/FidelityFX/signedbin/amd_fidelityfx_upscaler_vk.dll"
+  }
+]

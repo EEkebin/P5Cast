@@ -12,12 +12,13 @@ using System.Windows.Forms;
 // independent of the SDR/HDR video swap chain. It has no taskbar or Alt+Tab entry.
 internal sealed class PlaybackControls : Form
 {
-    internal static readonly string[] Modes={"original","sharp","fsr","rtxvideo","dlss","dlaa"};
-    static readonly string[] Names={"Original","Sharpen","AMD FSR 1","RTX Video SR","DLSS","DLAA"};
+    internal static readonly string[] Modes={"original","sharp","fsr","rtxvideo","dlss","dlaa","fsr-temporal"};
+    static readonly string[] Names={"Original","Sharpen","AMD FSR 1","RTX Video SR","DLSS","DLAA","AMD FSR Temporal"};
     static readonly Color Surface=Color.FromArgb(19,30,35), Idle=Color.FromArgb(31,45,51),
         Edge=Color.FromArgb(63,81,87), TextColor=Color.FromArgb(235,244,243),
         Muted=Color.FromArgb(174,193,195), Mint=Color.FromArgb(146,232,209);
     readonly PlayerWindow player;
+    readonly string backend;
     readonly IntPtr source;
     readonly Panel panel=new Panel();
     readonly List<Control> children=new List<Control>();
@@ -45,9 +46,9 @@ internal sealed class PlaybackControls : Form
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
     [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr window,int attr,ref int value,int size);
 
-    public PlaybackControls(PlayerWindow player,IntPtr source,string mode,int multiplier,int targetFps)
+    public PlaybackControls(PlayerWindow player,IntPtr source,string mode,int multiplier,int targetFps,string backend="d3d11")
     {
-        this.player=player; this.source=source;
+        this.player=player; this.source=source; this.backend=backend;
         selection=mode; this.multiplier=multiplier; this.targetFps=targetFps;
         Text="P5Cast playback controls"; AccessibleName=Text;
         FormBorderStyle=FormBorderStyle.None; StartPosition=FormStartPosition.Manual;
@@ -77,17 +78,17 @@ internal sealed class PlaybackControls : Form
             button.AccessibleName="Picture: "+Names[i];
             Add(button,16+(i%3)*110,283+(i/3)*35,104,30,13); modes[i]=button;
         }
-        Add(Label("Frame generation",TextColor),16,361,220,20,14);
+        Add(Label("Frame generation",TextColor),16,396,220,20,14);
         for(int i=0;i<4;i++) {
             int factor=i+1; var button=MakeButton(i==0 ? "Off":factor+"×",delegate { Request(null,factor); });
             button.AccessibleName=i==0 ? "Frame generation off":"Frame generation "+factor+" times";
-            Add(button,16+i*83,388,77,30,13); factors[i]=button;
+            Add(button,16+i*83,423,77,30,13); factors[i]=button;
         }
         pin=MakeButton("Pin stats",delegate { pinned=!pinned; Mark(pin,pinned); pin.Text=pinned ? "Unpin stats":"Pin stats"; });
-        pin.AccessibleName="Pin live stats"; Add(pin,16,432,105,29,12);
+        pin.AccessibleName="Pin live stats"; Add(pin,16,467,105,29,12);
         var hint=Label("Ctrl+Alt+O   ·   Show or hide",Muted); hint.TextAlign=ContentAlignment.MiddleRight;
-        Add(hint,128,432,212,29,12);
-        notice=Label("",Color.FromArgb(255,214,149)); notice.AutoEllipsis=true; Add(notice,16,465,324,43,12);
+        Add(hint,128,467,212,29,12);
+        notice=Label("",Color.FromArgb(255,214,149)); notice.AutoEllipsis=true; Add(notice,16,500,324,43,12);
         Sync(mode,multiplier);
     }
     Label Metric(string caption,int x,Color color)
@@ -146,7 +147,7 @@ internal sealed class PlaybackControls : Form
         // NGX has process-wide SDK state. A separate windowless process can test adapters
         // while the player continues using its current device and enhancement resources.
         try {
-            var start=new ProcessStartInfo(Application.ExecutablePath,"--capabilities --quiet") {
+            var start=new ProcessStartInfo(Application.ExecutablePath,"--capabilities --quiet --renderer "+backend) {
                 UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,
                 WorkingDirectory=Path.GetDirectoryName(Application.ExecutablePath)
             };
@@ -209,7 +210,7 @@ internal sealed class PlaybackControls : Form
     {
         var monitor=Screen.FromHandle(player.Handle).Bounds;
         int dpi=(int)GetDpiForWindow(player.Handle); if(dpi<72) dpi=96;
-        int logicalHeight=expanded ? lastNotice.Length>0 ? 515 : 475 : pinned ? 86 : 36;
+        int logicalHeight=expanded ? lastNotice.Length>0 ? 550 : 510 : pinned ? 86 : 36;
         int logicalWidth=expanded ? 356 : pinned ? 255 : 222;
         dpi=Math.Max(48,Math.Min(dpi,Math.Min(96*(monitor.Width-4)/logicalWidth,96*(monitor.Height-4)/logicalHeight)));
         float scale=dpi/96f;

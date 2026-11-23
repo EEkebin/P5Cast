@@ -18,39 +18,50 @@ internal sealed class GpuCapabilities
     public bool RtxVideo { get { return rtxReason==null; } }
     public bool OpticalFlow { get { return flowReason==null; } }
     public bool NativeFrameGeneration { get { return false; } }
+    string fgReason="AMD frame generation requires Direct3D 12 or Vulkan.",fgVersion="";
+    string fsrReason="Temporal FSR requires Direct3D 12 or Vulkan.",fsrVersion="";
     string dlssReason,dlaaReason,rtxReason,flowReason;
 
-    public static GpuCapabilities Probe()
+    public static GpuCapabilities Probe() { return ProbeForBackend("d3d11"); }
+
+    public static GpuCapabilities ProbeForBackend(string backend)
     {
         var result=new GpuCapabilities();
         result.Adapter="Unavailable";
         try
         {
-            using(var device=new Device(DriverType.Hardware,DeviceCreationFlags.BgraSupport))
+            using(var device=Renderer.CreateEffectDevice(backend))
             using(var dxgi=device.QueryInterface<SharpDX.DXGI.Device>())
             using(var adapter=dxgi.Adapter)
             {
                 result.Adapter=adapter.Description.Description.TrimEnd('\0',' ');
+                if(Renderer.HasVendorBridge(backend,"fsr-temporal"))
+                    result.fsrReason=result.CheckVideo(device,"fsr-temporal",backend);
+                if(backend=="d3d12" || backend=="vulkan") {
+                    result.fgReason=FsrFrameGeneration.Probe(device,backend,out result.fgVersion);
+                }
                 if(adapter.Description.VendorId!=0x10de)
                     result.AllUnavailable("The active Direct3D adapter is not an NVIDIA GPU.");
                 else
                 {
-                    result.dlssReason=CheckVideo(device,"dlss");
-                    result.dlaaReason=CheckVideo(device,"dlaa");
-                    result.rtxReason=CheckVideo(device,"rtxvideo");
-                    result.flowReason=CheckMotion(device);
+                    string unavailable="This NVIDIA effect has no native bridge for "+backend+".";
+                    result.dlssReason=Renderer.HasVendorBridge(backend,"dlss") ? result.CheckVideo(device,"dlss",backend) : unavailable;
+                    result.dlaaReason=Renderer.HasVendorBridge(backend,"dlaa") ? result.CheckVideo(device,"dlaa",backend) : unavailable;
+                    result.rtxReason=Renderer.HasVendorBridge(backend,"rtxvideo") ? result.CheckVideo(device,"rtxvideo",backend) : unavailable;
+                    result.flowReason=backend=="d3d11" ? CheckMotion(device) : "Motion estimation runs as a shader on "+backend+".";
                 }
             }
         }
-        catch(Exception e) { result.AllUnavailable(e.Message); }
+        catch(Exception e) { result.AllUnavailable(e.Message);result.fsrReason=result.fgReason=e.Message; }
         return result;
     }
     void AllUnavailable(string message) { dlssReason=dlaaReason=rtxReason=flowReason=message; }
 
     // Evaluate and read one center texel to catch runtimes that accept creation but produce no picture.
-    static string CheckVideo(Device device,string mode)
+    string CheckVideo(Device device,string mode,string backend)
     {
         var context=device.ImmediateContext;
+        string evaluatedFsrVersion=null;
         int outputW=mode=="dlaa" ? W : W*2, outputH=mode=="dlaa" ? H : H*2;
         try
         {
@@ -68,11 +79,18 @@ internal sealed class GpuCapabilities
                 {
                     using(var vectors=new GpuImage(device,W,H,Format.R16G16_Float,true))
                     using(var depth=new GpuImage(device,W,H,Format.R32_Float,true))
-                    using(var model=new NgxVideo(device,W,H,outputW,outputH,mode=="dlaa"))
                     {
                         context.ClearRenderTargetView(vectors.Write,new RawColor4(0,0,0,0));
                         context.ClearRenderTargetView(depth.Write,new RawColor4(.5f,0,0,0));
-                        model.Evaluate(context,color.Texture,vectors.Texture,depth.Texture,output.Texture,0,0,16.67f,true);
+                        if(mode=="fsr-temporal") {
+                            using(var model=new FsrUpscaler(device,W,H,outputW,outputH,false,backend)) {
+                                model.Evaluate(context,color.Texture,vectors.Texture,depth.Texture,output.Texture,16.67f,true);
+                                evaluatedFsrVersion=model.ActiveVersion;
+                            }
+                        } else {
+                            using(var model=new NgxVideo(device,W,H,outputW,outputH,mode=="dlaa"))
+                                model.Evaluate(context,color.Texture,vectors.Texture,depth.Texture,output.Texture,0,0,16.67f,true);
+                        }
                     }
                 }
                 var desc=output.Texture.Description;
@@ -91,6 +109,7 @@ internal sealed class GpuCapabilities
                     finally { context.UnmapSubresource(pixel,0); }
                 }
             }
+            if(evaluatedFsrVersion!=null) fsrVersion=evaluatedFsrVersion;
             return null;
         }
         catch(Exception e) { return e.Message; }
@@ -121,6 +140,8 @@ internal sealed class GpuCapabilities
             case "dlss": return dlssReason ?? "";
             case "dlaa": return dlaaReason ?? "";
             case "rtxvideo": return rtxReason ?? "";
+            case "amdFrameGeneration": return fgReason ?? "";
+            case "fsr-temporal": return fsrReason ?? "";
             case "opticalFlow": return flowReason ?? "";
             case "nativeFrameGeneration": return FrameGenerationReason;
             case "original": case "fsr": case "sharp": return "";
@@ -131,7 +152,7 @@ internal sealed class GpuCapabilities
     static string Quote(string value)
     {
         var text=new StringBuilder("\"");
-        foreach(char c in value)
+        foreach(char c in value ?? string.Empty)
         {
             if(c=='\\' || c=='"') text.Append('\\').Append(c);
             else if(c<32) text.Append("\\u").Append(((int)c).ToString("x4"));
@@ -142,7 +163,9 @@ internal sealed class GpuCapabilities
     public string ToJson()
     {
         var json=new StringBuilder("{\"adapter\":").Append(Quote(Adapter));
-        foreach(string id in new[]{"dlss","dlaa","rtxvideo","opticalFlow","nativeFrameGeneration"})
+        json.Append(",\"fsrVersion\":").Append(Quote(fsrReason==null ? fsrVersion : ""));
+        json.Append(",\"amdFrameGenerationVersion\":").Append(Quote(fgReason==null ? fgVersion : ""));
+        foreach(string id in new[]{"dlss","dlaa","rtxvideo","fsr-temporal","amdFrameGeneration","opticalFlow","nativeFrameGeneration"})
             json.Append(',').Append(Quote(id)).Append(Supports(id) ? ":true" : ":false")
                 .Append(',').Append(Quote(id+"Reason")).Append(':').Append(Quote(Reason(id)));
         json.Append(",\"presentationDrivers\":[");

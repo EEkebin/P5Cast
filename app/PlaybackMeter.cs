@@ -14,10 +14,10 @@ namespace Cadrivect
 {
     internal sealed class PlaybackMeter : UserControl
     {
-        static readonly string[] ModeIds={"original","sharp","fsr","rtxvideo","dlss","dlaa"};
-        static readonly string[] ModeLabels={"Original","Sharpen","AMD FSR 1","RTX Video SR","DLSS","DLAA"};
+        static readonly string[] ModeIds={"original","sharp","fsr","rtxvideo","dlss","dlaa","fsr-temporal"};
+        static readonly string[] ModeLabels={"Original","Sharpen","AMD FSR 1","RTX Video SR","DLSS","DLAA","AMD FSR Temporal"};
         static readonly string[] Descriptions={"Display the source picture.","Sharpen edges at the source resolution.","AMD FidelityFX Super Resolution 1.",
-            "NVIDIA RTX Video Super Resolution for SDR video.","Experimental DLSS with motion estimated from the stream.","Experimental DLAA at the source resolution."};
+            "NVIDIA RTX Video Super Resolution for SDR video.","Experimental DLSS with motion estimated from the stream.","Experimental DLAA at the source resolution.","AMD temporal upscaling. The SDK selects a provider supported by the GPU."};
         static readonly Brush Ink=ColorBrush("#E9F3F1"), Muted=ColorBrush("#A5B9BB"), Line=ColorBrush("#304147"), Dark=ColorBrush("#141F24");
         static readonly Brush Mint=ColorBrush("#8FE6D0"), Amber=ColorBrush("#EABC8E");
         static readonly ControlTemplate ChipTemplate=MakeChipTemplate();
@@ -28,7 +28,14 @@ namespace Cadrivect
         readonly RadioButton[] views=new RadioButton[ViewIds.Length];
         static readonly string[] QualityIds={"auto","quality","balanced","performance","ultra-performance"};
         static readonly string[] QualityLabels={"Auto","Quality","Balanced","Performance","Ultra Performance"};
-        readonly ComboBox qualityChoice;
+        static readonly string[] ModelIds={"auto","k","m","l"};
+        readonly ComboBox qualityChoice,modelChoice;
+        readonly StackPanel modelGroup;
+        internal string DlssModelHint {
+            get {return ModelIds[modelChoice.SelectedIndex];}
+            set {modelChoice.SelectedIndex=Math.Max(0,Array.IndexOf(ModelIds,value));}
+        }
+        internal event Action<string> DlssModelChanged;
         readonly StackPanel qualityGroup;
         readonly TextBlock activeQuality;
         internal string DlssQuality {
@@ -36,6 +43,8 @@ namespace Cadrivect
             set {qualityChoice.SelectedIndex=Math.Max(0,Array.IndexOf(QualityIds,value));}
         }
         internal event Action<string> DlssQualityChanged;
+        readonly RadioButton amdGeneration;
+        internal string FrameGenerationProvider {get;set;}
         readonly Slider divider;
         readonly ToggleButton horizontalSplit;
         internal bool WipeHorizontal {get {return horizontalSplit.IsChecked==true;} set {horizontalSplit.IsChecked=value;}}
@@ -45,7 +54,7 @@ namespace Cadrivect
         int selectedView,previousView;
         readonly TextBlock comparisonGuide;
         public string ComparisonView {get {return ViewIds[selectedView];}}
-        readonly RadioButton[] modes=new RadioButton[6], factors=new RadioButton[4];
+        readonly RadioButton[] modes=new RadioButton[ModeIds.Length], factors=new RadioButton[4];
         readonly TextBlock sourceValue,generatedValue,targetValue;
         readonly Dictionary<string,TextBlock> values=new Dictionary<string,TextBlock>();
         readonly TextBlock submitLabel,notice,pictureScale,pictureSize;
@@ -79,9 +88,9 @@ namespace Cadrivect
             Separator(fixedMeter);
             var picture=AddGroup(sections,"Picture","PictureGroup");
             string group=Guid.NewGuid().ToString("N");
-            var modeGrid=new UniformGrid {Rows=3,Columns=2,Margin=new Thickness(-2,1,-2,0)};
+            var modeGrid=new UniformGrid {Rows=0,Columns=2,Margin=new Thickness(-2,1,-2,0)};
             picture.Children.Add(modeGrid);
-            for(int i=0;i<6;i++)
+            for(int i=0;i<modes.Length;i++)
             {
                 var button=new RadioButton {GroupName="Picture"+group,Content=ModeLabels[i],Template=ChipTemplate};
                 StyleChip(button); modes[i]=button; int index=i;
@@ -107,6 +116,15 @@ namespace Cadrivect
             AutomationProperties.SetAutomationId(qualityChoice,"DlssQuality");
             qualityChoice.SelectionChanged+=delegate {if(DlssQualityChanged!=null) DlssQualityChanged(DlssQuality);};
             qualityGroup.Children.Add(qualityChoice);
+            modelGroup=new StackPanel {Margin=new Thickness(0,5,0,0)};
+            modelGroup.Children.Add(Label("DLSS model preference",Muted,11,FontWeights.Normal));
+            modelChoice=new ComboBox {ItemsSource=new[]{"Driver default","DLSS 4 · K","DLSS 4.5 · M","DLSS 4.5 · L"},SelectedIndex=0,
+                ToolTip="Requests an NVIDIA Super Resolution or DLAA model. Driver overrides may take precedence. M is tuned for Performance and L for Ultra Performance."};
+            modelChoice.SetResourceReference(FrameworkElement.StyleProperty,typeof(ComboBox));
+            AutomationProperties.SetName(modelChoice,"DLSS model preference");
+            AutomationProperties.SetAutomationId(modelChoice,"DlssModelHint");
+            modelChoice.SelectionChanged+=delegate {if(DlssModelChanged!=null) DlssModelChanged(DlssModelHint);};
+            modelGroup.Children.Add(modelChoice); picture.Children.Add(modelGroup);
             var resolutionHeader=new DockPanel {Margin=new Thickness(0,7,0,0)};
             pictureScale=Label("",Mint,11,FontWeights.SemiBold);
             DockPanel.SetDock(pictureScale,Dock.Right);
@@ -129,9 +147,17 @@ namespace Cadrivect
                 var button=new RadioButton {GroupName="Rate"+group,Content=i==0 ? "Off" : factor+"×",Template=ChipTemplate};
                 StyleChip(button); factors[i]=button;
                 button.ToolTip=i==0 ? "Present captured frames only." : "P5Cast uses motion estimated from the video to present up to "+factor+" frames per source frame.";
-                button.Checked+=delegate {if(syncing) return; selectedFactor=factor; SendSettings();};
+                button.Checked+=delegate {if(syncing) return; selectedFactor=factor; FrameGenerationProvider="p5cast"; SendSettings();};
                 factorGrid.Children.Add(button);
             }
+            FrameGenerationProvider="p5cast";
+            amdGeneration=new RadioButton {GroupName="Rate"+group,Content="AMD FSR 2×",Template=ChipTemplate};
+            StyleChip(amdGeneration); AutomationProperties.SetAutomationId(amdGeneration,"AmdFrameGeneration");
+            amdGeneration.Checked+=delegate {
+                if(syncing) return;
+                FrameGenerationProvider="amd"; selectedFactor=2; SendSettings();
+            };
+            picture.Children.Add(amdGeneration);
             var viewLabel=Label("Comparison view",Muted,11,FontWeights.Normal);
             viewLabel.Margin=new Thickness(0,9,0,2); picture.Children.Add(viewLabel);
             var viewGrid=new UniformGrid {Rows=2,Columns=2,Margin=new Thickness(-2,0,-2,0)};
@@ -186,7 +212,7 @@ namespace Cadrivect
             AddMetric(diagnostics,"format","Video format","Source codec and active output color mode.");
             AddMetric(diagnostics,"surface","Playback area","Size of the player surface in screen pixels, including any black bars.");
             AddMetric(diagnostics,"refresh","Display refresh","Active Windows display mode in Hz. The FPS dial counts submitted frames.");
-            AddMetric(diagnostics,"renderer","Video renderer","Graphics API currently presenting frames to the display.");
+            AddMetric(diagnostics,"renderer","Effects and output API","Graphics API running picture effects and presenting the video.");
             AddMetric(diagnostics,"incomingFps","Incoming FPS","Frames received from the source each second.");
             AddMetric(diagnostics,"requested","Requested bitrate","Configured bitrate requested from the PS5 when connecting.");
             AddMetric(diagnostics,"bitrate","Received bitrate","Measured compressed video arriving from the PS5.");
@@ -348,9 +374,9 @@ namespace Cadrivect
         }
         public void Reset(int modeIndex,int multiplier)
         {
-            selectedMode=Math.Max(0,Math.Min(5,modeIndex)); selectedFactor=Math.Max(1,Math.Min(4,multiplier));
+            selectedMode=Math.Max(0,Math.Min(modes.Length-1,modeIndex)); selectedFactor=Math.Max(1,Math.Min(4,multiplier));
             syncing=true;
-            try {modes[selectedMode].IsChecked=true; factors[selectedFactor-1].IsChecked=true; SelectView(selectedView);}
+            try {modes[selectedMode].IsChecked=true; (FrameGenerationProvider=="amd" && selectedFactor==2 ? amdGeneration : factors[selectedFactor-1]).IsChecked=true; SelectView(selectedView);}
             finally {syncing=false;}
             hdr=false; lastSample=-1; pendingSettings=DateTime.MinValue; dial.SetRates(double.NaN,double.NaN,double.NaN,double.NaN);
             sourceValue.Text=generatedValue.Text="—"; targetValue.Text="Target —";
@@ -372,15 +398,22 @@ namespace Cadrivect
                 bool vendor=i>=3;
                 bool available=i==0 || (!noAdapter && (!vendor || Flag(gpu,ModeIds[i])==true));
                 string reason=Descriptions[i];
-                if(!available) reason=gpu==null ? "Checking GPU support." : Text(gpu,ModeIds[i]+"Reason") ?? "This mode is unavailable on the active GPU.";
+                if(!available) reason=gpu==null ? "Checking GPU support." : Text(gpu,ModeIds[i]+"Reason") ?? Text(gpu,"probeFailure") ?? "This mode is unavailable on the active GPU.";
                 if(i==3 && hdr) {available=false; reason="RTX Video SR requires SDR output.";}
+                if(ModeIds[i]=="fsr-temporal" && available && !string.IsNullOrEmpty(Text(gpu,"fsrVersion")))
+                    reason="AMD temporal upscaling · "+Text(gpu,"fsrVersion");
                 modes[i].IsEnabled=available; modes[i].ToolTip=reason;
             }
+            amdGeneration.IsEnabled=Flag(gpu,"amdFrameGeneration")==true;
+            amdGeneration.ToolTip=amdGeneration.IsEnabled ? "AMD FSR frame generation "+Text(gpu,"amdFrameGenerationVersion")+" · one generated frame between source frames." :
+                Text(gpu,"amdFrameGenerationReason") ?? Text(gpu,"probeFailure") ?? "Checking GPU support.";
             for(int i=0;i<factors.Length;i++) factors[i].IsEnabled=i==0 || !noAdapter;
             RefreshQualityChoice();
         }
         void RefreshQualityChoice()
         {
+            modelGroup.Visibility=selectedMode==4 || selectedMode==5 ? Visibility.Visible : Visibility.Collapsed;
+            modelChoice.IsEnabled=(selectedMode==4 || selectedMode==5) && modes[selectedMode].IsEnabled;
             qualityGroup.Visibility=selectedMode==4 ? Visibility.Visible : Visibility.Collapsed;
             qualityChoice.IsEnabled=selectedMode==4 && modes[4].IsEnabled;
         }
@@ -441,7 +474,7 @@ namespace Cadrivect
             UpdatePictureSize(snapshot);
             values["surface"].Text=Dimensions(Number(snapshot,"surfaceWidth"),Number(snapshot,"surfaceHeight"));
             values["refresh"].Text=Metric(Number(snapshot,"displayRefreshHz")," Hz","0.##");
-            values["renderer"].Text=Dashboard.RendererName(Text(snapshot,"renderer"));
+            values["renderer"].Text=Dashboard.RendererName(Text(snapshot,"processingRenderer") ?? Text(snapshot,"renderer"));
             string codec=Text(snapshot,"codec"); bool? hdrFlag=Flag(snapshot,"presenterHdr10") ?? Flag(snapshot,"hdrEnabled");
             string color=hdrFlag.HasValue ? (hdrFlag.Value ? "HDR10":"SDR") : "";
             values["format"].Text=string.IsNullOrEmpty(codec) ? (color.Length==0 ? "—":color) : codec+(color.Length==0 ? "" : " · "+color);
@@ -471,15 +504,24 @@ namespace Cadrivect
             int mode=Array.IndexOf(ModeIds,requested); double factor=Number(snapshot,"multiplier"); bool? comparing=Flag(snapshot,"compare");
             syncing=true;
             try {
-                if(DateTime.UtcNow>=pendingSettings || (mode==selectedMode && factor==selectedFactor)) {
+                if(DateTime.UtcNow>=pendingSettings || (mode==selectedMode && factor==selectedFactor && Text(snapshot,"frameGenerationProvider")==FrameGenerationProvider)) {
                     if(mode>=0 && mode!=selectedMode) {selectedMode=mode; modes[mode].IsChecked=true; RefreshQualityChoice();}
-                    if(factor>=1 && factor<=4) {selectedFactor=(int)factor; factors[selectedFactor-1].IsChecked=true;}
+                    if(factor>=1 && factor<=4) {
+                        selectedFactor=(int)factor;
+                        FrameGenerationProvider=Text(snapshot,"frameGenerationProvider")=="amd" && selectedFactor==2 ? "amd" : "p5cast";
+                        (FrameGenerationProvider=="amd" ? amdGeneration : factors[selectedFactor-1]).IsChecked=true;
+                    }
                     pendingSettings=DateTime.MinValue;
                 }
             } finally {syncing=false;}
             int quality=Array.IndexOf(QualityIds,Text(snapshot,"activeDlssQuality"));
             activeQuality.Text=effective=="dlss" && quality>0 ? "Active · "+QualityLabels[quality] : "";
             string message=Text(snapshot,"effectNotice");
+            if(string.IsNullOrEmpty(message) && effective=="fsr-temporal" && !string.IsNullOrEmpty(Text(snapshot,"fsrVersion")))
+                message="AMD FSR "+Text(snapshot,"fsrVersion");
+            string fgVersion=Text(snapshot,"activeFrameGenerationVersion");
+            if(!string.IsNullOrEmpty(fgVersion) && string.IsNullOrEmpty(Text(snapshot,"effectNotice")))
+                message=(string.IsNullOrEmpty(message) ? "" : message+" · ")+"AMD frame generation "+fgVersion;
             int active=Array.IndexOf(ModeIds,effective);
             if(string.IsNullOrEmpty(message) && comparing!=true && active>=0 && mode>=0 && active!=mode && effective!="dlaa") message="Active picture · "+ModeLabels[active];
             notice.Text=message ?? ""; notice.Visibility=string.IsNullOrEmpty(message) ? Visibility.Collapsed : Visibility.Visible;

@@ -103,6 +103,9 @@ try {
     $quality=$meter.GetType().GetProperty('DlssQuality',[Reflection.BindingFlags]'Instance,NonPublic')
     Require ($quality.GetValue($meter) -eq 'auto') 'DLSS quality defaults to Auto'
     $quality.SetValue($meter,'balanced')
+    $model=$meter.GetType().GetProperty('DlssModelHint',[Reflection.BindingFlags]'Instance,NonPublic')
+    Require ($model.GetValue($meter) -eq 'auto') 'Driver default is the initial DLSS model preference'
+    $model.SetValue($meter,'m')
     $orientation=$meter.GetType().GetProperty('WipeHorizontal',[Reflection.BindingFlags]'Instance,NonPublic')
     Require (!$orientation.GetValue($meter)) 'Existing preferences open with a vertical divider'
     $orientation.SetValue($meter,$true)
@@ -113,6 +116,9 @@ try {
     $restoredMeter=$type.GetField('meter','Instance,NonPublic').GetValue($reopened)
     Require ($orientation.GetValue($restoredMeter)) 'Horizontal divider survives reopening'
     Require ($quality.GetValue($restoredMeter) -eq 'balanced') 'DLSS quality survives reopening'
+    Require ($model.GetValue($restoredMeter) -eq 'm') 'DLSS model preference survives reopening'
+    $model.SetValue($restoredMeter,'invalid')
+    Require ($model.GetValue($restoredMeter) -eq 'auto') 'Unknown DLSS model uses the driver default'
     $quality.SetValue($restoredMeter,'invalid')
     Require ($quality.GetValue($restoredMeter) -eq 'auto') 'Unknown DLSS quality reverts to Auto'
     Require (!$second.FindName('SharePresence').IsChecked -and !$second.FindName('ShareProject').IsChecked) 'Discord opt-outs survive reopening'

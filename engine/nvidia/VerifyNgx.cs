@@ -188,11 +188,11 @@ internal static class VerifyNgx
             }
         }
     }
-    static int Main()
+    static int Main(string[] args)
     {
         try
         {
-            using (var device=new Device(DriverType.Hardware,DeviceCreationFlags.BgraSupport))
+            using (var device=args.Length>0 && args[0]=="d3d12" ? SelectedEffectDevice.CreateD3D12() : new Device(DriverType.Hardware,DeviceCreationFlags.BgraSupport))
             {
                 Verify(device,false); Verify(device,true);
                 VerifyHdr(device,false); VerifyHdr(device,true);

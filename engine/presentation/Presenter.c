@@ -131,6 +131,11 @@ static SDL_Window *wrap_child(HWND child, const char *name)
     SDL_DestroyProperties(props);
     return window;
 }
+SDL_Window *p5_gl_hidden_child(HWND parent, HWND *child)
+{
+    *child = create_child(parent, 1, 1);
+    return *child ? wrap_child(*child, "opengl") : NULL;
+}
 #endif
 
 void *p5_present_create(void *native_parent, const char *driver, int width, int height,

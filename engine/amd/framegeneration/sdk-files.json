@@ -1,0 +1,18 @@
+[
+  {
+    "path": "Kits/FidelityFX/framegeneration/include/ffx_framegeneration.h",
+    "sha256": "BC78A18AA95F5157B4699B0602700592B624788C5BC55D1762CB46A1B6557CA1"
+  },
+  {
+    "path": "Kits/FidelityFX/framegeneration/include/ffx_framegeneration_api_types.h",
+    "sha256": "396596AF3DF63310674E8036ABD2AD0FCD061E61334E7A2C76653A2BE3C686B4"
+  },
+  {
+    "path": "Kits/FidelityFX/signedbin/amd_fidelityfx_framegeneration_dx12.dll",
+    "sha256": "E6843252F58B0341A0D80F6A20BC0D840643EE95BC48C22CAC08745344577BB6"
+  },
+  {
+    "path": "Kits/FidelityFX/signedbin/amd_fidelityfx_framegeneration_vk.dll",
+    "sha256": "D002DABFF8C5E71EAA715FC99438CD4DC81230262A7897B16BC402EFEC3498B4"
+  }
+]

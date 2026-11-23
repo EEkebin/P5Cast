@@ -24,6 +24,13 @@ float4 HdrToPq(Vertex v) : SV_Target {
 float4 HdrToLinear2020(Vertex v) : SV_Target {
     return float4(max(0,LinearScRgbTo2020(SamplePicture(v))),1);
 }
+float4 HdrLinear2020ToScRgb(Vertex v) : SV_Target {
+    const float3x3 inverseGamut=float3x3(
+         1.660491,-0.587641,-0.072850,
+        -0.124550, 1.132900,-0.008349,
+        -0.018151,-0.100579, 1.118730);
+    return float4(mul(inverseGamut,SamplePicture(v)),1);
+}
 float4 HdrLinear2020ToPq(Vertex v) : SV_Target {
     return float4(EncodePq80(SamplePicture(v)),1);
 }

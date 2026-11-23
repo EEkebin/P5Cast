@@ -227,6 +227,12 @@ internal static partial class EmbeddedProbe {
             choose.Invoke(renderer,new object[]{preset});
             checkFrame(preset=="auto" ? "quality" : preset,fullscreen);
         }
+        var modelHint=type.GetProperty("DlssModelHint");
+        foreach(string hint in new[]{"k","m","l","auto"}) {
+            type.GetMethod("SetDlssModel").Invoke(renderer,new object[]{hint});
+            Check((string)modelHint.GetValue(renderer,null)==hint,"Model preference was lost.");
+            checkFrame("quality",fullscreen);
+        }
         choose.Invoke(renderer,new object[]{"balanced"});
         resize.Invoke(renderer,new object[]{source});
         checkFrame("dlaa",source);
@@ -247,7 +253,7 @@ internal static partial class EmbeddedProbe {
                 type.GetMethod("Resize").Invoke(renderer,new object[]{fit});
                 type.GetMethod("SetPictureMode").Invoke(renderer,new object[]{"original"});
                 int[] baseline=null;
-                foreach(string mode in new[]{"original","dlss"}) {
+                foreach(string mode in new[]{"original","fsr-temporal","dlss"}) {
                     type.GetMethod("SetPictureMode").Invoke(renderer,new object[]{mode});
                     for(int frame=0;frame<5;frame++) {
                         UploadQualityFrame(device,input,frame,hdr);
@@ -258,10 +264,12 @@ internal static partial class EmbeddedProbe {
                     var pixels=ReadPresentedTexture(device,(Texture2D)backBuffer.GetValue(renderer));
                     if(mode=="original") {baseline=pixels;continue;}
                     bool enlarged=fit.Width>fullHd.Width;
-                    string effect=enlarged?"dlss":"dlaa";
+                    string effect=mode=="fsr-temporal" ? mode : enlarged?"dlss":"dlaa";
+                    if(mode=="fsr-temporal") Check((int)type.GetProperty("FsrEvaluations").GetValue(renderer,null)>0 &&
+                        !string.IsNullOrEmpty((string)type.GetProperty("ActiveFsrVersion").GetValue(renderer,null)),"AMD did not evaluate the input.");
                     Check((Size)type.GetProperty("RenderSize").GetValue(renderer,null)==(enlarged?fit:fullHd) &&
                           (string)type.GetProperty("EffectivePictureMode").GetValue(renderer,null)==effect,
-                          "Full HD fit did not use the expected NVIDIA reconstruction.");
+                          "Full HD fit did not use the expected temporal reconstruction.");
                     double scale=(double)fit.Height/fullHd.Height;
                     var crop=new Rectangle((int)(324*scale),(int)(250*scale),(int)(290*scale),(int)(73*scale));
                     pass&=MeasureMovingWhites(baseline,pixels,fit.Width,crop,hdr,effect+" at "+fit.Width+"x"+fit.Height);
@@ -285,7 +293,7 @@ internal static partial class EmbeddedProbe {
             if(!hdrAvailable) Console.WriteLine("SDR only. Windows HDR is off on "+name+".");
             bool pass=true;
             var capsType=assembly.GetType("GpuCapabilities",true);
-            var caps=capsType.GetMethod("Probe").Invoke(null,null);
+            var caps=capsType.GetMethod("ProbeForBackend").Invoke(null,new object[]{"d3d12"});
             bool videoSr=(bool)capsType.GetMethod("Supports").Invoke(caps,new object[]{"rtxvideo"});
             using(var host=new VideoHost()) {
                 var window=new Window{WindowStyle=WindowStyle.None,ResizeMode=ResizeMode.NoResize,Left=screen.Bounds.Left+12,Top=screen.Bounds.Top+12,

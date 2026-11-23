@@ -32,7 +32,7 @@ try {
     $object = Join-Path $cache 'NgxVideo.obj'
     $native = Join-Path $cache 'Cadrivect.Ngx.dll'
     . (Join-Path $PSScriptRoot 'Use-Compiler.ps1')
-    & cl.exe /nologo /MT /EHsc /O2 /LD "/I$cache" "/Fo$object" $source /link /MANIFEST:NO /BREPRO /NODEFAULTLIB:oldnames.lib "/implib:$cache\Cadrivect.Ngx.lib" "/out:$native" (Join-Path $cache 'nvsdk_ngx_s.lib') advapi32.lib wintrust.lib crypt32.lib user32.lib
+    & cl.exe /nologo /MT /EHsc /O2 /LD "/I$cache" "/Fo$object" $source /link /MANIFEST:NO /BREPRO /NODEFAULTLIB:oldnames.lib "/implib:$cache\Cadrivect.Ngx.lib" "/out:$native" (Join-Path $cache 'nvsdk_ngx_s.lib') d3d11.lib d3d12.lib advapi32.lib wintrust.lib crypt32.lib user32.lib
     if ($LASTEXITCODE) { throw 'Could not build the NGX renderer bridge.' }
     foreach ($item in @(
         @{ Source=$native; Name='Cadrivect.Ngx.dll' },

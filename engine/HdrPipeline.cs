@@ -11,7 +11,7 @@ internal sealed partial class Renderer
 
     void InitHdrShaders()
     {
-        foreach (string name in new[] {"HdrToPq", "HdrToLinear2020", "HdrLinear2020ToPq", "HdrSharpToPq", "HdrMotionGuide"})
+        foreach (string name in new[] {"HdrToPq", "HdrToLinear2020", "HdrLinear2020ToPq", "HdrLinear2020ToScRgb", "HdrSharpToPq", "HdrMotionGuide"})
             shaders.Add(name, new PixelShader(Device, Shader(name)));
     }
 
@@ -49,10 +49,10 @@ internal sealed partial class Renderer
         PrepareMotion(hdrGuideCurrent,hdrGuidePrevious);
     }
 
-    void DrawHdr(string mode,float phase,bool finishPrevious,Rectangle area,Rectangle? clip=null)
+    void DrawHdr(string mode,float phase,bool finishPrevious,Rectangle area,Rectangle? clip=null,ShaderResourceView sourceOverride=null)
     {
         var srcArea=new Rectangle(Point.Empty,srcSize);
-        ShaderResourceView source=finishPrevious ? prev.Read : curr.Read;
+        ShaderResourceView source=sourceOverride ?? (finishPrevious ? prev.Read : curr.Read);
         if (phase<1 && HasPrevious)
         {
             PrepareHdrMotion();

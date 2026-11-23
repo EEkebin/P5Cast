@@ -14,7 +14,7 @@ Direct loads the three hash-verified FFmpeg DLLs from its local decoder cache an
 
 ## Presentation
 
-Choose a renderer before starting a session with `--renderer auto`, `d3d11`, `d3d12`, `vulkan`, or `opengl`. Auto selects D3D11 on Windows. D3D12, Vulkan and OpenGL upload the finished image through SDL3 and present in a child of the same video surface. SDR uses BGRA8. On HDR-capable D3D12 and Vulkan devices, the player outputs packed 10-bit PQ/BT.2020 values to a verified HDR10 swap chain. The extra GPU readback and upload can affect frame times at high resolutions. Windows color conversion, scaling and effects use D3D11 for all selections. If the requested API cannot initialize or present, playback reports the driver error.
+Choose a renderer before starting a session with `--renderer auto`, `d3d11`, `d3d12`, `vulkan`, or `opengl`. Auto selects D3D11 on Windows. D3D12, Vulkan and OpenGL upload the finished image through SDL3 and present in a child of the same video surface. SDR uses BGRA8. On HDR-capable D3D12 and Vulkan devices, the player outputs packed 10-bit PQ/BT.2020 values to a verified HDR10 swap chain. The extra GPU readback and upload can affect frame times at high resolutions. D3D12 runs the effects shader graph through D3D11On12 and evaluates NVIDIA features on the underlying D3D12 textures and command queue. A privately named DXVK library runs the shader graph on Vulkan. OpenGL runs its own GLSL picture and motion passes. Windows capture and OpenGL dashboard overlay composition use system D3D11. If the requested API cannot initialize or present, playback reports the driver error.
 
 ## Processing
 
@@ -23,13 +23,16 @@ Choose a renderer before starting a session with `--renderer auto`, `d3d11`, `d3
 | `--mode original` | Exact texel loads at native size, bilinear enlargement, and four-region sampling during reduction. |
 | `--mode sharp` | Bounded cubic enlargement and a spatial detail filter. |
 | `--mode fsr` | FidelityFX Super Resolution 1 EASU for enlargement and RCAS sharpening. Native-size input goes directly to RCAS. |
+| `--mode fsr-temporal` | AMD FSR temporal reconstruction through the AMD FSR SDK 2.4 on D3D12 or Vulkan. The active provider reports its version after context creation. |
 | `--mode rtxvideo` | NVIDIA RTX Video Super Resolution at High quality on SDR. |
 | `--dlss-quality auto\|quality\|balanced\|performance\|ultra-performance` | Select the NGX quality mode for DLSS enlargement. Auto chooses by scale ratio. Native-size processing uses DLAA. |
+| `--dlss-model auto\|k\|m\|l` | Request the driver default, DLSS 4 K or a DLSS 4.5 M/L preset. The snapshot reports the requested hint. |
 | `--mode dlss` or `dlaa` | Experimental NVIDIA NGX processing in SDR or floating-point HDR. The player estimates motion, uses a constant depth plane and supplies zero camera jitter. DLSS uses DLAA when the input already fills or exceeds the processing dimensions. |
 | `--comparison enhanced`, `original`, `side-by-side`, `wipe` | Changes the view independently of picture settings. Side by side fits the entire image into each pane. Wipe overlays the original and enhanced frames at the same full-size pixel coordinates. |
 | `--wipe-position 0.5` | Initial divider position along its usable travel, from 0 to 1. Both endpoints leave room to grab the handle. Embedded callers can change this live with `SetWipePosition(float)`. |
 | `--wipe-horizontal` | Places Original above Enhanced. The default vertical orientation puts Original on the left. Embedded callers can rotate the divider live with `SetWipeHorizontal(bool)`. |
 | `--multiplier 1`, `2`, `3`, `4` | 1 presents captured frames. Higher values request intermediate frames. Achieved rates depend on source cadence, rendering time and display refresh. |
+| `--frame-generation p5cast` or `amd` | Select an interpolation provider. AMD uses multiplier 2 on D3D12 and Vulkan and reports the active provider version. |
 | `--resolution native`, `720`, `1080`, `1440`, `4k` | Caps enlargement by an active upscaler. Native allows enlargement up to the fitted picture size. Source-sized processing is preserved when the limit or window is smaller than the input. |
 | `--hdr auto`, `off`, `hdr10` | Auto follows the active Windows display. D3D12 and Vulkan use SDR when the driver cannot create an HDR10 swap chain. Explicit HDR10 requires D3D11, D3D12 or Vulkan with an active HDR display and supported PQ/BT.2020 output. OpenGL and RTX Video SR use SDR on Windows. |
 | `--display primary` or `--display \\.\DISPLAY2` | Selects a monitor in standalone mode. Embedded presentation follows the dashboard surface. |
@@ -58,7 +61,9 @@ To exercise a real HDR display with the HEVC Main 10 fixture, use `.\tests\Smoke
 
 The decoder test checks every YUV sample and the color metadata of H.264, HEVC and HEVC Main 10 fixtures. The embedded test submits packets to a normal WPF child surface. The HDR test validates PQ output, scaling, and one-pixel strokes. Add `-Nvidia` to the HDR test to check FP16 DLSS/DLAA output on compatible hardware.
 
-Use `CadrivectPlayer.exe --capabilities --report <path>` for a JSON adapter report. Its `presentationDrivers` list identifies the API drivers included in the build. Opening a session checks whether the current hardware and driver can present to the selected display. A positive DLSS, DLAA or RTX Video SR result requires an actual evaluation and a successful output check. The optical-flow check executes the hardware API. Run the probe in a separate process during live playback.
+Use `CadrivectPlayer.exe --capabilities --report <path>` for a JSON adapter report. Its `presentationDrivers` list identifies the API drivers included in the build. Opening a session checks whether the current hardware and driver can present to the selected display. Add `--renderer d3d12` or `--renderer vulkan` to test that backend. A positive AMD temporal upscaling, AMD frame generation, DLSS, DLAA or RTX Video SR result requires an actual evaluation and a successful output check. The optical-flow check executes the hardware API. Run the probe in a separate process during live playback.
+
+To check AMD frame generation on a Windows GPU, run `engine\amd\framegeneration\Test-FrameGeneration.ps1 -Backend vulkan` or use `-Backend d3d12`. The fixture measures a moving object's midpoint and samples static SDR and HDR patches. Add `-Display '\\.\DISPLAY2'` with the name of an HDR-enabled display to exercise the embedded player's cadence, color output and comparison controls.
 
 For standalone diagnostics, use `CadrivectPlayer.exe --self-test --mode fsr --multiplier 3 --seconds 5 --report <path>` in an interactive Windows session. Replace `--self-test` with `--hwnd <handle>` or `--process RemotePlay` to use a restored source window. Adding `--verify-output` reads 576 interior samples periodically for a luminance range. Routine playback keeps diagnostic pixel readback off. Standalone player hotkeys should be tested with one standalone player running.
 
@@ -66,4 +71,4 @@ On an HDR-enabled Windows monitor, run `.\engine\presentation\Build.ps1 -VerifyH
 
 ## Dependencies
 
-Rendering uses .NET Framework 4.8, Direct3D 11 and SharpDX 4.2.0. HLSL is compiled at build time and embedded in the player assembly. The FSR 1 headers are pinned to AMD commit `a21ffb8f6c13233ba336352bdff293894c706575`. Signed NVIDIA runtimes and their notices ship beside the engine. [AMD FidelityFX FSR](https://github.com/GPUOpen-Effects/FidelityFX-FSR/tree/a21ffb8f6c13233ba336352bdff293894c706575) · [SharpDX 4.2.0](https://github.com/sharpdx/SharpDX/tree/v4.2.0) · [NGX integration](nvidia/README.md) · [RTX Video integration](rtxvideo/README.md)
+The Windows render host uses .NET Framework 4.8 and SharpDX 4.2.0. HLSL is compiled at build time and embedded in the player assembly. The FSR 1 headers are pinned to AMD commit `a21ffb8f6c13233ba336352bdff293894c706575`. Signed NVIDIA runtimes and their notices ship beside the engine. [AMD FidelityFX FSR](https://github.com/GPUOpen-Effects/FidelityFX-FSR/tree/a21ffb8f6c13233ba336352bdff293894c706575) · [SharpDX 4.2.0](https://github.com/sharpdx/SharpDX/tree/v4.2.0) · [NGX integration](nvidia/README.md) · [RTX Video integration](rtxvideo/README.md)

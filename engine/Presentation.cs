@@ -7,8 +7,8 @@ using SharpDX.Direct3D11;
 using SharpDX.DXGI;
 using Device = SharpDX.Direct3D11.Device;
 
-// Windows processes frames on D3D11. The portable presenter owns the selected
-// API's graphics context and copies the final SDR or packed PQ image before this mapping ends.
+// The portable presenter uses its own graphics context and copies the final SDR
+// or packed PQ image before the effects device unmaps the staging texture.
 internal sealed class Presentation : IDisposable
 {
     const string Library="P5Cast.Presentation.dll";

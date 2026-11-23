@@ -47,9 +47,15 @@ namespace Cadrivect.Engine
         }
         public static void Configure(int modeIndex,int multiplier)
         {
+            ConfigureWithGeneration(modeIndex,multiplier,multiplier>0 ? "p5cast" : null);
+        }
+        public static void ConfigureWithGeneration(int modeIndex,int multiplier,string provider)
+        {
+            if(provider!=null && provider!="amd" && provider!="p5cast") throw new ArgumentException("Unknown frame generation provider.");
+            if(provider=="amd" && multiplier!=2) throw new ArgumentException("AMD frame generation provides a 2× mode.");
             if(modeIndex< -1 || modeIndex>=global::PlaybackControls.Modes.Length) throw new ArgumentOutOfRangeException("modeIndex");
             if(multiplier!= -1 && (multiplier<1 || multiplier>4)) throw new ArgumentOutOfRangeException("multiplier");
-            lock(Gate) if(current!=null) current.Configure(modeIndex,multiplier);
+            lock(Gate) if(current!=null) current.Configure(modeIndex,multiplier,provider);
         }
         public static void ConfigureOutput(string resolution,string hdr)
         {
@@ -59,6 +65,11 @@ namespace Cadrivect.Engine
                 if(hdr!="auto" && hdr!="off" && hdr!="hdr10") throw new ArgumentException("Choose auto, off, or hdr10.","hdr");
             }
             lock(Gate) if(current!=null) current.SetOutput(resolution,hdr);
+        }
+        public static void SetDlssModel(string model)
+        {
+            global::DlssModel.Preset(model);
+            lock(Gate) if(current!=null) Interlocked.Exchange(ref current.PendingDlssModel,model);
         }
         public static void SetDlssQuality(string quality)
         {
@@ -140,10 +151,10 @@ namespace Cadrivect.Engine
         [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr hwnd,uint flags);
         readonly object gate=new object();
         int mode=-1,factor=-1,displayChanged;
-        string resolution,hdr;
+        string resolution,hdr,generation;
         public readonly IntPtr Handle;
         public volatile bool Stopped;
-        public string PendingDlssQuality;
+        public string PendingDlssQuality,PendingDlssModel;
         public volatile string ComparisonView="enhanced";
         public volatile float WipePosition=0.5f;
         public volatile bool WipeHorizontal;
@@ -162,13 +173,13 @@ namespace Cadrivect.Engine
         public Size ClientSize {
             get { Rect r; return GetClientRect(Handle,out r) ? new Size(Math.Max(1,r.R-r.L),Math.Max(1,r.B-r.T)) : new Size(1,1); }
         }
-        public void Configure(int nextMode,int nextFactor) {
-            lock(gate) { if(nextMode>=0) mode=nextMode; if(nextFactor>0) factor=nextFactor; }
+        public void Configure(int nextMode,int nextFactor,string provider) {
+            lock(gate) { if(nextMode>=0) mode=nextMode; if(nextFactor>0) factor=nextFactor; if(provider!=null) generation=provider; }
         }
-        public void TakeChanges(Action<string,int> apply) {
+        public void TakeChanges(Action<string,int,string> apply) {
             lock(gate) {
                 if(mode== -1 && factor== -1) return;
-                apply(mode<0 ? null : global::PlaybackControls.Modes[mode],factor); mode=factor=-1;
+                apply(mode<0 ? null : global::PlaybackControls.Modes[mode],factor,generation); mode=factor=-1; generation=null;
             }
         }
         public void SetOutput(string size,string color) {

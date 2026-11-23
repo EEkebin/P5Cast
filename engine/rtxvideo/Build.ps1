@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$OutDir = (Join-Path $PSScriptRoot '..\bin'),
-    [switch]$Verify
+    [switch]$Verify,
+    [ValidateSet('d3d11','d3d12')][string]$VerifyBackend='d3d11'
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -46,6 +47,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'The RTX Video bridge did not compile.' }
         Copy-Item -LiteralPath $runtime -Destination $stage
         if ($Verify) {
+            if ($VerifyBackend -eq 'd3d12') { Copy-Item -LiteralPath (Join-Path $out 'Cadrivect.Ngx.dll') -Destination $stage }
             $refs = foreach ($lib in @('SharpDX', 'SharpDX.Direct3D11', 'SharpDX.DXGI')) {
                 $path = Join-Path $out "$lib.dll"
                 if (!(Test-Path -LiteralPath $path)) { throw "Build the managed player first to stage $lib.dll." }
@@ -53,9 +55,9 @@ try {
                 "/reference:$path"
             }
             $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-            & $csc /nologo /platform:x64 /out:Verify.exe $refs "$PSScriptRoot\Verify.cs" "$PSScriptRoot\RtxVideo.cs"
+            & $csc /nologo /platform:x64 /out:Verify.exe $refs "$PSScriptRoot\Verify.cs" "$PSScriptRoot\RtxVideo.cs" "$PSScriptRoot\..\D3D12Effects.cs"
             if ($LASTEXITCODE -ne 0) { throw 'The RTX Video GPU test did not compile.' }
-            & .\Verify.exe
+            & .\Verify.exe $VerifyBackend
             if ($LASTEXITCODE -ne 0) { throw 'The RTX Video GPU output failed validation.' }
         }
         Copy-Item -LiteralPath '.\Cadrivect.RtxVideo.dll', $runtime, "$sdk\NVIDIA_RTX_Video_SDK_License.pdf" -Destination $out -Force

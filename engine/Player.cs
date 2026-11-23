@@ -236,7 +236,7 @@ internal static class Player
         try
         {
             if(Array.IndexOf(args,"--capabilities")>=0) {
-                string json=GpuCapabilities.Probe().ToJson();
+                string json=GpuCapabilities.ProbeForBackend(Presentation.Resolve(Option(args,"--renderer","auto"))).ToJson();
                 string output=Option(args,"--report",null);
                 if(output!=null) File.WriteAllText(output,json);
                 Console.WriteLine(json); return 0;
@@ -266,8 +266,11 @@ internal static class Player
             int targetFps=targetOption==null ? 0 : int.Parse(targetOption,CultureInfo.InvariantCulture);
             if(targetOption!=null && targetFps!=30 && targetFps!=60) throw new ArgumentException("Choose 30 or 60 for --target-fps.");
             int multiplier=int.Parse(Option(args,"--multiplier",testing ? "3":"1"),CultureInfo.InvariantCulture);
-            bool vendor=mode=="dlss" || mode=="dlaa" || mode=="rtxvideo";
+            bool vendor=Renderer.IsVendor(mode);
             if(!vendor && mode!="fsr" && mode!="sharp" && mode!="original") throw new ArgumentException("Unknown picture mode: "+mode);
+            string generation=Option(args,"--frame-generation","p5cast").ToLowerInvariant();
+            if(generation!="p5cast" && generation!="amd") throw new ArgumentException("Choose p5cast or amd for --frame-generation.");
+            if(generation=="amd" && multiplier!=2) throw new ArgumentException("AMD frame generation requires --multiplier 2.");
             if(multiplier<1 || multiplier>4) throw new ArgumentException("Multiplier must be between 1 and 4.");
             int seconds=int.Parse(Option(args,"--seconds",testing ? "4":"0"),CultureInfo.InvariantCulture);
             using(var sample=testing ? new SampleWindow():null)
@@ -283,13 +286,14 @@ internal static class Player
                         if(!testing && !direct) WindowsApi.SetForegroundWindow(source);
                     }
                     using(var renderer=new Renderer(host==null ? window.Handle:host.Handle,host==null ? window.ClientSize:host.ClientSize,raster,hdr,mode,host!=null,backend))
-                    using(var capture=captureWindow ? new WindowCapture(source,renderer.Device,renderer.HdrEnabled):null)
+                    using(var capture=captureWindow ? new WindowCapture(source,renderer.Device,renderer.HdrEnabled,backend=="vulkan" || backend=="d3d12"):null)
                     using(var decoded=direct ? new DirectVideo(pipe,runtime):null)
                     using(var offline=demo ? new DemoVideo(renderer,host.Handle,targetFps):null)
-                    using(var controls=host==null ? new PlaybackControls(window,source,mode,multiplier,targetFps):null)
+                    using(var controls=host==null ? new PlaybackControls(window,source,mode,multiplier,targetFps,backend):null)
                     using(var live=filename==null ? null:new LiveReport(filename))
                     {
                         renderer.SetDlssQuality(dlssQuality);
+                        renderer.SetDlssModel(Option(args,"--dlss-model","auto").ToLowerInvariant());
                         string requestedMode=null, settingsNotice=null;
                         int requestedMultiplier=multiplier;
                         bool changeRequested=false,compare=false;
@@ -306,8 +310,16 @@ internal static class Player
                             if(factor>0) requestedMultiplier=factor;
                             changeRequested=true;
                         };
+                        Action<string,int,string> hostedChange=delegate(string picture,int factor,string provider) {
+                            if(provider!=null) generation=provider;
+                            change(picture,factor);
+                        };
                         if(controls!=null) {
-                            window.ControlPanel=controls; controls.SettingChanged+=change; window.SettingsRequested+=change;
+                            Action<string,int> standaloneChange=delegate(string picture,int factor) {
+                                if(factor>0) generation="p5cast";
+                                change(picture,factor);
+                            };
+                            window.ControlPanel=controls; controls.SettingChanged+=standaloneChange; window.SettingsRequested+=standaloneChange;
                             if(Array.IndexOf(args,"--controls")>=0) controls.Open();
                         }
                         var clock=Stopwatch.StartNew();
@@ -326,7 +338,7 @@ internal static class Player
                             {
                                 // The portable presenter owns a child HWND on this playback thread.
                                 if(host==null || renderer.Backend!="d3d11") Application.DoEvents();
-                                if(host!=null) host.TakeChanges(change);
+                                if(host!=null) host.TakeChanges(hostedChange);
                                 if((window!=null && window.Ended) || (seconds>0 && clock.Elapsed.TotalSeconds>=seconds)) break;
                                 comparisonView=host==null ? window.ComparisonView:host.ComparisonView;
                                 compare=comparisonView=="original";
@@ -347,6 +359,11 @@ internal static class Player
                                     if(loupe==null) renderer.SetLoupe(false,0,0,0,1);
                                     else renderer.SetLoupe(true,loupe.X,loupe.Y,loupe.Level,loupe.Scale);
                                     redraw=true;
+                                }
+                                string newModel=host==null ? null : Interlocked.Exchange(ref host.PendingDlssModel,null);
+                                if(newModel!=null && newModel!=renderer.DlssModelHint) {
+                                    renderer.SetDlssModel(newModel);
+                                    if(mode=="dlss" || mode=="dlaa") {step=0; previousTime=0; redraw=true;}
                                 }
                                 string newQuality=host==null ? null : Interlocked.Exchange(ref host.PendingDlssQuality,null);
                                 if(newQuality!=null && newQuality!=renderer.DlssQuality) {
@@ -373,13 +390,15 @@ internal static class Player
                                             mode=requestedMode; settingsNotice=null;
                                         } catch(InvalidOperationException ex) { settingsNotice=ex.Message; }
                                     }
-                                    multiplier=requestedMultiplier; vendor=mode=="dlss" || mode=="dlaa" || mode=="rtxvideo";
+                                    multiplier=requestedMultiplier; vendor=Renderer.IsVendor(mode);
                                     renderer.ResetFrameHistory(); if(controls!=null) controls.Sync(mode,multiplier);
                                     renderer.SetSideBySide(comparisonView=="side-by-side");
                                     step=0; previousTime=0; previousView=comparisonView;
                                     redraw=true;
                                     requestedMode=null; changeRequested=false;
                                 }
+                                bool useAmd=generation=="amd" && multiplier==2 && !compare;
+                                renderer.SetFrameGenerationProvider(useAmd ? "amd" : "p5cast");
                                 if(controls!=null) {
                                     controls.SetNotice(settingsNotice ?? renderer.EffectNotice);
                                     controls.UpdateLive(now,renderer,compare,lastRealAge,decoded);
@@ -395,10 +414,10 @@ internal static class Player
                                         +",\"loupeX\":"+(loupe==null ? "0" : loupe.X.ToString("R",CultureInfo.InvariantCulture))
                                         +",\"loupeY\":"+(loupe==null ? "0" : loupe.Y.ToString("R",CultureInfo.InvariantCulture))
                                         +",\"loupeScale\":"+Number(loupe==null ? 1 : loupe.Scale)
-                                        +",\"effectNotice\":"+JsonString(settingsNotice ?? (string.IsNullOrEmpty(renderer.EffectNotice) ? renderer.OutputNotice : renderer.EffectNotice))+",\"compare\":"+(compare ? "true":"false")
+                                        +",\"effectNotice\":"+JsonString(settingsNotice ?? (!string.IsNullOrEmpty(renderer.FrameGenerationNotice) ? renderer.FrameGenerationNotice : string.IsNullOrEmpty(renderer.EffectNotice) ? renderer.OutputNotice : renderer.EffectNotice))+",\"compare\":"+(compare ? "true":"false")
                                         +",\"wipeGripState\":"+gripState+",\"wipeGripScale\":"+Number(gripScale)+",\"wipeHorizontal\":"+(wipeHorizontal ? "true" : "false")+",\"wipePosition\":"+wipePosition.ToString("R",CultureInfo.InvariantCulture)+",\"comparisonView\":"+JsonString(comparisonView)+",\"sampleId\":"+(++sampleId)+",\"elapsedMs\":"+Number(now)+",\"display\":"+JsonString(renderer.DisplayName)
                                         +",\"hdrEnabled\":"+(renderer.HdrEnabled ? "true":"false")
-                                        +",\"resolution\":"+JsonString(resolution)+",\"hdrMode\":"+JsonString(hdr)
+                                        +",\"frameGenerationProvider\":"+JsonString(generation)+",\"resolution\":"+JsonString(resolution)+",\"hdrMode\":"+JsonString(hdr)
                                         +Telemetry(renderer,decoded,targetFps,compare ? 1:multiplier,lastRealAge,demo)+"}";
                                     if(host!=null) EmbeddedPlayback.Publish(snapshot);
                                     if(live!=null && now-lastFile>=1000) { live.Update(snapshot); lastFile=now; }
@@ -485,18 +504,19 @@ internal static class Player
                             renderer.Captured,renderer.Presented,renderer.Generated,samples.Count,mode,multiplier,renderer.Duplicates,
                             inputFps,renderer.Presented/testSeconds,liveFrameAges.Count==0 ? 0:liveFrameAges[median],renderer.SampledFrames,
                             renderer.SampledFrames==0 ? 0:renderer.SampleMinLuma,renderer.SampleMaxLuma)
+                            +",\"frameGenerationProvider\":"+JsonString(generation)
                             +",\"activeNvidiaEffect\":\""+renderer.ActiveEffect+"\",\"nvidiaEvaluations\":"+renderer.VendorEvaluations
                             +",\"hardwareMotionPairs\":"+renderer.HardwareMotionPairs
                             +",\"display\":"+JsonString(renderer.DisplayName)+",\"resolution\":"+JsonString(resolution)
                             +",\"embedded\":"+(host!=null ? "true":"false")+",\"fullscreen\":"+(window!=null && window.Fullscreen ? "true":"false")+",\"hdrEnabled\":"+(renderer.HdrEnabled ? "true":"false")
                             +",\"wipeHorizontal\":"+(wipeHorizontal ? "true" : "false")+",\"wipePosition\":"+wipePosition.ToString("R",CultureInfo.InvariantCulture)+",\"comparisonView\":"+JsonString(comparisonView)+",\"outputStatus\":"+JsonString(renderer.OutputStatus)+",\"effectivePictureMode\":"+JsonString(renderer.EffectivePictureMode)
-                            +",\"effectNotice\":"+JsonString(renderer.EffectNotice)
+                            +",\"effectNotice\":"+JsonString(string.IsNullOrEmpty(renderer.FrameGenerationNotice) ? renderer.EffectNotice : renderer.FrameGenerationNotice)
                             +",\"medianPcSubmitMs\":"+Number(liveFrameAges.Count==0 ? -1:liveFrameAges[median])
                             +Telemetry(renderer,decoded,targetFps,compare ? 1:multiplier,lastRealAge,demo)+"}";
                         if(filename!=null) File.WriteAllText(filename,report);
                         Console.WriteLine(report);
                         if(testing && (renderer.Captured<8 || renderer.Presented<8 || samples.Count<5 ||
-                            (multiplier>1 && renderer.Generated<1) || (vendor && renderer.VendorEvaluations<5))) throw new InvalidOperationException("GPU capture self-test failed. "+report);
+                            (multiplier>1 && renderer.Generated<1) || (vendor && renderer.VendorEvaluations+renderer.FsrEvaluations<5))) throw new InvalidOperationException("GPU capture self-test failed. "+report);
                     }
                 }
             }
@@ -550,8 +570,10 @@ internal static class Player
                +",\"presentationColorSpace\":"+JsonString(renderer.PresenterHdr10 ? "BT.2020 PQ":"sRGB")
                +",\"presenterHdrFormat\":"+(renderer.PresenterHdr10 ? "\"RGB10A2_UNORM\"":"null")
                +",\"outputNotice\":"+JsonString(renderer.OutputNotice)
-               +",\"dlssQuality\":"+JsonString(renderer.DlssQuality)+",\"activeDlssQuality\":"+JsonString(renderer.ActiveDlssQuality)
-               +",\"renderer\":"+JsonString(renderer.Backend)+",\"processingRenderer\":\"d3d11\""+",\"inputWidth\":"+input.Width+",\"inputHeight\":"+input.Height+",\"targetFps\":"+Number(targetFps==0 ? -1:targetFps)
+               +",\"activeFrameGenerationVersion\":"+JsonString(renderer.ActiveFrameGenerationVersion)
+               +",\"fsrVersion\":"+JsonString(renderer.ActiveFsrVersion)+",\"fsrEvaluations\":"+renderer.FsrEvaluations
+               +",\"dlssModelHint\":"+JsonString(renderer.DlssModelHint)+",\"dlssQuality\":"+JsonString(renderer.DlssQuality)+",\"activeDlssQuality\":"+JsonString(renderer.ActiveDlssQuality)
+               +",\"renderer\":"+JsonString(renderer.Backend)+",\"processingRenderer\":"+JsonString(renderer.Backend)+",\"inputWidth\":"+input.Width+",\"inputHeight\":"+input.Height+",\"targetFps\":"+Number(targetFps==0 ? -1:targetFps)
                +",\"targetPresentedFps\":"+Number(targetFps==0 ? -1:targetFps*factor)+",\"lastPcSubmitMs\":"+Number(age)
                +",\"sourceKind\":"+JsonString(demo ? "demo":direct==null ? "window":"direct")
                +",\"audioQueueMs\":"+Number(audio==null ? -1:audio.QueueMs)+",\"audioTargetMs\":"+Number(audio==null ? -1:audio.TargetMs)

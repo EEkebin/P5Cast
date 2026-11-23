@@ -126,8 +126,8 @@ internal static partial class EmbeddedProbe
     }
     static void CheckRenderer(Dictionary<string,object> report,string renderer) {
         string active=renderer=="auto" ? "d3d11" : renderer;
-        Check((string)report["renderer"]==active && (string)report["processingRenderer"]=="d3d11",
-              "The selected presentation API was not used.");
+        Check((string)report["renderer"]==active && (string)report["processingRenderer"]==active,
+              "The selected graphics API did not handle effects and presentation.");
         Check((bool)report["hdrEnabled"]==(bool)report["presenterHdr10"],"HDR processing and presenter color space disagree.");
         if(active=="opengl") Check(!(bool)report["hdrEnabled"],"The SDR presenter reported HDR output.");
     }

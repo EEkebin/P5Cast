@@ -35,7 +35,7 @@ static class VerifyRtxVideo
         }
         return pixels;
     }
-    static int Main()
+    static int Main(string[] args)
     {
         try {
             var source = new int[W * H];
@@ -46,7 +46,7 @@ static class VerifyRtxVideo
                 }
             var pin = GCHandle.Alloc(source, GCHandleType.Pinned);
             try {
-                using (var device = new Device(DriverType.Hardware, DeviceCreationFlags.BgraSupport))
+                using (var device = args.Length>0 && args[0]=="d3d12" ? SelectedEffectDevice.CreateD3D12() : new Device(DriverType.Hardware, DeviceCreationFlags.BgraSupport))
                 using (var input = new Texture2D(device, Description(W, H, BindFlags.ShaderResource, Format.B8G8R8A8_UNorm),
                     new DataRectangle(pin.AddrOfPinnedObject(), W * 4)))
                 using (var output = new Texture2D(device, Description(OX, OY, BindFlags.ShaderResource | BindFlags.UnorderedAccess | BindFlags.RenderTarget)))

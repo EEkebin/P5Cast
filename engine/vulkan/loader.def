@@ -1,0 +1,18 @@
+LIBRARY vulkan-1.dll
+EXPORTS
+    vkAllocateCommandBuffers
+    vkBeginCommandBuffer
+    vkCmdPipelineBarrier
+    vkCreateCommandPool
+    vkCreateFence
+    vkCreateImageView
+    vkDestroyCommandPool
+    vkDestroyFence
+    vkDestroyImageView
+    vkEndCommandBuffer
+    vkGetDeviceProcAddr
+    vkGetInstanceProcAddr
+    vkQueueSubmit
+    vkResetCommandBuffer
+    vkResetFences
+    vkWaitForFences

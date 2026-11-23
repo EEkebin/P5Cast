@@ -103,9 +103,9 @@ internal static partial class WindowChromeProbe
         var provider=Peer(Find<Button>(id)).GetPattern(PatternInterface.Invoke) as IInvokeProvider;
         Require(provider!=null,id+" lacks an Invoke provider."); provider.Invoke();
     }
-    static async Task Until(Func<bool> condition,string reason) {
+    static async Task Until(Func<bool> condition,string reason,int timeoutMs=4500) {
         var time=Stopwatch.StartNew();
-        while(!condition() && time.ElapsedMilliseconds<4500) await Task.Delay(15);
+        while(!condition() && time.ElapsedMilliseconds<timeoutMs) await Task.Delay(15);
         Require(condition(),reason);
     }
     static void Note(string text) { File.AppendAllText(report,text+Environment.NewLine); }
@@ -442,9 +442,30 @@ internal static partial class WindowChromeProbe
                             color.SelectedItem="HDR10";
                             await Until(delegate{return ((string)snapshot.Invoke(null,null)).Contains("\"hdrEnabled\":true");},"HDR10 did not resume.");
                             Note(labels[i]+" presented HDR10 and switched to SDR and back during playback.");
-                            if(keys[i]=="d3d12") {
+                            if(keys[i]=="d3d12" || keys[i]=="vulkan") {
                                 var picture=Find<Border>("MeterHost");
                                 var dlss=(RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"DLSS"));
+                                await Until(()=>!Equals(dlss.ToolTip,"Checking GPU support."),labels[i]+" capability probe did not finish.",45000);
+                                var fsr=(RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"AMD FSR Temporal"));
+                                var amdFrames=(RadioButton)FindVisual(picture,"RadioButton",e=>AutomationProperties.GetAutomationId(e)=="AmdFrameGeneration");
+                                Func<Dictionary<string,object>> sample=()=>new System.Web.Script.Serialization.JavaScriptSerializer()
+                                    .Deserialize<Dictionary<string,object>>((string)snapshot.Invoke(null,null));
+                                if(fsr.IsEnabled) {
+                                    fsr.IsChecked=true;
+                                    await Until(()=>Convert.ToInt32(sample()["fsrEvaluations"])>0 &&
+                                        !string.IsNullOrEmpty(Convert.ToString(sample()["fsrVersion"])),"AMD temporal upscaling did not process the demo.",12000);
+                                    Note(labels[i]+" dashboard AMD FSR upscaling: "+sample()["fsrVersion"]);
+                                }
+                                if(amdFrames.IsEnabled) {
+                                    int before=Convert.ToInt32(sample()["generated"]);
+                                    amdFrames.IsChecked=true;
+                                    await Until(()=>Convert.ToString(sample()["frameGenerationProvider"])=="amd" &&
+                                        !string.IsNullOrEmpty(Convert.ToString(sample()["activeFrameGenerationVersion"])) &&
+                                        Convert.ToInt32(sample()["generated"])>before,"AMD frame generation did not submit an intermediate frame.",12000);
+                                    Note(labels[i]+" dashboard AMD frame generation: "+sample()["activeFrameGenerationVersion"]);
+                                    ((RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"Off"))).IsChecked=true;
+                                }
+                                ((RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"Original"))).IsChecked=true;
                                 if(dlss.IsEnabled) {
                                     var restored=Rect(video);
                                     dlss.IsChecked=true;
@@ -452,6 +473,9 @@ internal static partial class WindowChromeProbe
                                     var quality=(ComboBox)FindVisual(picture,"ComboBox",e=>AutomationProperties.GetAutomationId(e)=="DlssQuality");
                                     Require(quality.IsEnabled && quality.Items.Cast<string>().SequenceEqual(new[]{"Auto","Quality","Balanced","Performance","Ultra Performance"}),
                                             "DLSS mode choices are incomplete.");
+                                    var model=(ComboBox)FindVisual(picture,"ComboBox",e=>AutomationProperties.GetAutomationId(e)=="DlssModelHint");
+                                    model.SelectedIndex=2;
+                                    await Until(()=>Convert.ToString(sample()["dlssModelHint"])=="m","DLSS 4.5 model preference did not reach the player.");
                                     quality.SelectedItem="Balanced";
                                     await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"dlssQuality\":\"balanced\""),"The dashboard failed to apply Balanced.");
                                     await CheckFullscreenFrame(()=>Click("Fullscreen"),()=>Fits(Rect(video),Screen().Full,2),"DLSS HDR enter fullscreen");
@@ -537,7 +561,7 @@ internal static partial class WindowChromeProbe
             CloseHandle(pi.Thread);
             try {
                 // The HDR suite starts four backends and exercises NVIDIA fullscreen in addition to the base UI checks.
-                uint timeoutMs=Environment.GetEnvironmentVariable("P5CAST_PROBE_RENDERERS")=="hdr" ? 60000u : 30000u;
+                uint timeoutMs=Environment.GetEnvironmentVariable("P5CAST_PROBE_RENDERERS")=="hdr" ? 120000u : 30000u;
                 if(WaitForSingleObject(pi.Process,timeoutMs)!=0) {
                     TerminateProcess(pi.Process,2); WaitForSingleObject(pi.Process,3000);
                     throw new TimeoutException("The private dashboard did not close in time.");

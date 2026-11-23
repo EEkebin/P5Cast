@@ -43,6 +43,7 @@ internal sealed partial class Renderer : IDisposable
     readonly DeviceContext context;
     readonly SwapChain swap;
     Presentation presentation;
+    OpenGlEffects openGlEffects;
     public string Backend { get; private set; }
     readonly Buffer constants;
     readonly ComputeShader changed;
@@ -102,6 +103,7 @@ internal sealed partial class Renderer : IDisposable
     public bool VerifyNextOutput;
     public Renderer(IntPtr hwnd, Size window,Size limit,string hdr,string picture,bool clearOnDispose=false,string backend="auto")
     {
+        FrameGenerationProvider="p5cast";
         this.hwnd=hwnd; this.clearOnDispose=clearOnDispose; renderLimit=limit; hdrMode=hdr; pictureMode=picture;
         EffectivePictureMode="original"; EffectNotice="";
         Backend=Presentation.Resolve(backend);
@@ -118,7 +120,7 @@ internal sealed partial class Renderer : IDisposable
                 Device=device; swap=chain;
                 using(var factory=swap.GetParent<Factory>()) factory.MakeWindowAssociation(hwnd,WindowAssociationFlags.IgnoreAltEnter);
             } else {
-                Device=new Device(DriverType.Hardware,DeviceCreationFlags.BgraSupport);
+                Device=CreateEffectDevice(Backend);
             }
             context=Device.ImmediateContext;
             SampleMinLuma=255;
@@ -154,6 +156,22 @@ internal sealed partial class Renderer : IDisposable
             Resize(window);
         } catch { Dispose(); throw; }
     }
+    internal static Device CreateEffectDevice(string backend)
+    {
+        if(backend=="d3d12") return SelectedEffectDevice.CreateD3D12();
+        if(backend=="vulkan") {
+            string adapter;
+            return VulkanEffects.Create(out adapter);
+        }
+        return new Device(DriverType.Hardware,DeviceCreationFlags.BgraSupport);
+    }
+
+    // Vendor SDK entry points require the native resource type expected by that backend.
+    internal static bool HasVendorBridge(string backend,string mode)
+    {
+        if(mode=="fsr-temporal") return backend=="d3d12" || backend=="vulkan";
+        return backend=="d3d11" || backend=="d3d12";
+    }
     static byte[] Shader(string name)
     {
         using(var data=Assembly.GetExecutingAssembly().GetManifestResourceStream(name+".cso"))
@@ -177,7 +195,7 @@ internal sealed partial class Renderer : IDisposable
             long frequency=System.Diagnostics.Stopwatch.Frequency;
             // DLSS and RTX Video rebuild size-dependent resources. Keep the current
             // video running through a short drawer animation, then evaluate at its final size.
-            bool resizingUpscaler=pictureMode=="dlss" || pictureMode=="rtxvideo";
+            bool resizingUpscaler=pictureMode=="dlss" || pictureMode=="rtxvideo" || pictureMode=="fsr-temporal";
             long settle=frequency/(resizingUpscaler ? 30 : 60);
             long maximumWait=frequency/(resizingUpscaler ? 5 : 15);
             if(now-sizeChangedAt<settle && now-resizeStartedAt<maximumWait) return false;
@@ -336,7 +354,7 @@ internal sealed partial class Renderer : IDisposable
     }
     Size ProcessingSize(string mode)
     {
-        return mode=="fsr" || mode=="dlss" || mode=="rtxvideo" ? upscaleTarget : srcSize;
+        return mode=="fsr" || mode=="fsr-temporal" || mode=="dlss" || mode=="rtxvideo" ? upscaleTarget : srcSize;
     }
     void SetProcessingSize(Size next)
     {
@@ -384,6 +402,7 @@ internal sealed partial class Renderer : IDisposable
     }
     void ReleaseSource()
     {
+        ReleaseAmdFrames();
         ReleaseNvidia();
         ReleaseHdr();
         foreach(var image in new [] {curr,prev,incoming,motion,mixed}) if(image!=null) image.Dispose();
@@ -397,6 +416,10 @@ internal sealed partial class Renderer : IDisposable
     {
         var info=new FrameInfo { SourceX=srcSize.Width,SourceY=srcSize.Height,OutputX=outSize.Width,OutputY=outSize.Height,
                                  Phase=phase,WipeHorizontal=wipeHorizontal ? 1 : 0,OriginX=area.X,OriginY=area.Y,TargetX=area.Width,TargetY=area.Height,WipeGripState=wipeGripState };
+        if(Backend=="opengl") {
+            if(openGlEffects==null) openGlEffects=new OpenGlEffects(hwnd,Device);
+            if(openGlEffects.Draw(name,target,area,input,previous,flow,clip,phase,srcSize)) return;
+        }
         context.UpdateSubresource(ref info,constants);
         if(auxiliary==null) context.OutputMerger.SetRenderTargets(target);
         else context.OutputMerger.SetTargets(target,auxiliary);
@@ -415,7 +438,7 @@ internal sealed partial class Renderer : IDisposable
         context.PixelShader.SetShaderResources(0,unbind);
         context.OutputMerger.ResetTargets();
     }
-    static bool IsVendor(string mode) { return mode=="dlss" || mode=="dlaa" || mode=="rtxvideo"; }
+    internal static bool IsVendor(string mode) { return mode=="fsr-temporal" || mode=="dlss" || mode=="dlaa" || mode=="rtxvideo"; }
     static bool IsEffectFailure(Exception error)
     {
         var dx=error as SharpDXException;
@@ -427,6 +450,7 @@ internal sealed partial class Renderer : IDisposable
     }
     public void ResetFrameHistory()
     {
+        amdNeedsReset=true;amdEvaluated=-1;amdHasMidpoint=false;
         HasPrevious=false; suppressNextPair=true; motionReady=false; hdrGuideFrame=-1;
         if(optical!=null) optical.ResetHistory();
         resetHistory=true; evaluatedFrame=-1; havePriorEnhanced=false;
@@ -486,16 +510,31 @@ internal sealed partial class Renderer : IDisposable
             }
         }
         EffectivePictureMode=vendor ? neuralMode : mode;
+        bool amd=AmdFrameGenerationEnabled,amdIntermediate=false;
+        if(amd) {
+            PrepareAmdFrame(vendor);
+            if(phase<1 && HasPrevious) {
+                if(amdHasMidpoint) {source=amdMidpoint.Read;amdIntermediate=true;Generated++;}
+                else {
+                    finishPrevious=true;
+                    source=vendor ? (havePriorEnhanced?neuralPrevious.Read:neuralCurrent.Read) : prev.Read;
+                }
+            }
+        }
         context.ClearRenderTargetView(display,new RawColor4(0,0,0,1));
         // The reference holds its last real frame between enhanced presentations.
         bool holdOriginal=(finishPrevious || (phase<1 && HasPrevious)) && (!vendor || havePriorEnhanced);
         if(!originalViewport.IsEmpty) DrawOriginal(originalViewport,holdOriginal);
-        if(HdrEnabled && !vendor)
-        {
-            DrawHdr(mode,phase,finishPrevious,viewport);
+        if(amdIntermediate && vendor) {
+            Draw(HdrEnabled?"HdrToPq":"Original",display,viewport,source,1);
             return Present(samplePixel,holdOriginal);
         }
-        if(phase<1 && HasPrevious)
+        if(HdrEnabled && !vendor)
+        {
+            DrawHdr(mode,amd?1:phase,finishPrevious,viewport,sourceOverride:amdIntermediate?source:null);
+            return Present(samplePixel,holdOriginal);
+        }
+        if(!amd && phase<1 && HasPrevious)
         {
             if(HdrEnabled) PrepareHdrMotion(); else PrepareMotion();
             if(vendor && havePriorEnhanced)
@@ -521,7 +560,7 @@ internal sealed partial class Renderer : IDisposable
             }
             DrawFinal("Rcas",source,phase,viewport);
         }
-        else if((mode=="dlss" || mode=="dlaa") && neuralSize!=viewport.Size)
+        else if((mode=="dlss" || mode=="dlaa" || mode=="fsr-temporal") && neuralSize!=viewport.Size)
             Draw("FitNgxFrame",display,viewport,source,HdrEnabled ? 1 : 0,finishPrevious && havePriorEnhanced ? prev.Read : curr.Read);
         else DrawFinal(mode=="sharp" ? "Sharp":"Original",source,phase,viewport,null,null,HdrEnabled && vendor);
         return Present(samplePixel,holdOriginal);
@@ -630,6 +669,7 @@ internal sealed partial class Renderer : IDisposable
                 context.Flush(); DwmFlush();
             } catch(SharpDXException) { /* A removed device can no longer present. */ }
         }
+        if(openGlEffects!=null) openGlEffects.Dispose();
         if(context!=null) context.ClearState();
         if(loupePixels!=null) loupePixels.Dispose();
         if(loupeLabels!=null) loupeLabels.Dispose();

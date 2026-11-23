@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.20.1.0")]
+[assembly: AssemblyVersion("0.21.0.0")]
 
 namespace Cadrivect
 {
@@ -124,8 +124,11 @@ namespace Cadrivect
                 if(surface.ZoomWheel(e.Delta)) e.Handled=true;
             };
             meter=new PlaybackMeter(delegate(int selectedMode,int multiplier) {
+                bool pictureChanged=mode!=selectedMode;
                 pictureSelectionRevision++; mode=selectedMode; factor=multiplier;
+                if(pictureChanged && !Active && !preparing) RefreshFrucOutputIntent();
                 if(rendering!=null) engine.Configure(mode,factor,meter.FrameGenerationProvider);
+                if(window.IsLoaded) SaveSettings();
             },delegate(string view){
                 if(rendering!=null) engine.SetComparison(view);
                 UpdateWipeInput();
@@ -145,6 +148,11 @@ namespace Cadrivect
             meter.DialMaximumChanged+=delegate {if(window.IsLoaded) {saveDial.Stop();saveDial.Start();}};
             window.Closed+=delegate {saveDial.Stop();};
             meter.NeuralDownloadRequested+=InstallNeuralRuntime;
+            meter.FrucImportRequested+=ImportFrucRuntime;
+            meter.FrucSdkRequested+=delegate {
+                try {Process.Start(new ProcessStartInfo("https://developer.nvidia.com/opticalflow/download"){UseShellExecute=true});}
+                catch(System.ComponentModel.Win32Exception ex) {Show(ex.Message,true);}
+            };
             meter.NeuralLicenseRequested+=delegate {
                 try {Process.Start(new ProcessStartInfo("https://github.com/NVIDIA/DLSS/blob/9981c6350dc58c0ce21f024fd65e31e851c31689/LICENSE.txt"){UseShellExecute=true});}
                 catch(System.ComponentModel.Win32Exception ex) {Show(ex.Message,true);}
@@ -180,7 +188,7 @@ namespace Cadrivect
             UI<CheckBox>("ClientHdr").IsChecked=string.Equals(Field(saved,"clientHdr"),"True",StringComparison.OrdinalIgnoreCase);
             output.DropDownOpened += delegate { RefreshDisplays(SelectedDisplayName()); };
             output.SelectionChanged += delegate {
-                if(!refreshingDisplays && window.IsLoaded) MoveDashboard();
+                if(!refreshingDisplays && window.IsLoaded) {MoveDashboard(); RefreshFrucOutputIntent();}
             };
             UI<ComboBox>("HdrOutput").ItemsSource=new[]{"Auto","SDR","HDR10"};
             preferredHdr=ParseIndex(saved,"hdr",0,hdrIds.Length);
@@ -201,6 +209,7 @@ namespace Cadrivect
             UI<ComboBox>("RenderResolution").SelectedIndex=ParseIndex(saved,"resolution",0,resolutionIds.Length);
             UI<ComboBox>("HdrOutput").SelectionChanged+=delegate {
                 if(!UsesSdrPresenter) preferredHdr=UI<ComboBox>("HdrOutput").SelectedIndex;
+                RefreshFrucOutputIntent();
                 UpdateOutput();
             };
             UI<ComboBox>("RenderResolution").SelectionChanged+=delegate {UpdateOutput();};
@@ -209,8 +218,8 @@ namespace Cadrivect
             bool savedPicture=Field(saved,"pictureDefaults")=="1";
             int requested=savedPicture?ParseIndex(saved,"mode",0,modeIds.Length):0;
             mode=requested<3?requested:0;
-            meter.FrameGenerationProvider=Field(saved,"frameGenerationProvider")=="amd" ? "amd":"p5cast";
             factor=savedPicture?ParseIndex(saved,"multiplier",0,4)+1:1;
+            meter.FrameGenerationProvider=PlaybackMeter.SavedProvider(Field(saved,"frameGenerationProvider"),factor);
             meter.Reset(mode,factor);
             window.Loaded+=async delegate {
                 MoveDashboard();
@@ -372,8 +381,8 @@ namespace Cadrivect
         async Task ReadGpu(int requested)
         {
             int generation=++gpuProbeGeneration, revision=pictureSelectionRevision;
-            bool restoreAmd=meter.FrameGenerationProvider=="amd" && factor==2;
-            if(!Active && !preparing && meter.FrameGenerationProvider=="amd") {
+            string restoreProvider=PlaybackMeter.SavedProvider(meter.FrameGenerationProvider,factor);
+            if(!Active && !preparing && restoreProvider!="p5cast") {
                 meter.FrameGenerationProvider="p5cast"; factor=1; meter.Reset(mode,factor);
             }
             bool completed=false;
@@ -390,11 +399,10 @@ namespace Cadrivect
                 meter.SetCapabilities(gpu);
                 completed=true;
                 if(!Active && !preparing && revision==pictureSelectionRevision) {
-                    if(restoreAmd && Field(gpu,"amdFrameGeneration").Equals("true",StringComparison.OrdinalIgnoreCase)) {
-                        meter.FrameGenerationProvider="amd"; factor=2;
-                    }
                     if(mode==0 && requested>=3 && Field(gpu,modeIds[requested]).Equals("true",StringComparison.OrdinalIgnoreCase))
                         mode=requested;
+                    RefreshFrucOutputIntent();
+                    if(meter.ProviderAvailable(restoreProvider)) {meter.FrameGenerationProvider=restoreProvider; factor=2;}
                     meter.Reset(mode,factor);
                 }
             } catch(IOException) {} catch(System.ComponentModel.Win32Exception) {} catch(ArgumentException) {} catch(InvalidOperationException) {}
@@ -415,6 +423,7 @@ namespace Cadrivect
             if(message==0x02E0 || message==0x007E) QueueInterfaceScale(); // WM_DPICHANGED / WM_DISPLAYCHANGE
             if(message==0x232 || message==0x7E) {
                 RefreshDisplays(DisplayTarget.DeviceForWindow(hwnd));
+                RefreshFrucOutputIntent();
                 if(engine!=null) engine.InvalidateDisplay();
             }
             return IntPtr.Zero;

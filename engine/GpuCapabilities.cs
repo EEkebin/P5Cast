@@ -19,6 +19,8 @@ internal sealed class GpuCapabilities
     public bool OpticalFlow { get { return flowReason==null; } }
     public bool NativeFrameGeneration { get { return false; } }
     string fgReason="AMD frame generation requires Direct3D 12 or Vulkan.",fgVersion="";
+    string frucReason=Renderer.FrucBackendReason;
+    bool frucRuntimeInstalled,frucRuntimeImportAvailable;
     string fsrReason="Temporal FSR requires Direct3D 12 or Vulkan.",fsrVersion="";
     string nisReason=NisScaler.BackendReason;
     string dlssReason,dlaaReason,rtxReason,flowReason;
@@ -31,6 +33,7 @@ internal sealed class GpuCapabilities
     {
         var result=new GpuCapabilities();
         result.Adapter="Unavailable";
+        result.frucRuntimeInstalled=FrucFrames.RuntimeInstalled;
         try
         {
             using(var device=Renderer.CreateEffectDevice(backend))
@@ -61,13 +64,19 @@ internal sealed class GpuCapabilities
                     result.dlaaReason=Renderer.HasVendorBridge(backend,"dlaa") ? result.CheckVideo(device,"dlaa",backend) : unavailable;
                     result.rtxReason=Renderer.HasVendorBridge(backend,"rtxvideo") ? result.CheckVideo(device,"rtxvideo",backend) : unavailable;
                     result.flowReason=backend=="d3d11" ? CheckMotion(device) : "Motion estimation runs as a shader on "+backend+".";
+                    if(Renderer.SupportsFrucBackend(backend)) {
+                        bool repairable;
+                        result.frucReason=FrucFrames.Probe(device,out repairable);
+                        result.frucRuntimeImportAvailable=(!result.frucRuntimeInstalled || repairable) &&
+                            (backend=="d3d12" || string.IsNullOrEmpty(result.flowReason));
+                    }
                 }
             }
         }
         catch(Exception e) { result.AllUnavailable(e.Message);result.nisReason=result.fsrReason=result.fgReason=e.Message; }
         return result;
     }
-    void AllUnavailable(string message) { dlssReason=dlaaReason=rtxReason=flowReason=neuralRenderingReason=message;neuralRuntimeDownloadAvailable=false; }
+    void AllUnavailable(string message) { dlssReason=dlaaReason=rtxReason=flowReason=neuralRenderingReason=frucReason=message;neuralRuntimeDownloadAvailable=frucRuntimeImportAvailable=false; }
 
     // Evaluate and read one center texel to catch runtimes that accept creation but produce no picture.
     string CheckVideo(Device device,string mode,string backend)
@@ -155,6 +164,7 @@ internal sealed class GpuCapabilities
             case "dlss-nr": return neuralRenderingReason ?? "";
             case "rtxvideo": return rtxReason ?? "";
             case "amdFrameGeneration": return fgReason ?? "";
+            case "frucFrameGeneration": return frucReason ?? "";
             case "fsr-temporal": return fsrReason ?? "";
             case "opticalFlow": return flowReason ?? "";
             case "nativeFrameGeneration": return FrameGenerationReason;
@@ -179,8 +189,10 @@ internal sealed class GpuCapabilities
         var json=new StringBuilder("{\"adapter\":").Append(Quote(Adapter));
         json.Append(",\"fsrVersion\":").Append(Quote(fsrReason==null ? fsrVersion : ""));
         json.Append(",\"amdFrameGenerationVersion\":").Append(Quote(fgReason==null ? fgVersion : ""));
+        json.Append(",\"frucRuntimeInstalled\":").Append(frucRuntimeInstalled ? "true":"false");
+        json.Append(",\"frucRuntimeImportAvailable\":").Append(frucRuntimeImportAvailable ? "true":"false");
         json.Append(",\"dlssNeuralRuntimeDownloadAvailable\":").Append(neuralRuntimeDownloadAvailable ? "true":"false");
-        foreach(string id in new[]{"dlss","dlaa","dlss-nr","rtxvideo","fsr-temporal","nis","amdFrameGeneration","opticalFlow","nativeFrameGeneration"})
+        foreach(string id in new[]{"dlss","dlaa","dlss-nr","rtxvideo","fsr-temporal","nis","amdFrameGeneration","frucFrameGeneration","opticalFlow","nativeFrameGeneration"})
             json.Append(',').Append(Quote(id)).Append(Supports(id) ? ":true" : ":false")
                 .Append(',').Append(Quote(id+"Reason")).Append(':').Append(Quote(Reason(id)));
         json.Append(",\"presentationDrivers\":[");

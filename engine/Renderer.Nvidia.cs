@@ -48,7 +48,7 @@ internal sealed partial class Renderer
 
     public void SetFrameTiming(double delta,bool continuous)
     {
-        if(!continuous) amdNeedsReset=true;
+        if(!continuous) sdkNeedsReset=true;
         resetHistory=!continuous;
         if(!continuous && optical!=null) optical.ResetHistory();
         frameMilliseconds=continuous ? (float)Math.Max(1,Math.Min(120,delta)) : 16.67f;

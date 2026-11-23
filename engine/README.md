@@ -33,7 +33,7 @@ Choose a renderer before starting a session with `--renderer auto`, `d3d11`, `d3
 | `--wipe-position 0.5` | Initial divider position along its usable travel, from 0 to 1. Both endpoints leave room to grab the handle. Embedded callers can change this live with `SetWipePosition(float)`. |
 | `--wipe-horizontal` | Places Original above Enhanced. The default vertical orientation puts Original on the left. Embedded callers can rotate the divider live with `SetWipeHorizontal(bool)`. |
 | `--multiplier 1`, `2`, `3`, `4` | 1 presents captured frames. Higher values request intermediate frames. Achieved rates depend on source cadence, rendering time and display refresh. |
-| `--frame-generation p5cast` or `amd` | Select an interpolation provider. AMD uses multiplier 2 on D3D12 and Vulkan and reports the active provider version. |
+| `--frame-generation p5cast`, `amd`, or `fruc` | AMD FSR uses multiplier 2 on D3D12 and Vulkan. NVIDIA FRUC uses multiplier 2 in SDR on supported D3D11 and D3D12 devices. The capability report checks the installed runtime and selected device. |
 | `--resolution native`, `720`, `1080`, `1440`, `4k` | Caps enlargement by an active upscaler. Native allows enlargement up to the fitted picture size. Source-sized processing is preserved when the limit or window is smaller than the input. |
 | `--hdr auto`, `off`, `hdr10` | Auto follows the active Windows display. D3D12 and Vulkan use SDR when the driver cannot create an HDR10 swap chain. Explicit HDR10 requires D3D11, D3D12 or Vulkan with an active HDR display and supported PQ/BT.2020 output. OpenGL and RTX Video SR use SDR on Windows. |
 | `--display primary` or `--display \\.\DISPLAY2` | Selects a monitor in standalone mode. Embedded presentation follows the dashboard surface. |

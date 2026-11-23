@@ -405,7 +405,7 @@ internal sealed partial class Renderer : IDisposable
     void ReleaseSource()
     {
         ReleaseNis();
-        ReleaseAmdFrames();
+        ReleaseFrameGeneration();
         ReleaseNvidia();
         ReleaseHdr();
         foreach(var image in new [] {curr,prev,incoming,motion,mixed}) if(image!=null) image.Dispose();
@@ -453,7 +453,7 @@ internal sealed partial class Renderer : IDisposable
     }
     public void ResetFrameHistory()
     {
-        amdNeedsReset=true;amdEvaluated=-1;amdHasMidpoint=false;
+        sdkNeedsReset=true;sdkEvaluated=-1;sdkHasMidpoint=false;
         HasPrevious=false; suppressNextPair=true; motionReady=false; hdrGuideFrame=-1;
         if(optical!=null) optical.ResetHistory();
         resetHistory=true; evaluatedFrame=-1; havePriorEnhanced=false;
@@ -523,11 +523,11 @@ internal sealed partial class Renderer : IDisposable
             }
         }
         EffectivePictureMode=vendor ? neuralMode : mode;
-        bool amd=AmdFrameGenerationEnabled,amdIntermediate=false;
-        if(amd) {
-            PrepareAmdFrame(vendor);
+        bool sdkGeneration=FrameGenerationProvider!="p5cast",sdkIntermediate=false;
+        if(sdkGeneration) {
+            PrepareSdkFrame(vendor);
             if(phase<1 && HasPrevious) {
-                if(amdHasMidpoint) {source=amdMidpoint.Read;amdIntermediate=true;Generated++;}
+                if(sdkHasMidpoint) {source=sdkMidpoint.Read;sdkIntermediate=true;Generated++;}
                 else {
                     finishPrevious=true;
                     source=vendor ? (havePriorEnhanced?neuralPrevious.Read:neuralCurrent.Read) : prev.Read;
@@ -538,16 +538,16 @@ internal sealed partial class Renderer : IDisposable
         // The reference holds its last real frame between enhanced presentations.
         bool holdOriginal=(finishPrevious || (phase<1 && HasPrevious)) && (!vendor || havePriorEnhanced);
         if(!originalViewport.IsEmpty) DrawOriginal(originalViewport,holdOriginal);
-        if(amdIntermediate && vendor) {
+        if(sdkIntermediate && vendor) {
             Draw(HdrEnabled?"HdrToPq":"Original",display,viewport,source,1);
             return Present(samplePixel,holdOriginal);
         }
         if(HdrEnabled && !vendor)
         {
-            DrawHdr(mode,amd?1:phase,finishPrevious,viewport,sourceOverride:amdIntermediate?source:null);
+            DrawHdr(mode,sdkGeneration?1:phase,finishPrevious,viewport,sourceOverride:sdkIntermediate?source:null);
             return Present(samplePixel,holdOriginal);
         }
-        if(!amd && phase<1 && HasPrevious)
+        if(!sdkGeneration && phase<1 && HasPrevious)
         {
             if(HdrEnabled) PrepareHdrMotion(); else PrepareMotion();
             if(vendor && havePriorEnhanced)

@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$Version = '0.20.1',[string]$BuildDir=$PSScriptRoot)
+param([string]$Version = '0.21.0',[string]$BuildDir=$PSScriptRoot)
 $ErrorActionPreference = 'Stop'
 if ($Version -notmatch '^\d+\.\d+\.\d+(-[a-z0-9.-]+)?$') { throw 'Invalid version.' }
 $dist = Join-Path $PSScriptRoot 'dist'
@@ -20,7 +20,7 @@ try {
     }
     $runtimeFiles = @('CadrivectPlayer.exe','SharpDX.dll','SharpDX.Direct3D11.dll','SharpDX.DXGI.dll','SharpDX-LICENSE.txt','FSR-LICENSE.txt','NVIDIA-NIS-LICENSE.txt',
         'P5Cast.NeuralVk.dll','NVIDIA-NEURAL-RENDERING-LICENSE.txt','Cadrivect.Ngx.dll','nvngx_dlss.dll','NVIDIA-RTX-LICENSE.txt','Cadrivect.RtxVideo.dll','nvngx_vsr.dll',
-        'NVIDIA_RTX_Video_SDK_License.pdf','NVIDIA-OPTICAL-FLOW-LICENSE.txt','Cadrivect.Decoder.dll','FFmpeg-LICENSE.txt',
+        'NVIDIA_RTX_Video_SDK_License.pdf','NVIDIA-OPTICAL-FLOW-LICENSE.txt','P5Cast.Fruc.dll','P5Cast.FrucHost.exe','Cadrivect.Decoder.dll','FFmpeg-LICENSE.txt',
         'P5Cast.Fsr.dll','amd_fidelityfx_loader_dx12.dll','amd_fidelityfx_upscaler_dx12.dll','amd_fidelityfx_framegeneration_dx12.dll','AMD-FSR-LICENSE.md','AMD-FSR-NOTICES.md',
         'P5Cast.FsrVk.dll','amd_fidelityfx_loader_vk.dll','amd_fidelityfx_upscaler_vk.dll','amd_fidelityfx_framegeneration_vk.dll',
         'P5Cast.Presentation.dll','P5Cast.Dxvk.dll','DXVK-LICENSE.txt','SDL3.dll','SDL3-LICENSE.txt')

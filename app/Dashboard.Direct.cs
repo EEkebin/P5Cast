@@ -92,6 +92,14 @@ namespace Cadrivect
         {
             if(rendering!=null) engine.ConfigureOutput(resolutionIds[UI<ComboBox>("RenderResolution").SelectedIndex],hdrIds[UI<ComboBox>("HdrOutput").SelectedIndex]);
         }
+        void RefreshFrucOutputIntent()
+        {
+            int color=UI<ComboBox>("HdrOutput").SelectedIndex;
+            if(color<0) return;
+            var display=UI<ComboBox>("PlaybackDisplay").SelectedItem as DisplayTarget;
+            bool wantsHdr=color==2 || (color==0 && mode!=3 && display!=null && display.AdvancedColorEnabled);
+            meter.SetFrucOutputIntent(hdrIds[color],wantsHdr);
+        }
         double sourceAspect;
         void UpdateWipeInput()
         {
@@ -153,7 +161,8 @@ namespace Cadrivect
             playingMac=playingPipe=null; EndDiscordSession();
             if(!requestingRest) closeAfterStop=false;
             DismissStopPrompt();
-            meter.Reset(mode,factor); meter.SetRequestedVideoKbps(source=="Direct"?DirectKbps():0); surface.Clear(); UpdateTransport();
+            meter.Reset(mode,factor); RefreshFrucOutputIntent();
+            meter.SetRequestedVideoKbps(source=="Direct"?DirectKbps():0); surface.Clear(); UpdateTransport();
             if(closing) QueueWindowClose();
         }
         async Task StartPlayback()

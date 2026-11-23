@@ -101,7 +101,14 @@ The PS5 sends compressed video. Direct decodes those pixels once before enhancem
 
 Picture enhancements and frame generation default to Off through the Original picture and Off interpolation settings. P5Cast tests the chosen device before enabling vendor effects. DLSS and DLAA run through D3D11 or D3D12. NVIDIA optical flow can supply motion on D3D11. Other backends estimate motion on the selected GPU. [NVIDIA DLSS SDK](https://github.com/NVIDIA/DLSS/releases/tag/v310.9.16)
 
-**Frame generation** is independent of the picture filter. **P5Cast interpolation** estimates motion between captured frames at 2×, 3× or 4×. With DLAA or RTX Video SR it interpolates between enhanced pictures. With NIS it interpolates first and then applies the spatial filter. **AMD FSR frame generation · 2×** selects the AMD SDK on supported Direct3D 12 and Vulkan devices. NVIDIA DLSS Frame Generation requires a separate integration. On eligible RX 9000 hardware, the Direct3D 12 SDK can select frame generation 4.0.2. The RTX 4090 used 3.1.6 on both backends in SDR and HDR10 tests. The frame-rate dial counts intermediate frames actually submitted. Interpolation can add delay and distort moving details. [AMD FSR SDK and hardware support](https://gpuopen.com/amd-fsr-sdk/)
+**Frame generation** is independent of the picture filter. **P5Cast interpolation** estimates motion between captured frames at 2×, 3× or 4×. With DLAA or RTX Video SR it interpolates between enhanced pictures. With NIS it interpolates first and then applies the spatial filter. The frame-rate dial counts intermediate frames actually submitted.
+
+Under **Picture → Frame generation → Vendor interpolation**, choose the engine that generates the midpoint between two decoded frames.
+
+| Provider | Supported output |
+| --- | --- |
+| **AMD FSR 2×** | Direct3D 12 and Vulkan, in SDR or HDR10. The RTX 4090 used FSR 3.1.6 in testing. On eligible RX 9000 hardware the Direct3D 12 SDK can select frame generation 4.0.2. [AMD FSR SDK](https://gpuopen.com/amd-fsr-sdk/) |
+| **NVIDIA FRUC 2×** | Direct3D 11 and 12, in SDR, on NVIDIA hardware that passes the midpoint test. To set up a new PC, select **Import FRUC runtime…** and choose NVIDIA's Optical Flow SDK ZIP or its x64 `NvOFFRUC.dll`. The importer also installs the matching CUDA 11 runtime. [NVIDIA SDK download](https://developer.nvidia.com/opticalflow/download) · [FRUC programming guide](https://docs.nvidia.com/video-technologies/optical-flow-sdk/nvfruc-programming-guide/index.html) |
 
 On an eligible PC, the Picture panel offers the optional NVIDIA runtime for DLSS 5 NR. It uses RTX Remix’s published Vulkan dependency. Neural rendering can change lighting, materials and faces. P5Cast estimates motion from successive decoded frames and has no game geometry. Use the split view to judge the result on your game. The RTX 4090 is outside NVIDIA’s supported RTX 50 series for this feature. Visual quality and frame time on a 5090 still need measurement.
 

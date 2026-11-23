@@ -73,6 +73,28 @@ try {
     Require ($pictureButtons[8].Parent -eq $pictureButtons[2].Parent) 'NIS and spatial FSR share a row'
     Require ($pictureButtons[3].Parent -eq $pictureButtons[6].Parent -and $pictureButtons[6].Parent -ne $pictureButtons[2].Parent) 'RTX Video SR and temporal FSR share a separate row'
     Require ($pictureButtons[4].Parent -eq $pictureButtons[5].Parent -and $pictureButtons[5].Parent -eq $pictureButtons[7].Parent) 'The DLSS family shares a group'
+    $fruc=$meter.GetType().GetField('frucGeneration','Instance,NonPublic').GetValue($meter)
+    $amd=$meter.GetType().GetField('amdGeneration','Instance,NonPublic').GetValue($meter)
+    $frucSetup=$meter.GetType().GetField('frucSetup','Instance,NonPublic').GetValue($meter)
+    $provider=$meter.GetType().GetProperty('FrameGenerationProvider',[Reflection.BindingFlags]'Instance,NonPublic')
+    Require ($amd.Parent -eq $fruc.Parent -and $amd.GroupName -eq $fruc.GroupName) 'AMD and NVIDIA share one mutually exclusive vendor interpolation group'
+    Require (!$fruc.IsEnabled -and $frucSetup.Visibility -eq 'Collapsed') 'FRUC waits for its own GPU probe'
+    $caps['frucRuntimeImportAvailable']=$true; $caps['frucFrameGenerationReason']='Import the NVIDIA runtime.'
+    $meter.SetCapabilities($caps)
+    Require (!$fruc.IsEnabled -and $fruc.ToolTip -eq 'Import the NVIDIA runtime.' -and $frucSetup.Visibility -eq 'Visible') 'A missing FRUC runtime explains how to import it'
+    (Widget HdrOutput).SelectedItem='SDR'
+    $caps['amdFrameGeneration']=$true; $caps['frucFrameGeneration']=$true; $caps['frucRuntimeImportAvailable']=$false
+    $meter.SetCapabilities($caps); $amd.IsChecked=$true; $fruc.IsChecked=$true
+    Require ($fruc.IsEnabled -and !$amd.IsChecked -and $provider.GetValue($meter) -eq 'fruc' -and $frucSetup.Visibility -eq 'Collapsed') 'Selecting FRUC replaces AMD with NVIDIA at 2x'
+    $saveProvider=$meter.GetType().GetMethod('SavedProvider',[Reflection.BindingFlags]'Static,NonPublic')
+    Require ($saveProvider.Invoke($null,@('fruc',2)) -eq 'fruc' -and $saveProvider.Invoke($null,@('amd',2)) -eq 'amd' -and $saveProvider.Invoke($null,@('fruc',4)) -eq 'p5cast') 'FRUC and existing AMD selections round-trip at valid multipliers'
+    (Widget HdrOutput).SelectedItem='HDR10'
+    Require (!$fruc.IsEnabled -and !$fruc.IsChecked -and $fruc.ToolTip -like '*requires SDR*' -and $provider.GetValue($meter) -eq 'p5cast') 'Requesting HDR disables SDR-only FRUC before live telemetry arrives'
+    $frucHdrNotice=$meter.GetType().GetField('frucHdrNotice','Instance,NonPublic').GetValue($meter)
+    $frucFactors=$meter.GetType().GetField('factors','Instance,NonPublic').GetValue($meter)
+    Require ($frucFactors[0].IsChecked -and $frucHdrNotice.Visibility -eq 'Visible') 'HDR visibly selects Off and explains why FRUC stopped'
+    (Widget HdrOutput).SelectedItem='SDR'
+    Require ($fruc.IsEnabled -and $frucHdrNotice.Visibility -eq 'Collapsed') 'Returning to SDR makes the probed FRUC provider available again'
     Require (!$pictureButtons[8].IsEnabled) 'NIS waits for the selected graphics device probe'
     $caps['adapter']='AMD test adapter'; $caps['nis']=$true
     $caps['fsr-temporal']=$true; $caps['fsrVersion']='4.1.2'

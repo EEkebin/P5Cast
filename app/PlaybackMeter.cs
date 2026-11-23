@@ -64,8 +64,34 @@ namespace Cadrivect
             set {qualityChoice.SelectedIndex=Math.Max(0,Array.IndexOf(QualityIds,value));}
         }
         internal event Action<string> DlssQualityChanged;
-        readonly RadioButton amdGeneration;
+        readonly RadioButton amdGeneration,frucGeneration;
+        readonly StackPanel frucSetup;
+        readonly TextBlock frucHdrNotice;
+        internal event Action FrucImportRequested,FrucSdkRequested;
         internal string FrameGenerationProvider {get;set;}
+        internal static string SavedProvider(string provider,int factor)
+        {
+            return factor==2 && (provider=="amd" || provider=="fruc") ? provider : "p5cast";
+        }
+        internal bool ProviderAvailable(string provider)
+        {
+            return provider=="fruc" ? frucGeneration.IsEnabled : provider=="amd" && amdGeneration.IsEnabled;
+        }
+        bool expectedHdr;
+        string requestedColor="auto";
+        internal void SetFrucOutputIntent(string key,bool willUseHdr)
+        {
+            requestedColor=key;
+            expectedHdr=willUseHdr;
+            RefreshGenerationAvailability();
+            if(expectedHdr && FrameGenerationProvider=="fruc" && Flag(gpu,"frucFrameGeneration")==true)
+                TurnOffFrucForHdr();
+        }
+        void TurnOffFrucForHdr()
+        {
+            factors[0].IsChecked=true;
+            frucHdrNotice.Visibility=Visibility.Visible;
+        }
         readonly Slider divider;
         readonly ToggleButton horizontalSplit;
         internal bool WipeHorizontal {get {return horizontalSplit.IsChecked==true;} set {horizontalSplit.IsChecked=value;}}
@@ -222,17 +248,37 @@ namespace Cadrivect
                 StyleChip(button); factors[i]=button;
                 AutomationProperties.SetName(button,i==0 ? "Frame generation off" : "P5Cast interpolation "+factor+"×");
                 button.ToolTip=i==0 ? "Present captured frames only." : "P5Cast uses motion estimated from the video to present up to "+factor+" frames per source frame.";
-                button.Checked+=delegate {if(syncing) return; selectedFactor=factor; FrameGenerationProvider="p5cast"; SendSettings();};
+                button.Checked+=delegate {
+                    if(syncing) return;
+                    frucHdrNotice.Visibility=Visibility.Collapsed;
+                    selectedFactor=factor; FrameGenerationProvider="p5cast"; SendSettings();
+                };
                 factorGrid.Children.Add(button);
             }
             FrameGenerationProvider="p5cast";
-            amdGeneration=new RadioButton {GroupName="Rate"+group,Content="AMD FSR frame generation · 2×",Template=ChipTemplate};
-            StyleChip(amdGeneration); AutomationProperties.SetAutomationId(amdGeneration,"AmdFrameGeneration");
-            amdGeneration.Checked+=delegate {
-                if(syncing) return;
-                FrameGenerationProvider="amd"; selectedFactor=2; SendSettings();
-            };
-            picture.Children.Add(amdGeneration);
+            var vendorTitle=Label("Vendor interpolation",Muted,11,FontWeights.Normal);
+            vendorTitle.Margin=new Thickness(0,4,0,0); picture.Children.Add(vendorTitle);
+            var vendorRates=new UniformGrid {Columns=2,Rows=1,Margin=new Thickness(-2,0,-2,0)};
+            AutomationProperties.SetName(vendorRates,"Vendor interpolation");
+            amdGeneration=AddGenerationProvider(vendorRates,group,"amd","AMD FSR 2×","AmdFrameGeneration");
+            frucGeneration=AddGenerationProvider(vendorRates,group,"fruc","NVIDIA FRUC 2×","NvidiaFrucFrameGeneration");
+            picture.Children.Add(vendorRates);
+            frucHdrNotice=Label("Frame generation is off. NVIDIA FRUC requires SDR.",Muted,11,FontWeights.Normal);
+            frucHdrNotice.TextWrapping=TextWrapping.Wrap;
+            frucHdrNotice.Visibility=Visibility.Collapsed;
+            AutomationProperties.SetAutomationId(frucHdrNotice,"FrucHdrNotice");
+            picture.Children.Add(frucHdrNotice);
+            frucSetup=new StackPanel {Margin=new Thickness(0,3,0,0),Visibility=Visibility.Collapsed};
+            var sdkLink=new Hyperlink(new Run("Get NVIDIA Optical Flow SDK"));
+            sdkLink.SetResourceReference(TextElement.ForegroundProperty,Mint);
+            sdkLink.Click+=delegate {if(FrucSdkRequested!=null) FrucSdkRequested();};
+            var sdkText=Label("",Muted,11,FontWeights.Normal);sdkText.Inlines.Add(sdkLink);
+            frucSetup.Children.Add(sdkText);
+            var import=new Button {Content="Import FRUC runtime…",Margin=new Thickness(0,3,0,0),
+                ToolTip="Choose the NVIDIA Optical Flow SDK ZIP or its 64-bit FRUC runtime."};
+            AutomationProperties.SetAutomationId(import,"ImportFrucRuntime");
+            import.Click+=delegate {if(FrucImportRequested!=null) FrucImportRequested();};
+            frucSetup.Children.Add(import);picture.Children.Add(frucSetup);
             var viewLabel=Label("Comparison view",Muted,11,FontWeights.Normal);
             viewLabel.Margin=new Thickness(0,9,0,2); picture.Children.Add(viewLabel);
             var viewGrid=new UniformGrid {Rows=2,Columns=2,Margin=new Thickness(-2,0,-2,0)};
@@ -448,6 +494,23 @@ namespace Cadrivect
             pendingSettings=DateTime.UtcNow.AddSeconds(2);
             if(change!=null) change(selectedMode,selectedFactor);
         }
+        RadioButton AddGenerationProvider(Panel parent,string group,string provider,string label,string id)
+        {
+            var button=new RadioButton {GroupName="Rate"+group,Content=label,Template=ChipTemplate};
+            StyleChip(button);AutomationProperties.SetAutomationId(button,id);
+            button.Checked+=delegate {
+                if(syncing) return;
+                frucHdrNotice.Visibility=Visibility.Collapsed;
+                FrameGenerationProvider=provider; selectedFactor=2; SendSettings();
+            };
+            parent.Children.Add(button); return button;
+        }
+        void SyncGenerationChoice()
+        {
+            FrameGenerationProvider=SavedProvider(FrameGenerationProvider,selectedFactor);
+            var choice=FrameGenerationProvider=="amd" ? amdGeneration : FrameGenerationProvider=="fruc" ? frucGeneration : factors[selectedFactor-1];
+            choice.IsChecked=true;
+        }
         void SelectView(int index)
         {
             if(index==1 && selectedView!=1) previousView=selectedView;
@@ -469,7 +532,7 @@ namespace Cadrivect
         {
             selectedMode=Math.Max(0,Math.Min(modes.Length-1,modeIndex)); selectedFactor=Math.Max(1,Math.Min(4,multiplier));
             syncing=true;
-            try {modes[selectedMode].IsChecked=true; (FrameGenerationProvider=="amd" && selectedFactor==2 ? amdGeneration : factors[selectedFactor-1]).IsChecked=true; SelectView(selectedView);}
+            try {modes[selectedMode].IsChecked=true; SyncGenerationChoice(); SelectView(selectedView);}
             finally {syncing=false;}
             liveFsrVersion=null; hdr=false; lastSample=-1; pendingSettings=DateTime.MinValue; dial.SetRates(double.NaN,double.NaN,double.NaN,double.NaN);
             sourceValue.Text=generatedValue.Text="—"; targetValue.Text="Target —";
@@ -501,11 +564,23 @@ namespace Cadrivect
                 modes[i].IsEnabled=available; modes[i].ToolTip=reason;
             }
             modes[6].Content=PictureLabels.TemporalFsr(liveFsrVersion ?? Text(gpu,"fsrVersion"));
+            RefreshGenerationAvailability();
+            for(int i=0;i<factors.Length;i++) factors[i].IsEnabled=i==0 || !noAdapter;
+            RefreshQualityChoice();
+        }
+        void RefreshGenerationAvailability()
+        {
             amdGeneration.IsEnabled=Flag(gpu,"amdFrameGeneration")==true;
             amdGeneration.ToolTip=amdGeneration.IsEnabled ? "AMD FSR frame generation "+Text(gpu,"amdFrameGenerationVersion")+" · one generated frame between source frames." :
                 Text(gpu,"amdFrameGenerationReason") ?? Text(gpu,"probeFailure") ?? "Checking GPU support.";
-            for(int i=0;i<factors.Length;i++) factors[i].IsEnabled=i==0 || !noAdapter;
-            RefreshQualityChoice();
+            bool supported=Flag(gpu,"frucFrameGeneration")==true;
+            if(!hdr && !expectedHdr) frucHdrNotice.Visibility=Visibility.Collapsed;
+            frucGeneration.IsEnabled=supported && !expectedHdr && !hdr;
+            frucGeneration.ToolTip=!supported ? Text(gpu,"frucFrameGenerationReason") ?? Text(gpu,"probeFailure") ?? "Checking NVIDIA FRUC support." :
+                frucGeneration.IsEnabled ? "NVIDIA FRUC generates one intermediate SDR frame from two video frames." :
+                "NVIDIA FRUC requires SDR. Choose SDR in Graphics & display.";
+            AutomationProperties.SetHelpText(frucGeneration,(string)frucGeneration.ToolTip);
+            frucSetup.Visibility=Flag(gpu,"frucRuntimeImportAvailable")==true ? Visibility.Visible : Visibility.Collapsed;
         }
         void RefreshQualityChoice()
         {
@@ -599,7 +674,14 @@ namespace Cadrivect
             values["audioTarget"].Text=Metric(Number(snapshot,"audioTargetMs")," ms","0.#");
             values["underruns"].Text=Metric(Number(snapshot,"audioUnderruns"),"","0");
             values["rtt"].Text=Metric(Number(snapshot,"handshakeRttMs")," ms","0.0");
-            if(hdrFlag.HasValue && hdr!=hdrFlag.Value) {hdr=hdrFlag.Value; RefreshAvailability();}
+            if(hdrFlag.HasValue) {
+                bool negotiated=Text(snapshot,"hdrMode")==requestedColor && expectedHdr!=hdrFlag.Value;
+                if(negotiated) expectedHdr=hdrFlag.Value;
+                if(negotiated || hdr!=hdrFlag.Value) {
+                    hdr=hdrFlag.Value; RefreshAvailability();
+                    if(hdr && FrameGenerationProvider=="fruc") TurnOffFrucForHdr();
+                }
+            }
             string requested=Text(snapshot,"mode"), effective=Text(snapshot,"effectivePictureMode");
             string fsrVersion=effective=="fsr-temporal" ? Text(snapshot,"fsrVersion") : null;
             if(fsrVersion!=liveFsrVersion) {
@@ -613,8 +695,7 @@ namespace Cadrivect
                     if(mode>=0 && mode!=selectedMode) {selectedMode=mode; modes[mode].IsChecked=true; RefreshQualityChoice();}
                     if(factor>=1 && factor<=4) {
                         selectedFactor=(int)factor;
-                        FrameGenerationProvider=Text(snapshot,"frameGenerationProvider")=="amd" && selectedFactor==2 ? "amd" : "p5cast";
-                        (FrameGenerationProvider=="amd" ? amdGeneration : factors[selectedFactor-1]).IsChecked=true;
+                        FrameGenerationProvider=Text(snapshot,"frameGenerationProvider"); SyncGenerationChoice();
                     }
                     pendingSettings=DateTime.MinValue;
                 }
@@ -626,6 +707,8 @@ namespace Cadrivect
             if(string.IsNullOrEmpty(message) && comparing==true && mode>0)
                 message="Viewing Original. Select Enhanced or Draggable split to see the picture effect.";
             string fgVersion=Text(snapshot,"activeFrameGenerationVersion");
+            if(Text(snapshot,"activeFrameGenerationProvider")=="fruc" && comparing!=true && string.IsNullOrEmpty(message))
+                message="NVIDIA FRUC · 2×";
             if(!string.IsNullOrEmpty(fgVersion) && string.IsNullOrEmpty(Text(snapshot,"effectNotice")))
                 message=(string.IsNullOrEmpty(message) ? "" : message+" · ")+"AMD frame generation "+fgVersion;
             int active=Array.IndexOf(ModeIds,effective);

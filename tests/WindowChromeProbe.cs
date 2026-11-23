@@ -452,10 +452,31 @@ internal static partial class WindowChromeProbe
                         if(expectHdr) {
                             Require(frame.Contains("\"presenterHdr10\":true") && frame.Contains("\"presentationColorSpace\":\"BT.2020 PQ\"") &&
                                 frame.Contains("\"presenterHdrFormat\":\"RGB10A2_UNORM\""),"Missing negotiated HDR10 surface: "+frame);
+                            var fruc=(RadioButton)FindVisual(meter,"RadioButton",e=>AutomationProperties.GetAutomationId(e)=="NvidiaFrucFrameGeneration");
+                            Require(fruc!=null && !fruc.IsEnabled,"FRUC must be disabled during HDR playback.");
+                            bool testFruc=Equals(fruc.ToolTip,"NVIDIA FRUC requires SDR. Choose SDR in Graphics & display.");
                             color.SelectedItem="SDR";
                             await Until(delegate{return ((string)snapshot.Invoke(null,null)).Contains("\"hdrEnabled\":false");},"Live SDR switch failed.");
+                            if(testFruc) {
+                                await Until(()=>fruc.IsEnabled,"FRUC did not become available after selecting SDR.");
+                                var amd=(RadioButton)FindVisual(meter,"RadioButton",e=>AutomationProperties.GetAutomationId(e)=="AmdFrameGeneration");
+                                if(amd.IsEnabled) {
+                                    amd.IsChecked=true;
+                                    await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"activeFrameGenerationProvider\":\"amd\""),"AMD failed before switching to FRUC.",12000);
+                                }
+                                fruc.IsChecked=true;
+                                await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"activeFrameGenerationProvider\":\"fruc\""),"Selected FRUC failed to produce an intermediate frame.",12000);
+                                Require(amd.IsChecked!=true,"Both vendor providers are selected.");
+                            }
                             color.SelectedItem="HDR10";
                             await Until(delegate{return ((string)snapshot.Invoke(null,null)).Contains("\"hdrEnabled\":true");},"HDR10 did not resume.");
+                            if(testFruc) {
+                                await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"multiplier\":1") && fruc.IsChecked!=true && !fruc.IsEnabled,
+                                    "HDR did not turn FRUC off.");
+                                var hint=(TextBlock)FindVisual(meter,"TextBlock",e=>AutomationProperties.GetAutomationId(e)=="FrucHdrNotice");
+                                Require(hint!=null && hint.Visibility==Visibility.Visible,"HDR transition did not explain that FRUC was turned off.");
+                                Note(labels[i]+" presented NVIDIA FRUC in SDR and turned frame generation off for HDR10.");
+                            }
                             Note(labels[i]+" presented HDR10 and switched to SDR and back during playback.");
                             if(keys[i]=="d3d12" || keys[i]=="vulkan") {
                                 var picture=Find<Border>("MeterHost");
@@ -554,6 +575,18 @@ internal static partial class WindowChromeProbe
         // milliseconds. Measure layout here with software WPF; the native video stays on its GPU.
         if(CheckDrawerOption) RenderOptions.ProcessRenderMode=RenderMode.SoftwareOnly;
         string local=Path.Combine(stage,"local");
+        if(!reopen && Environment.GetEnvironmentVariable("P5CAST_PROBE_RENDERERS")=="hdr") {
+            var runtime=Path.Combine("P5Cast","runtimes","fruc");
+            var installed=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),runtime);
+            var isolated=Path.Combine(local,runtime);
+            foreach(string namePart in new[]{"NvOFFRUC.dll","cudart64_110.dll"}) {
+                var file=Path.Combine(installed,namePart);
+                if(File.Exists(file)) {
+                    Directory.CreateDirectory(isolated);
+                    File.Copy(file,Path.Combine(isolated,namePart),true);
+                }
+            }
+        }
         Environment.SetEnvironmentVariable("LOCALAPPDATA",local);
         string prefs=Path.Combine(local,"LumaRelay");
         Directory.CreateDirectory(prefs);

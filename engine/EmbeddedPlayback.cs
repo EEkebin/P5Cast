@@ -51,8 +51,7 @@ namespace Cadrivect.Engine
         }
         public static void ConfigureWithGeneration(int modeIndex,int multiplier,string provider)
         {
-            if(provider!=null && provider!="amd" && provider!="p5cast") throw new ArgumentException("Unknown frame generation provider.");
-            if(provider=="amd" && multiplier!=2) throw new ArgumentException("AMD frame generation provides a 2× mode.");
+            global::Renderer.ValidateFrameGeneration(provider,multiplier);
             if(modeIndex< -1 || modeIndex>=global::PlaybackControls.Modes.Length) throw new ArgumentOutOfRangeException("modeIndex");
             if(multiplier!= -1 && (multiplier<1 || multiplier>4)) throw new ArgumentOutOfRangeException("multiplier");
             lock(Gate) if(current!=null) current.Configure(modeIndex,multiplier,provider);

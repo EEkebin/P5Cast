@@ -270,8 +270,10 @@ internal static class Player
             if(Array.IndexOf(PictureLabels.Ids,mode)<0) throw new ArgumentException("Unknown picture mode: "+mode);
             if(mode=="nis" && !NisScaler.SupportsBackend(backend)) throw new ArgumentException(NisScaler.BackendReason);
             string generation=Option(args,"--frame-generation","p5cast").ToLowerInvariant();
-            if(generation!="p5cast" && generation!="amd") throw new ArgumentException("Choose p5cast or amd for --frame-generation.");
-            if(generation=="amd" && multiplier!=2) throw new ArgumentException("AMD frame generation requires --multiplier 2.");
+            Renderer.ValidateFrameGeneration(generation,multiplier);
+            if(host==null && generation=="amd" && backend!="d3d12" && backend!="vulkan") throw new ArgumentException("AMD frame generation requires Direct3D 12 or Vulkan.");
+            if(host==null && generation=="fruc" && !Renderer.SupportsFrucBackend(backend)) throw new ArgumentException(Renderer.FrucBackendReason);
+            if(host==null && generation=="fruc" && hdr=="hdr10") throw new ArgumentException(Renderer.FrucHdrReason);
             if(multiplier<1 || multiplier>4) throw new ArgumentException("Multiplier must be between 1 and 4.");
             int seconds=int.Parse(Option(args,"--seconds",testing ? "4":"0"),CultureInfo.InvariantCulture);
             using(var sample=testing ? new SampleWindow():null)
@@ -312,7 +314,12 @@ internal static class Player
                             changeRequested=true;
                         };
                         Action<string,int,string> hostedChange=delegate(string picture,int factor,string provider) {
+                            if(factor>0) {
+                                try {Renderer.ValidateFrameGeneration(provider ?? generation,factor);}
+                                catch(ArgumentException error) {settingsNotice=error.Message;return;}
+                            }
                             if(provider!=null) generation=provider;
+                            settingsNotice=null;
                             change(picture,factor);
                         };
                         if(controls!=null) {
@@ -398,10 +405,9 @@ internal static class Player
                                     redraw=true;
                                     requestedMode=null; changeRequested=false;
                                 }
-                                bool useAmd=generation=="amd" && multiplier==2 && !compare;
-                                renderer.SetFrameGenerationProvider(useAmd ? "amd" : "p5cast");
+                                renderer.SetFrameGenerationProvider(compare ? "p5cast" : generation);
                                 if(controls!=null) {
-                                    controls.SetNotice(settingsNotice ?? renderer.EffectNotice);
+                                    controls.SetNotice(settingsNotice ?? (!string.IsNullOrEmpty(renderer.FrameGenerationNotice) ? renderer.FrameGenerationNotice : renderer.EffectNotice));
                                     controls.UpdateLive(now,renderer,compare,lastRealAge,decoded);
                                 }
                                 if((host!=null || live!=null) && now-lastSnapshot>=(host==null ? 1000:250)) {
@@ -461,7 +467,7 @@ internal static class Player
                                     previousTime=timestamp;
                                     if(firstInput==0) firstInput=timestamp;
                                     lastInput=timestamp;
-                                    count=continuous && !compare ? multiplier:1;
+                                    count=continuous && !compare && string.IsNullOrEmpty(renderer.FrameGenerationNotice) ? multiplier:1;
                                     step=1; pairStart=now;
                                     due=count==1 ? now:Math.Max(now,lastSubmit+period/count);
                                 }
@@ -572,6 +578,8 @@ internal static class Player
                +",\"presenterHdrFormat\":"+(renderer.PresenterHdr10 ? "\"RGB10A2_UNORM\"":"null")
                +",\"outputNotice\":"+JsonString(renderer.OutputNotice)
                +",\"activeFrameGenerationVersion\":"+JsonString(renderer.ActiveFrameGenerationVersion)
+               +",\"activeFrameGenerationProvider\":"+JsonString(renderer.ActiveFrameGenerationProvider)
+               +",\"frucEvaluations\":"+renderer.FrucEvaluations+",\"frucMidpoints\":"+renderer.FrucMidpoints
                +",\"activeNisFilter\":"+JsonString(renderer.ActiveNisFilter)+",\"nisEvaluations\":"+renderer.NisEvaluations
                +",\"fsrVersion\":"+JsonString(renderer.ActiveFsrVersion)+",\"fsrEvaluations\":"+renderer.FsrEvaluations
                +",\"dlssModelHint\":"+JsonString(renderer.DlssModelHint)+",\"dlssQuality\":"+JsonString(renderer.DlssQuality)+",\"activeDlssQuality\":"+JsonString(renderer.ActiveDlssQuality)

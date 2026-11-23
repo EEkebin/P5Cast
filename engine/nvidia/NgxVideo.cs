@@ -8,17 +8,17 @@ internal sealed class NgxVideo : IDisposable
     const string Bridge = "Cadrivect.Ngx.dll";
     IntPtr state;
 
-    [DefaultDllImportSearchPaths(DllImportSearchPath.ApplicationDirectory | DllImportSearchPath.System32)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.AssemblyDirectory | DllImportSearchPath.System32)]
     [DllImport(Bridge, CallingConvention=CallingConvention.Cdecl, ExactSpelling=true, CharSet=CharSet.Unicode)]
     static extern uint NgxOpen2(IntPtr device, IntPtr context, string runtimeDirectory, string dataDirectory,
         int inputWidth, int inputHeight, int outputWidth, int outputHeight, int dlaa, int hdr, out IntPtr state, out int stage);
 
-    [DefaultDllImportSearchPaths(DllImportSearchPath.ApplicationDirectory | DllImportSearchPath.System32)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.AssemblyDirectory | DllImportSearchPath.System32)]
     [DllImport(Bridge, CallingConvention=CallingConvention.Cdecl, ExactSpelling=true)]
     static extern uint NgxEvaluate(IntPtr state, IntPtr context, IntPtr color, IntPtr motion, IntPtr depth,
         IntPtr output, float jitterX, float jitterY, float frameMs, int reset);
 
-    [DefaultDllImportSearchPaths(DllImportSearchPath.ApplicationDirectory | DllImportSearchPath.System32)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.AssemblyDirectory | DllImportSearchPath.System32)]
     [DllImport(Bridge, CallingConvention=CallingConvention.Cdecl, ExactSpelling=true)]
     static extern void NgxClose(IntPtr state);
 
@@ -30,7 +30,7 @@ internal sealed class NgxVideo : IDisposable
             throw new ArgumentException("DLAA evaluates at the incoming video resolution.");
         if (!dlaa && (outputWidth<inputWidth || outputHeight<inputHeight))
             throw new ArgumentException("Select an output at least as large as the input for DLSS upscaling.");
-        string runtime=AppDomain.CurrentDomain.BaseDirectory;
+        string runtime=Path.GetDirectoryName(typeof(NgxVideo).Assembly.Location);
         if (!File.Exists(Path.Combine(runtime,"nvngx_dlss.dll")) || !File.Exists(Path.Combine(runtime,Bridge)))
             throw new FileNotFoundException("Install the complete Windows package including the NVIDIA runtime.");
         string data=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Cadrivect","NGX");

@@ -14,13 +14,17 @@ using System.Web.Script.Serialization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Markup;
+using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Threading;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Ellipse = System.Windows.Shapes.Ellipse;
 
-[assembly: AssemblyTitle("Cadrivect")]
+[assembly: AssemblyTitle("P5Cast")]
+[assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.2.0.0")]
+[assembly: AssemblyVersion("0.3.0.0")]
 
 namespace Cadrivect
 {
@@ -42,21 +46,19 @@ namespace Cadrivect
             }
             catch (Exception e)
             {
-                MessageBox.Show(e.GetBaseException().Message, "Cadrivect", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(e.GetBaseException().Message, "P5Cast", MessageBoxButton.OK, MessageBoxImage.Error);
                 return 1;
             }
         }
     }
 
-    internal class Dashboard
+    internal partial class Dashboard
     {
         readonly Window window;
         readonly JavaScriptSerializer json = new JavaScriptSerializer();
         readonly string preferences = Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA") ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LumaRelay", "dashboard.json");
-        readonly string[] names = { "Sony", "Direct", "Demo" };
-        readonly string[] titles = { "PS Remote Play", "Direct to PS5", "Arcade demo" };
-        readonly string[] subtitles = { "Play through your existing Sony connection.", "Pair once and play through chiaki-ng.", "Try video, audio, and controls on this PC." };
-        readonly string[] actions = { "Open Remote Play", "Open direct client", "Play demo" };
+        readonly string[] names = { "Direct", "Sony", "Demo" };
+        readonly string[] titles = { "Direct to PS5", "Sony Remote Play", "Offline demo" };
         readonly string[] modeIds = { "original", "sharp", "fsr", "rtxvideo", "dlss", "dlaa" };
         readonly string[] hdrIds = { "auto","off","hdr10" };
         readonly string[] resolutionIds = { "native","720","1080","1440","4k" };
@@ -68,7 +70,19 @@ namespace Cadrivect
         string source = "Sony";
         string page = "Play";
         bool busy;
-        Process player;
+        readonly VideoSurface surface=new VideoSurface();
+        readonly PlaybackMeter meter;
+        readonly DispatcherTimer timer=new DispatcherTimer {Interval=TimeSpan.FromMilliseconds(250)};
+        EngineSession engine;
+        Process directCore;
+        Task<int> rendering;
+        bool closing, preparing, stopping, fullscreen, stats=true, comparing;
+        int mode, factor=1;
+        WindowState previousWindowState;
+        string failure="";
+        string pendingRevocation;
+        DateTime revokeUntil;
+        readonly Dictionary<string,string> consoleAddresses=new Dictionary<string,string>();
 
         T UI<T>(string name) where T : class { return (T)window.FindName(name); }
 
@@ -76,15 +90,13 @@ namespace Cadrivect
         {
             window = w;
             window.Icon = new BitmapImage(new Uri(Path.Combine(Program.Root,"app","assets","mark.ico")));
-            UI<ImageBrush>("HeroBrush").ImageSource = new BitmapImage(new Uri(Path.Combine(Program.Root,"app","assets","aurora.jpg")));
-            UI<ComboBox>("Mode").ItemsSource = new[] { "Original", "Sharpen", "AMD FSR 1", "NVIDIA RTX Video SR", "NVIDIA DLSS · experimental", "NVIDIA DLAA · experimental" };
-            UI<ComboBox>("Mode").SelectionChanged += delegate {
-                int i=UI<ComboBox>("Mode").SelectedIndex;
-                UI<TextBlock>("PictureHint").Text=i>=4
-                    ? "Experimental video reconstruction uses estimated motion and flat depth. Ctrl+Alt+B compares the picture. Ctrl+Alt+Q exits."
-                    : "Open the view after your game is visible. Ctrl+Alt+B compares the picture. Ctrl+Alt+Q exits.";
-            };
-            UI<ComboBox>("Multiplier").ItemsSource = new[] { "Off", "2×", "3×", "4×" };
+            UI<Border>("VideoHost").Child=surface;
+            surface.DoubleClicked+=ToggleFullscreen;
+            meter=new PlaybackMeter(delegate(int selectedMode,int multiplier) {
+                mode=selectedMode; factor=multiplier;
+                if(rendering!=null) engine.Configure(mode,factor);
+            },delegate(bool enabled){comparing=enabled; if(rendering!=null) engine.Compare(enabled);});
+            UI<Border>("MeterHost").Child=meter;
             var saved = ReadSettings();
             var output=UI<ComboBox>("PlaybackDisplay");
             RefreshDisplays(Field(saved,"display"));
@@ -95,37 +107,79 @@ namespace Cadrivect
             UI<CheckBox>("ClientHdr").IsChecked=string.Equals(Field(saved,"clientHdr"),"True",StringComparison.OrdinalIgnoreCase);
             output.DropDownOpened += delegate { RefreshDisplays(SelectedDisplayName()); };
             output.SelectionChanged += delegate {
-                if(refreshingDisplays || player==null || player.HasExited) return;
-                try {
-                    if(DisplayTarget.MovePlayer(player.Id,SelectedDisplayName()))
-                        Show("Moved playback to "+SelectedDisplayName()+".");
-                } catch(Exception ex) { Show(ex.Message,true); }
+                if(!refreshingDisplays && window.IsLoaded) MoveDashboard();
             };
             UI<ComboBox>("HdrOutput").ItemsSource=new[]{"Auto","SDR","HDR10"};
             UI<ComboBox>("HdrOutput").SelectedIndex=ParseIndex(saved,"hdr",0,hdrIds.Length);
             UI<ComboBox>("RenderResolution").ItemsSource=new[]{"Native","720p","1080p","1440p","4K"};
             UI<ComboBox>("RenderResolution").SelectedIndex=ParseIndex(saved,"resolution",0,resolutionIds.Length);
-            UI<CheckBox>("Fullscreen").IsChecked=!string.Equals(Field(saved,"fullscreen"),"False",StringComparison.OrdinalIgnoreCase);
+            UI<ComboBox>("HdrOutput").SelectionChanged+=delegate {UpdateOutput();};
+            UI<ComboBox>("RenderResolution").SelectionChanged+=delegate {UpdateOutput();};
             UI<ComboBox>("Quality").ItemsSource = new[] { "Use Moonlight settings", "1080p · 60 FPS · 35 Mbps", "1440p · 120 FPS · 65 Mbps", "4K · 60 FPS · 80 Mbps", "4K · 120 FPS · 120 Mbps" };
             UI<ComboBox>("Quality").SelectedIndex = ParseIndex(saved,"quality",0,5);
-            UI<ComboBox>("Mode").SelectedIndex = ParseIndex(saved, "mode", 2, modeIds.Length);
-            UI<ComboBox>("Multiplier").SelectedIndex = ParseIndex(saved, "multiplier", 0, 4);
+            bool savedPicture=Field(saved,"pictureDefaults")=="1";
+            int requested=savedPicture?ParseIndex(saved,"mode",0,6):0;
+            mode=requested<3?requested:0;
+            factor=savedPicture?ParseIndex(saved,"multiplier",0,4)+1:1;
+            meter.Reset(mode,factor);
+            window.Loaded+=async delegate {
+                MoveDashboard();
+                var display=output.SelectedItem as DisplayTarget;
+                string state=Field(saved,"maximized");
+                if(state.Equals("True",StringComparison.OrdinalIgnoreCase) || (state.Length==0 && display!=null && display.WorkingArea.Width>=1600))
+                    window.WindowState=WindowState.Maximized;
+                HwndSource.FromHwnd(new WindowInteropHelper(window).Handle).AddHook(DisplayChanged);
+                timer.Start(); await ReadGpu(requested);
+            };
+            timer.Tick+=delegate {Tick();};
+            UI<ComboBox>("DirectFps").ItemsSource=new[]{"60 FPS","30 FPS"};
+            UI<ComboBox>("DirectFps").SelectedIndex=ParseIndex(saved,"directFps",0,2);
+            object rawAddresses;
+            if(saved.TryGetValue("consoleAddresses",out rawAddresses) && rawAddresses is Dictionary<string,object>)
+                foreach(var row in (Dictionary<string,object>)rawAddresses) consoleAddresses[row.Key]=Convert.ToString(row.Value);
+            UI<ComboBox>("ConsolePicker").SelectionChanged+=delegate {
+                var c=UI<ComboBox>("ConsolePicker").SelectedItem as DirectConsole;
+                string remembered;
+                if(c!=null) UI<TextBox>("ConsoleAddress").Text=consoleAddresses.TryGetValue(c.Mac,out remembered)?remembered:c.Address??"";
+            };
+            ReloadConsoles(Field(saved,"consoleMac"));
             UI<TextBox>("HostAddress").Text = Field(saved, "address");
             var addresses = BindAddresses().ToList();
             UI<ComboBox>("BindIP").ItemsSource = addresses;
             var previous = Field(saved,"bind");
             UI<ComboBox>("BindIP").SelectedItem = addresses.Contains(previous) ? previous : addresses[0];
             var selected = Field(saved,"source");
-            SetSource(names.Contains(selected) ? selected : "Sony");
-            var previousPage = Field(saved, "page");
-            SetPage(client ? "Client" : new[]{"Play","Host","Client"}.Contains(previousPage) ? previousPage : "Play");
-            foreach (string key in names)
-                UI<Button>(key).Click += delegate { SetSource(key); };
-            foreach (var key in new[]{"Play","Host","Client"})
-                UI<Button>(key+"Nav").Click += delegate { SetPage(key); };
-
-            Bind("OpenSource", () => Open(false));
-            Bind("Enhance", () => Open(true));
+            var sourcePicker=UI<ComboBox>("SourceChoice"); sourcePicker.ItemsSource=titles;
+            sourcePicker.SelectedIndex=Math.Max(0,Array.IndexOf(names,selected));
+            SetSource(names[sourcePicker.SelectedIndex]);
+            sourcePicker.SelectionChanged+=delegate {if(sourcePicker.SelectedIndex>=0) SetSource(names[sourcePicker.SelectedIndex]);};
+            SetPage(client?"Client":"Play");
+            foreach(var key in new[]{"Play","Host","Client"}) UI<Button>(key+"Nav").Click+=delegate {SetPage(key);};
+            UI<Button>("AddConsole").Click+=delegate {OpenPair();};
+            UI<Button>("CancelPair").Click+=delegate {SetPage("Play");};
+            UI<Button>("OpenSource").Click+=async delegate {
+                if(Active || preparing) StopPlayback(); else await StartPlayback();
+            };
+            UI<Button>("Fullscreen").Click+=delegate {ToggleFullscreen();};
+            UI<Button>("ShowStats").Click+=delegate {ToggleStats();};
+            window.PreviewKeyDown+=delegate(object sender,KeyEventArgs e) {
+                bool chord=(Keyboard.Modifiers & (ModifierKeys.Control|ModifierKeys.Alt))==(ModifierKeys.Control|ModifierKeys.Alt);
+                var key=e.Key==Key.System?e.SystemKey:e.Key;
+                if(key==Key.F11 || (chord && key==Key.Enter)) ToggleFullscreen();
+                else if(chord && key==Key.O) ToggleStats();
+                else if(chord && key==Key.Q) StopPlayback();
+                else if(chord && key==Key.B && rendering!=null) {comparing=!comparing; engine.Compare(comparing);}
+                else if(key==Key.Escape && UI<StackPanel>("PairPanel").IsVisible) SetPage("Play");
+                else if(key==Key.Escape && fullscreen) ToggleFullscreen();
+                else return;
+                e.Handled=true;
+            };
+            Bind("PairConsole",async delegate {
+                Show("Pairing with your PS5...");
+                var c=await DirectConsole.Pair(UI<TextBox>("PairAddress").Text,UI<TextBox>("PsnAccount").Text,UI<TextBox>("PairCode").Text);
+                consoleAddresses[c.Mac]=c.Address; ReloadConsoles(c.Mac); SetPage("Play"); SaveSettings();
+                Show("Paired with "+c.Name+". Select Connect to play.");
+            });
             Bind("StartHost", () => {
                 var hostTarget=hostScreen.SelectedItem as DisplayTarget;
                 return hostTarget==null ? Relay("StartHost","-Address",SelectedIP()) : Relay("StartHost","-Address",SelectedIP(),"-DisplayDevice",hostTarget.DeviceName);
@@ -136,7 +190,12 @@ namespace Cadrivect
             Bind("RemovePeer", async () => {
                 var peer = UI<ComboBox>("Peers").SelectedItem as Peer;
                 if (peer==null) throw new InvalidOperationException("Load devices and select a client first.");
-                if (MessageBox.Show(window,"Revoke host access for " + peer.Name + "? The client will need a new pairing PIN.","Revoke access",MessageBoxButton.YesNo,MessageBoxImage.Question)!=MessageBoxResult.Yes) return;
+                if(pendingRevocation!=peer.Id || DateTime.UtcNow>revokeUntil) {
+                    pendingRevocation=peer.Id; revokeUntil=DateTime.UtcNow.AddSeconds(15);
+                    Show("Select Revoke access again within 15 seconds to remove "+peer.Name+". A new pairing PIN will be required.");
+                    return;
+                }
+                pendingRevocation=null;
                 await Relay("RevokeClient","-ClientId",peer.Id);
                 await LoadPeers();
                 Show("Access revoked for " + peer.Name + ".");
@@ -145,10 +204,9 @@ namespace Cadrivect
                 try { Process.Start("https://docs.lizardbyte.dev/projects/sunshine/latest/md_docs_2getting__started.html#windows"); }
                 catch (Exception e) { Show(e.Message,true); }
             };
-            UI<Button>("DirectClient").Click += delegate { SetSource("Direct"); SetPage("Play"); };
-            Bind("OpenClient", () => Relay("OpenClient"));
-            Bind("ClientPair", () => Relay("PairClient","-Address", ClientAddress()));
-            Bind("ClientPlay", Connect);
+            UI<Button>("DirectClient").Click += delegate { UI<ComboBox>("SourceChoice").SelectedIndex=0; SetPage("Play"); };
+            Bind("ClientPair", () => StartNetwork(true));
+            Bind("ClientPlay", () => StartNetwork(false));
             Bind("ApprovePin", async () => {
                 var pin = UI<TextBox>("Pin").Text.Trim();
                 if (pin.Length != 4 || pin.Any(c => c < '0' || c > '9'))
@@ -156,10 +214,51 @@ namespace Cadrivect
                 await Relay("ApprovePin","-Pin",pin);
                 UI<TextBox>("Pin").Clear();
             });
-            window.Closed += delegate { SaveSettings(); };
+            window.Closing+=delegate(object sender,System.ComponentModel.CancelEventArgs e) {
+                if(!closing) {SaveSettings(); closing=true; StopPlayback();}
+                if(rendering!=null || preparing) e.Cancel=true;
+            };
+            window.Closed+=delegate {timer.Stop();};
+        }
+        static void StopOwned(Process p)
+        {
+            if(p==null) return;
+            try {if(!p.HasExited) p.Kill();} catch(InvalidOperationException) {} catch(System.ComponentModel.Win32Exception) {}
+        }
+        void ReloadConsoles(string mac)
+        {
+            var rows=DirectConsole.List();
+            var picker=UI<ComboBox>("ConsolePicker"); picker.ItemsSource=rows;
+            picker.SelectedItem=rows.FirstOrDefault(c=>c.Mac==mac)??rows.FirstOrDefault();
+        }
+        async Task ReadGpu(int requested)
+        {
+            string file=Path.Combine(Path.GetTempPath(),"cadrivect-gpu-"+Guid.NewGuid().ToString("N")+".json");
+            try {
+                var info=new ProcessStartInfo(Path.Combine(Program.Root,"engine","bin","CadrivectPlayer.exe"),"--capabilities --report "+Quote(file))
+                    {UseShellExecute=false,CreateNoWindow=true};
+                using(var proc=Process.Start(info)) {
+                    if(!await Task.Run(()=>proc.WaitForExit(20000))) {StopOwned(proc); return;}
+                    if(proc.ExitCode!=0 || !File.Exists(file)) return;
+                }
+                var gpu=json.Deserialize<Dictionary<string,object>>(File.ReadAllText(file));
+                if(closing) return;
+                meter.SetCapabilities(gpu);
+                if(mode==0 && !Active && !preparing && requested>=3 && Field(gpu,modeIds[requested]).Equals("true",StringComparison.OrdinalIgnoreCase))
+                { mode=requested; meter.Reset(mode,factor); }
+            } catch(IOException) {} catch(System.ComponentModel.Win32Exception) {} catch(ArgumentException) {} catch(InvalidOperationException) {}
+            finally {try {File.Delete(file);} catch(IOException) {}}
         }
 
         string SelectedIP() { return Convert.ToString(UI<ComboBox>("BindIP").SelectedItem); }
+        IntPtr DisplayChanged(IntPtr hwnd,int message,IntPtr wp,IntPtr lp,ref bool handled)
+        {
+            if(message==0x232 || message==0x7E) {
+                RefreshDisplays(DisplayTarget.DeviceForWindow(hwnd));
+                if(engine!=null) engine.InvalidateDisplay();
+            }
+            return IntPtr.Zero;
+        }
         string SelectedDisplayName()
         {
             var d=UI<ComboBox>("PlaybackDisplay").SelectedItem as DisplayTarget;
@@ -195,17 +294,6 @@ namespace Cadrivect
             UI<ComboBox>("Peers").ItemsSource = peers;
             UI<ComboBox>("Peers").SelectedIndex = peers.Count>0 ? 0 : -1;
             Show(peers.Count==0 ? "This host has no paired clients." : "Select the device whose access you want to manage.");
-        }
-        Task Connect()
-        {
-            string address = ClientAddress();
-            switch (UI<ComboBox>("Quality").SelectedIndex) {
-                case 1: return Relay("Play","-Address",address,"-Resolution","1080","-Fps","60","-Mbps","35");
-                case 2: return Relay("Play","-Address",address,"-Resolution","1440","-Fps","120","-Mbps","65");
-                case 3: return Relay("Play","-Address",address,"-Resolution","4K","-Fps","60","-Mbps","80");
-                case 4: return Relay("Play","-Address",address,"-Resolution","4K","-Fps","120","-Mbps","120");
-                default: return Relay("Play","-Address",address);
-            }
         }
         string ClientAddress()
         {
@@ -253,6 +341,9 @@ namespace Cadrivect
         void SetPage(string value)
         {
             page = value;
+            pendingRevocation=null;
+            UI<StackPanel>("PairPanel").Visibility=Visibility.Collapsed;
+            UI<TextBox>("PairCode").Clear(); UI<TextBox>("PsnAccount").Clear();
             foreach(var key in new[]{"Play","Host","Client"})
             {
                 bool on = key == value;
@@ -264,71 +355,21 @@ namespace Cadrivect
         void SetSource(string value)
         {
             source = value;
-            int i = Array.IndexOf(names,value);
-            UI<TextBlock>("HeroTitle").Text = titles[i];
-            UI<TextBlock>("HeroDetail").Text = subtitles[i];
-            UI<Button>("OpenSource").Content = actions[i];
-            foreach(string key in names) Highlight(UI<Button>(key), key == value);
+            UI<Border>("DirectCard").Visibility=value=="Direct"?Visibility.Visible:Visibility.Collapsed;
+            UpdateTransport();
         }
-
+        void OpenPair()
+        {
+            SetPage("Play"); UI<StackPanel>("PlayPage").Visibility=Visibility.Collapsed;
+            UI<StackPanel>("PairPanel").Visibility=Visibility.Visible;
+            UI<TextBox>("PsnAccount").Text=DirectConsole.KnownAccountId();
+            UI<TextBox>("PairAddress").Text=UI<TextBox>("ConsoleAddress").Text; UI<TextBox>("PairAddress").Focus();
+        }
         void Show(string message, bool error = false)
         {
             UI<TextBlock>("Status").Text = message;
             UI<TextBlock>("Status").ToolTip = message;
             UI<Ellipse>("Indicator").Fill = error ? Brushes.LightSalmon : mint;
-        }
-
-        async Task Open(bool enhance)
-        {
-            if (enhance && player != null && !player.HasExited)
-                throw new InvalidOperationException("Close the running enhanced view before opening another.");
-            Show(source == "Direct" ? "Opening chiaki-ng. The first launch downloads and verifies the direct client…" : "Opening " + titles[Array.IndexOf(names,source)] + "…");
-            var r = await Script("sources/Start-Source.ps1", "-Source",source);
-            long handle;
-            if (!long.TryParse(Field(r,"windowHandle"),out handle) || handle==0)
-                throw new InvalidOperationException("Open the source and connect to a game, then try the enhanced view again.");
-            var target=UI<ComboBox>("PlaybackDisplay").SelectedItem as DisplayTarget;
-            if(target!=null) target.MoveSourceWindow(new IntPtr(handle));
-            if (!enhance)
-            {
-                Show("Opened " + titles[Array.IndexOf(names,source)] + ". The enhanced view is available when your game is visible.");
-                return;
-            }
-            string mode = modeIds[UI<ComboBox>("Mode").SelectedIndex];
-            string mult = (UI<ComboBox>("Multiplier").SelectedIndex+1).ToString(CultureInfo.InvariantCulture);
-            string exe = Path.Combine(Program.Root,"engine","bin","CadrivectPlayer.exe");
-            if (!File.Exists(exe)) throw new FileNotFoundException("CadrivectPlayer is missing. Use the complete Windows release ZIP.");
-            string reportDir = Path.Combine(Path.GetDirectoryName(preferences),"sessions");
-            Directory.CreateDirectory(reportDir);
-            string report = Path.Combine(reportDir,Guid.NewGuid().ToString("N")+".json");
-            var p = new Process();
-            string options=" --display "+Quote(SelectedDisplayName())+" --resolution "+resolutionIds[UI<ComboBox>("RenderResolution").SelectedIndex]
-                +" --hdr "+hdrIds[UI<ComboBox>("HdrOutput").SelectedIndex]+(UI<CheckBox>("Fullscreen").IsChecked==true ? "" : " --windowed");
-            p.StartInfo = new ProcessStartInfo(exe, "--hwnd "+handle.ToString(CultureInfo.InvariantCulture)+" --mode "+mode+" --multiplier "+mult+options+" --report "+Quote(report)) { UseShellExecute=false, WorkingDirectory=Path.GetDirectoryName(exe) };
-            p.EnableRaisingEvents = true;
-            p.Exited += delegate {
-                if (!window.Dispatcher.HasShutdownStarted)
-                    window.Dispatcher.BeginInvoke(new Action(() => {
-                        if (p != player) return;
-                        if (p.ExitCode==0) Show(SessionSummary(report));
-                        else Show("Enhanced view stopped. Check that the source window is visible and try again.", true);
-                    }));
-            };
-            p.Start();
-            player = p;
-            Show("Enhanced view opened. Audio and input stay with the source.");
-        }
-
-        string SessionSummary(string file)
-        {
-            try {
-                var result = json.Deserialize<Dictionary<string,object>>(File.ReadAllText(file));
-                string effect=Field(result,"activeNvidiaEffect");
-                string label=effect=="rtxvideo" ? "RTX Video SR" : effect.ToUpperInvariant();
-                return string.Format(CultureInfo.CurrentCulture, "Session ended. {0}{1} source FPS · {2} submitted FPS · {3} interpolated frames.",
-                    label.Length==0 ? "" : label+" · ",Field(result,"sourceFps"),Field(result,"submittedFps"),Field(result,"generated"));
-            } catch (IOException) {} catch (UnauthorizedAccessException) {} catch (ArgumentException) {} catch (InvalidOperationException) {}
-            return "Enhanced view closed.";
         }
 
         async Task Relay(string action, params string[] args)
@@ -363,6 +404,9 @@ namespace Cadrivect
                 child.StartInfo = new ProcessStartInfo(ps, string.Join(" ",command.Select(Quote))) {
                     UseShellExecute=false, CreateNoWindow=true, RedirectStandardOutput=true, RedirectStandardError=true, WorkingDirectory=Program.Root
                 };
+                // Windows PowerShell needs its own inbox modules even when our parent is PowerShell 7.
+                string inbox=Path.Combine(Path.GetDirectoryName(ps),"Modules");
+                child.StartInfo.EnvironmentVariables["PSModulePath"]=inbox+";"+child.StartInfo.EnvironmentVariables["PSModulePath"];
                 child.Start();
                 Task<string> output = child.StandardOutput.ReadToEndAsync();
                 Task<string> errors = child.StandardError.ReadToEndAsync();
@@ -401,8 +445,11 @@ namespace Cadrivect
             try {
                 Directory.CreateDirectory(Path.GetDirectoryName(preferences));
                 var hostTarget=UI<ComboBox>("HostDisplay").SelectedItem as DisplayTarget;
-                var settings = new { mode=UI<ComboBox>("Mode").SelectedIndex, multiplier=UI<ComboBox>("Multiplier").SelectedIndex,
-                    display=SelectedDisplayName(), resolution=UI<ComboBox>("RenderResolution").SelectedIndex,hdr=UI<ComboBox>("HdrOutput").SelectedIndex, fullscreen=UI<CheckBox>("Fullscreen").IsChecked==true,
+                var console=UI<ComboBox>("ConsolePicker").SelectedItem as DirectConsole;
+                var settings = new { pictureDefaults=1, mode=mode, multiplier=factor-1,
+                    consoleMac=console==null?"":console.Mac,consoleAddresses=consoleAddresses,directFps=UI<ComboBox>("DirectFps").SelectedIndex,
+                    display=SelectedDisplayName(), resolution=UI<ComboBox>("RenderResolution").SelectedIndex,hdr=UI<ComboBox>("HdrOutput").SelectedIndex,
+                    maximized=(fullscreen?previousWindowState:window.WindowState)==WindowState.Maximized,
                     clientHdr=UI<CheckBox>("ClientHdr").IsChecked==true,hostDisplay=hostTarget==null ? "" : hostTarget.DeviceName,
                     address=UI<TextBox>("HostAddress").Text.Trim(), bind=SelectedIP(), source=source, page=page, quality=UI<ComboBox>("Quality").SelectedIndex };
                 string temp = preferences+"."+Guid.NewGuid().ToString("N")+".tmp";

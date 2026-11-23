@@ -1,0 +1,371 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Automation.Peers;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Media;
+using System.Windows.Shapes;
+
+namespace Cadrivect
+{
+    internal sealed class PlaybackMeter : UserControl
+    {
+        static readonly string[] ModeIds={"original","sharp","fsr","rtxvideo","dlss","dlaa"};
+        static readonly string[] ModeLabels={"Original","Sharpen","AMD FSR 1","RTX Video SR","DLSS","DLAA"};
+        static readonly string[] Descriptions={"Display the source picture.","Sharpen edges and upscale fine detail.","AMD FidelityFX Super Resolution 1.",
+            "NVIDIA RTX Video Super Resolution for SDR video.","Experimental DLSS with motion estimated from the stream.","Experimental DLAA at the source resolution."};
+        static readonly string[] RateLabels={"Target","Input","Presented","Generated"};
+        static readonly Brush Ink=ColorBrush("#E9F3F1"), Muted=ColorBrush("#A5B9BB"), Line=ColorBrush("#304147"), Dark=ColorBrush("#141F24");
+        static readonly Brush[] Series={ColorBrush("#ADBBC0"),ColorBrush("#8DBAF6"),ColorBrush("#8FE6D0"),ColorBrush("#EABC8E")};
+        static readonly ControlTemplate ChipTemplate=MakeChipTemplate();
+        readonly Action<int,int> change;
+        readonly Action<bool> compare;
+        readonly RadioButton[] modes=new RadioButton[6], factors=new RadioButton[4];
+        readonly TextBlock[] rateValues=new TextBlock[4];
+        readonly Dictionary<string,TextBlock> values=new Dictionary<string,TextBlock>();
+        readonly TextBlock submitLabel,notice;
+        readonly ToggleButton compareButton;
+        readonly FrameRateDial dial=new FrameRateDial();
+        Dictionary<string,object> gpu;
+        int selectedMode,selectedFactor=1;
+        bool syncing,hdr;
+        long lastSample=-1;
+        DateTime pendingSettings,pendingCompare;
+
+        public PlaybackMeter(Action<int,int> change,Action<bool> compare)
+        {
+            this.change=change; this.compare=compare;
+            UseLayoutRounding=true; SnapsToDevicePixels=true; Background=Dark;
+            Foreground=Ink; FontFamily=new FontFamily("Segoe UI"); FontSize=12;
+            var body=new StackPanel {Margin=new Thickness(16,14,16,14)};
+            var title=Heading("Frame rate"); title.Margin=new Thickness(0);
+            var heading=new DockPanel(); var units=Label("FPS",Muted,10,FontWeights.SemiBold);
+            units.VerticalAlignment=VerticalAlignment.Center; DockPanel.SetDock(units,Dock.Right);
+            heading.Children.Add(units); heading.Children.Add(title); body.Children.Add(heading);
+            dial.Height=133; dial.Margin=new Thickness(0,2,0,6); body.Children.Add(dial);
+            var legend=new UniformGrid {Rows=2,Columns=2}; body.Children.Add(legend);
+            for(int i=0;i<4;i++)
+            {
+                var cell=new Grid {Margin=new Thickness(0,1,7,2)};
+                cell.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(12)});
+                cell.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(1,GridUnitType.Star)});
+                cell.ColumnDefinitions.Add(new ColumnDefinition {Width=GridLength.Auto});
+                if(i==0) cell.Children.Add(new Polygon {Points=new PointCollection {new Point(0,0),new Point(8,0),new Point(4,6)},
+                    Fill=Ink,VerticalAlignment=VerticalAlignment.Center});
+                else cell.Children.Add(new Line {X1=0,X2=8,Y1=0,Y2=0,Stroke=Series[i],StrokeThickness=3,StrokeStartLineCap=PenLineCap.Round,
+                    StrokeEndLineCap=PenLineCap.Round,HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Center});
+                var label=Label(RateLabels[i],Muted,11,FontWeights.Normal); Grid.SetColumn(label,1); cell.Children.Add(label);
+                var val=Label("—",Ink,12,FontWeights.SemiBold); Grid.SetColumn(val,2); cell.Children.Add(val); rateValues[i]=val;
+                legend.Children.Add(cell);
+            }
+            Separator(body);
+            body.Children.Add(Heading("Stream"));
+            AddMetric(body,"size","Input → output","Incoming frame size and presentation surface size in pixels.");
+            AddMetric(body,"format","Video format","Source codec and active output color mode.");
+            AddMetric(body,"bitrate","Video bitrate","Measured incoming compressed video rate.");
+            AddMetric(body,"decode","Video decode","Time spent decoding the latest video frame.");
+            submitLabel=AddMetric(body,"submit","Receive → submit","Local receipt of a compressed frame to submission for presentation.");
+            AddMetric(body,"queue","Audio queue","Duration of queued local audio.");
+            AddMetric(body,"rtt","Handshake RTT","Round-trip estimate from session setup.");
+            Separator(body);
+            body.Children.Add(Heading("Picture"));
+            string group=Guid.NewGuid().ToString("N");
+            var modeGrid=new UniformGrid {Rows=3,Columns=2,Margin=new Thickness(-2,1,-2,0)};
+            body.Children.Add(modeGrid);
+            for(int i=0;i<6;i++)
+            {
+                var button=new RadioButton {GroupName="Picture"+group,Content=ModeLabels[i],Template=ChipTemplate};
+                StyleChip(button); modes[i]=button; int index=i;
+                button.Checked+=delegate {
+                    if(syncing) return;
+                    selectedMode=index; SendSettings();
+                };
+                modeGrid.Children.Add(button);
+            }
+            var interpolation=Label("Frame interpolation",Muted,11,FontWeights.SemiBold);
+            interpolation.Margin=new Thickness(0,9,0,2); body.Children.Add(interpolation);
+            var factorGrid=new UniformGrid {Rows=1,Columns=4,Margin=new Thickness(-2,0,-2,0)};
+            body.Children.Add(factorGrid);
+            for(int i=0;i<4;i++)
+            {
+                int factor=i+1;
+                var button=new RadioButton {GroupName="Rate"+group,Content=i==0 ? "Off" : factor+"×",Template=ChipTemplate};
+                StyleChip(button); factors[i]=button;
+                button.ToolTip=i==0 ? "Present captured frames only." : "Present up to "+factor+" frames per source frame, including interpolated frames.";
+                button.Checked+=delegate {if(syncing) return; selectedFactor=factor; SendSettings();};
+                factorGrid.Children.Add(button);
+            }
+            compareButton=new ToggleButton {Content="Compare original",Template=ChipTemplate,
+                ToolTip="Temporarily show the original picture with interpolation off."};
+            StyleChip(compareButton); compareButton.Margin=new Thickness(0,8,0,0); body.Children.Add(compareButton);
+            compareButton.Click+=delegate {
+                if(syncing) return;
+                pendingCompare=DateTime.UtcNow.AddSeconds(2); if(compare!=null) compare(compareButton.IsChecked==true);
+            };
+            notice=Label("",Series[3],11,FontWeights.Normal); notice.TextWrapping=TextWrapping.Wrap; notice.Margin=new Thickness(0,5,0,0);
+            notice.Visibility=Visibility.Collapsed; body.Children.Add(notice);
+            Content=new ScrollViewer {Content=body,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};
+            Reset(0,1);
+        }
+        static SolidColorBrush ColorBrush(string color)
+        {
+            var brush=new SolidColorBrush((Color)ColorConverter.ConvertFromString(color)); brush.Freeze(); return brush;
+        }
+        static TextBlock Label(string text,Brush foreground,double size,FontWeight weight)
+        {
+            return new TextBlock {Text=text,Foreground=foreground,FontSize=size,FontWeight=weight,VerticalAlignment=VerticalAlignment.Center};
+        }
+        static TextBlock Heading(string text)
+        {
+            return new TextBlock {Text=text,Foreground=Ink,FontSize=15,FontWeight=FontWeights.SemiBold,Margin=new Thickness(0,0,0,5)};
+        }
+        static void Separator(Panel body)
+        {
+            body.Children.Add(new Border {Height=1,Background=Line,Margin=new Thickness(0,10,0,9)});
+        }
+        TextBlock AddMetric(Panel body,string id,string name,string detail)
+        {
+            var row=new Grid {Margin=new Thickness(0,2,0,2),ToolTip=detail};
+            row.ColumnDefinitions.Add(new ColumnDefinition {Width=GridLength.Auto});
+            row.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(1,GridUnitType.Star)});
+            var label=Label(name,Muted,11,FontWeights.Normal); row.Children.Add(label);
+            var metric=Label("—",Ink,11,FontWeights.SemiBold); metric.Margin=new Thickness(5,0,0,0);
+            metric.TextAlignment=TextAlignment.Right; metric.TextTrimming=TextTrimming.CharacterEllipsis;
+            Grid.SetColumn(metric,1); row.Children.Add(metric); values.Add(id,metric); body.Children.Add(row);
+            return label;
+        }
+        static ControlTemplate MakeChipTemplate()
+        {
+            var surface=new FrameworkElementFactory(typeof(Border),"Surface");
+            surface.SetValue(Border.CornerRadiusProperty,new CornerRadius(5));
+            surface.SetValue(Border.BorderThicknessProperty,new Thickness(1));
+            surface.SetValue(Border.BackgroundProperty,ColorBrush("#1D2B31")); surface.SetValue(Border.BorderBrushProperty,Line);
+            var content=new FrameworkElementFactory(typeof(ContentPresenter));
+            content.SetValue(ContentPresenter.HorizontalAlignmentProperty,HorizontalAlignment.Center);
+            content.SetValue(ContentPresenter.VerticalAlignmentProperty,VerticalAlignment.Center);
+            surface.AppendChild(content);
+            var template=new ControlTemplate(typeof(ToggleButton)) {VisualTree=surface};
+            var hover=new Trigger {Property=UIElement.IsMouseOverProperty,Value=true};
+            hover.Setters.Add(new Setter(Border.BorderBrushProperty,ColorBrush("#70918E"),"Surface")); template.Triggers.Add(hover);
+            var selected=new Trigger {Property=ToggleButton.IsCheckedProperty,Value=true};
+            selected.Setters.Add(new Setter(Border.BackgroundProperty,ColorBrush("#263F3D"),"Surface"));
+            selected.Setters.Add(new Setter(Border.BorderBrushProperty,ColorBrush("#557D74"),"Surface"));
+            selected.Setters.Add(new Setter(Control.ForegroundProperty,Series[2])); template.Triggers.Add(selected);
+            var focus=new Trigger {Property=UIElement.IsKeyboardFocusedProperty,Value=true};
+            focus.Setters.Add(new Setter(Border.BorderBrushProperty,Series[2],"Surface")); template.Triggers.Add(focus);
+            var disabled=new Trigger {Property=UIElement.IsEnabledProperty,Value=false};
+            disabled.Setters.Add(new Setter(UIElement.OpacityProperty,.44,"Surface")); template.Triggers.Add(disabled);
+            return template;
+        }
+        static void StyleChip(ToggleButton chip)
+        {
+            chip.Height=28; chip.Margin=new Thickness(2); chip.FontSize=11; chip.Foreground=Ink;
+            chip.FontWeight=FontWeights.SemiBold; ToolTipService.SetShowOnDisabled(chip,true);
+            AutomationProperties.SetName(chip,chip.Content.ToString());
+        }
+        void SendSettings()
+        {
+            pendingSettings=DateTime.UtcNow.AddSeconds(2);
+            if(change!=null) change(selectedMode,selectedFactor);
+        }
+        public void Reset(int modeIndex,int multiplier)
+        {
+            selectedMode=Math.Max(0,Math.Min(5,modeIndex)); selectedFactor=Math.Max(1,Math.Min(4,multiplier));
+            syncing=true;
+            try {modes[selectedMode].IsChecked=true; factors[selectedFactor-1].IsChecked=true; compareButton.IsChecked=false;}
+            finally {syncing=false;}
+            hdr=false; lastSample=-1; pendingSettings=pendingCompare=DateTime.MinValue; dial.SetRates(double.NaN,double.NaN,double.NaN,double.NaN);
+            foreach(var label in rateValues) label.Text="—";
+            foreach(var label in values.Values) label.Text="—";
+            notice.Visibility=Visibility.Collapsed; RefreshAvailability();
+        }
+        public void SetCapabilities(Dictionary<string,object> gpu)
+        {
+            this.gpu=gpu; RefreshAvailability();
+        }
+        void RefreshAvailability()
+        {
+            bool noAdapter=string.Equals(Text(gpu,"adapter"),"Unavailable",StringComparison.OrdinalIgnoreCase);
+            for(int i=0;i<modes.Length;i++)
+            {
+                bool vendor=i>=3;
+                bool available=i==0 || (!noAdapter && (!vendor || Flag(gpu,ModeIds[i])==true));
+                string reason=Descriptions[i];
+                if(!available) reason=gpu==null ? "Checking GPU support." : Text(gpu,ModeIds[i]+"Reason") ?? "This mode is unavailable on the active GPU.";
+                if(i==3 && hdr) {available=false; reason="RTX Video SR requires SDR output.";}
+                modes[i].IsEnabled=available; modes[i].ToolTip=reason;
+            }
+            for(int i=0;i<factors.Length;i++) factors[i].IsEnabled=i==0 || !noAdapter;
+        }
+        static object Field(Dictionary<string,object> data,string key)
+        {
+            object value; return data!=null && data.TryGetValue(key,out value) ? value : null;
+        }
+        static string Text(Dictionary<string,object> data,string key) {return Field(data,key) as string;}
+        static bool? Flag(Dictionary<string,object> data,string key)
+        {
+            object value=Field(data,key);
+            if(value is bool) return (bool)value;
+            bool parsed; return bool.TryParse(value as string,out parsed) ? (bool?)parsed : null;
+        }
+        static double Number(Dictionary<string,object> data,string key)
+        {
+            object raw=Field(data,key); double number;
+            if(raw==null || !double.TryParse(Convert.ToString(raw,CultureInfo.InvariantCulture),NumberStyles.Float,CultureInfo.InvariantCulture,out number) ||
+               number<0 || double.IsInfinity(number)) return double.NaN;
+            return number;
+        }
+        static string Metric(double value,string unit,string format)
+        {
+            return double.IsNaN(value) ? "—" : value.ToString(format,CultureInfo.CurrentCulture)+unit;
+        }
+        static string Dimensions(Dictionary<string,object> data,string prefix)
+        {
+            double w=Number(data,prefix+"Width"), h=Number(data,prefix+"Height");
+            return w>0 && h>0 ? w.ToString("0")+"×"+h.ToString("0") : "—";
+        }
+        public void Update(Dictionary<string,object> snapshot)
+        {
+            if(snapshot==null) return;
+            double id=Number(snapshot,"sampleId");
+            if(!double.IsNaN(id) && (long)id<=lastSample) return;
+            if(!double.IsNaN(id)) lastSample=(long)id;
+            double[] rates={Number(snapshot,"targetPresentedFps"),Number(snapshot,"sourceFps"),Number(snapshot,"submittedFps"),Number(snapshot,"generatedFps")};
+            // The engine can publish telemetry while waiting for its first picture.
+            if(Number(snapshot,"captured")==0) for(int i=0;i<rates.Length;i++) rates[i]=double.NaN;
+            for(int i=0;i<rates.Length;i++) rateValues[i].Text=Metric(rates[i],"","0.#");
+            dial.SetRates(rates[0],rates[1],rates[2],rates[3]);
+            string input=Dimensions(snapshot,"input"),output=Dimensions(snapshot,"output");
+            values["size"].Text=input=="—" && output=="—" ? "—" : input+" → "+output;
+            string codec=Text(snapshot,"codec"); bool? hdrFlag=Flag(snapshot,"hdrEnabled");
+            string color=hdrFlag.HasValue ? (hdrFlag.Value ? "HDR10":"SDR") : "";
+            values["format"].Text=string.IsNullOrEmpty(codec) ? (color.Length==0 ? "—":color) : codec+(color.Length==0 ? "" : " · "+color);
+            values["bitrate"].Text=Metric(Number(snapshot,"bitrateMbps")," Mb/s","0.0");
+            values["decode"].Text=Metric(Number(snapshot,"decodeMs")," ms","0.0");
+            string kind=Text(snapshot,"sourceKind");
+            submitLabel.Text=kind=="window" ? "Capture → submit" : kind=="demo" ? "Frame → submit" : "Receive → submit";
+            values["submit"].Text=Metric(Number(snapshot,"lastPcSubmitMs")," ms","0.0");
+            values["queue"].Text=Metric(Number(snapshot,"audioQueueMs")," ms","0.#");
+            ((Grid)values["queue"].Parent).ToolTip="Buffered locally. Target "+Metric(Number(snapshot,"audioTargetMs")," ms","0.#")+
+                " · Underruns "+Metric(Number(snapshot,"audioUnderruns"),"","0")+".";
+            values["rtt"].Text=Metric(Number(snapshot,"handshakeRttMs")," ms","0.0");
+            if(hdrFlag.HasValue && hdr!=hdrFlag.Value) {hdr=hdrFlag.Value; RefreshAvailability();}
+            string requested=Text(snapshot,"mode"), effective=Text(snapshot,"effectivePictureMode");
+            int mode=Array.IndexOf(ModeIds,requested); double factor=Number(snapshot,"multiplier"); bool? comparing=Flag(snapshot,"compare");
+            syncing=true;
+            try {
+                if(DateTime.UtcNow>=pendingSettings || (mode==selectedMode && factor==selectedFactor)) {
+                    if(mode>=0) {selectedMode=mode; modes[mode].IsChecked=true;}
+                    if(factor>=1 && factor<=4) {selectedFactor=(int)factor; factors[selectedFactor-1].IsChecked=true;}
+                    pendingSettings=DateTime.MinValue;
+                }
+                if(comparing.HasValue && (DateTime.UtcNow>=pendingCompare || comparing==compareButton.IsChecked)) {
+                    compareButton.IsChecked=comparing; pendingCompare=DateTime.MinValue;
+                }
+            } finally {syncing=false;}
+            string message=Text(snapshot,"effectNotice");
+            int active=Array.IndexOf(ModeIds,effective);
+            if(string.IsNullOrEmpty(message) && comparing!=true && active>=0 && mode>=0 && active!=mode) message="Active picture · "+ModeLabels[active];
+            notice.Text=message ?? ""; notice.Visibility=string.IsNullOrEmpty(message) ? Visibility.Collapsed : Visibility.Visible;
+        }
+
+        sealed class FrameRateDial : FrameworkElement
+        {
+            const double Maximum=240;
+            static readonly Brush Track=ColorBrush("#2B3D43"), Tick=ColorBrush("#5C7378");
+            static readonly Pen MinorTick=new Pen(Tick,1),MajorTick=new Pen(Muted,1.3);
+            static readonly Typeface NumberFace=new Typeface(new FontFamily("Segoe UI"),FontStyles.Normal,FontWeights.SemiBold,FontStretches.Normal);
+            static readonly Typeface LabelFace=new Typeface("Segoe UI");
+            double target,source,presented,generated;
+            internal FrameRateDial()
+            {
+                AutomationProperties.SetAutomationId(this,"FrameRateDial");
+                AutomationProperties.SetName(this,"Frame rate dial");
+                SetRates(double.NaN,double.NaN,double.NaN,double.NaN);
+            }
+            protected override AutomationPeer OnCreateAutomationPeer() {return new DialPeer(this);}
+            sealed class DialPeer : FrameworkElementAutomationPeer
+            {
+                public DialPeer(FrameRateDial owner):base(owner) {}
+                protected override bool IsControlElementCore() {return true;}
+                protected override bool IsContentElementCore() {return true;}
+                protected override string GetClassNameCore() {return "FrameRateDial";}
+                protected override AutomationControlType GetAutomationControlTypeCore() {return AutomationControlType.Custom;}
+            }
+            static string Describe(double rate) {return double.IsNaN(rate) ? "unavailable" : Metric(rate," FPS","0.#");}
+            public void SetRates(double aim,double input,double submitted,double synthetic)
+            {
+                target=aim; source=input; presented=submitted; generated=synthetic;
+                string detail="Input "+Describe(source)+". Generated "+Describe(generated)+". Presented "+Describe(presented)+". Target "+Describe(target)+".";
+                AutomationProperties.SetHelpText(this,detail); ToolTip=detail; InvalidateVisual();
+            }
+            // All tracks use the same half-circle and zero-to-240 scale, including at 30 fps.
+            static Point Polar(Point hub,double radius,double angle)
+            {
+                return new Point(hub.X-radius*Math.Cos(angle),hub.Y-radius*Math.Sin(angle));
+            }
+            static double Angle(double fps) {return Math.PI*Math.Min(1,Math.Max(0,fps/Maximum));}
+            static void Arc(DrawingContext dc,Point hub,double r,double angle,Brush color,double width)
+            {
+                var pen=new Pen(color,width){StartLineCap=PenLineCap.Round,EndLineCap=PenLineCap.Round};
+                var shape=new StreamGeometry();
+                using(var g=shape.Open()) {
+                    g.BeginFigure(Polar(hub,r,0),false,false);
+                    g.ArcTo(Polar(hub,r,angle),new Size(r,r),0,false,SweepDirection.Clockwise,true,false);
+                }
+                dc.DrawGeometry(null,pen,shape);
+            }
+            static void TrackValue(DrawingContext dc,Point hub,double r,double value,Brush brush)
+            {
+                Arc(dc,hub,r,Math.PI,Track,4);
+                if(double.IsNaN(value)) return;
+                double angle=Angle(value); Point tip=Polar(hub,r,angle);
+                if(value>0) {
+                    Arc(dc,hub,r,angle,brush,4);
+                    dc.DrawEllipse(brush,null,tip,3.2,3.2);
+                } else dc.DrawEllipse(Dark,new Pen(brush,1.5),tip,2.3,2.3);
+            }
+            void CenterText(DrawingContext dc,string text,Point center,double size,Typeface font,Brush color)
+            {
+                var label=new FormattedText(text,CultureInfo.CurrentCulture,FlowDirection.LeftToRight,font,size,color,
+                    VisualTreeHelper.GetDpi(this).PixelsPerDip);
+                dc.DrawText(label,new Point(center.X-label.Width/2,center.Y-label.Height/2));
+            }
+            protected override void OnRender(DrawingContext dc)
+            {
+                base.OnRender(dc);
+                Point hub=new Point(ActualWidth/2,ActualHeight-10);
+                double radius=Math.Min(hub.X-18,hub.Y-11);
+                if(radius<45) return;
+                // Put the scale beyond the tips so endpoint readings and target marks never cover the rates.
+                for(int i=0;i<=16;i++) {
+                    double angle=i*Math.PI/16;
+                    bool major=i%4==0;
+                    dc.DrawLine(major ? MajorTick:MinorTick,Polar(hub,radius-10,angle),Polar(hub,radius-(major?3:i%2==0?5:7),angle));
+                    if(major) CenterText(dc,i==16 ? "240+" : (i*15).ToString(CultureInfo.InvariantCulture),
+                        Polar(hub,radius+7,angle),10,LabelFace,Muted);
+                }
+                TrackValue(dc,hub,radius-18,presented,Series[2]);
+                TrackValue(dc,hub,radius-27,source,Series[1]);
+                TrackValue(dc,hub,radius-36,generated,Series[3]);
+                if(!double.IsNaN(target)) {
+                    double a=Angle(target);
+                    var tip=Polar(hub,radius-16,a); var back=Polar(hub,radius-7,a);
+                    double dx=3.8*Math.Sin(a),dy=-3.8*Math.Cos(a);
+                    var marker=new StreamGeometry();
+                    using(var g=marker.Open()) {
+                        g.BeginFigure(tip,true,true);
+                        g.LineTo(new Point(back.X+dx,back.Y+dy),true,false);
+                        g.LineTo(new Point(back.X-dx,back.Y-dy),true,false);
+                    }
+                    dc.DrawGeometry(Ink,new Pen(Dark,1),marker);
+                }
+                CenterText(dc,Metric(presented,"","0"),new Point(hub.X,hub.Y-24),29,NumberFace,Ink);
+                CenterText(dc,"Presented FPS",new Point(hub.X,hub.Y-2),10.5,LabelFace,Muted);
+            }
+        }
+    }
+}

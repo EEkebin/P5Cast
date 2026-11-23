@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('StartHost','StopHost','Status','ResolveDisplay','OpenClient','PairClient','Play','ApprovePin','InstallClient','InstallHost','ListClients','RevokeClient')]
+    [ValidateSet('StartHost','StopHost','Status','ResolveDisplay','OpenClient','PairClient','Play','PreparePair','PreparePlay','ApprovePin','InstallClient','InstallHost','ListClients','RevokeClient')]
     [string] $Action = 'Status',
     [string] $Address,
     [ValidatePattern('^[0-9]{4}$')][string] $Pin,
@@ -133,6 +133,17 @@ function Confirm-HostDisplay($Log,$Device,$Id) {
     $selectedOutputs = @(($json.Groups[1].Value | ConvertFrom-Json) | Where-Object { $_.display_name -eq $Device })
     if ($selectedOutputs.Count -ne 1 -or $selectedOutputs[0].device_id -ne $Id) { throw 'Sunshine could not confirm the requested display. Refresh the display selection and restart the host.' }
 }
+function Write-HostApplications($Path) {
+    $entries = @(@{name='P5Cast'; 'image-path'='desktop.png'})
+    if (Test-Path -LiteralPath $Path -PathType Leaf) {
+        try { $prior = (Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json -ErrorAction Stop).apps }
+        catch { $prior = @() }
+        foreach ($legacy in 'Cadrivect','LumaRelay') {
+            if (@($prior.name) -contains $legacy) { $entries += @{name=$legacy; 'image-path'='desktop.png'} }
+        }
+    }
+    Write-Text $Path (@{env=@{}; apps=$entries} | ConvertTo-Json -Depth 4 -Compress)
+}
 function Start-RelayHost {
     $chosen = $Address
     $available = @(Get-LocalAddresses | Sort-Object hasGateway -Descending)
@@ -150,11 +161,11 @@ function Start-RelayHost {
     [IO.Directory]::CreateDirectory($private) | Out-Null
     New-HostCredential
     $apps = Join-Path $private 'apps.json'
-    Write-Text $apps '{"env":{},"apps":[{"name":"Cadrivect","image-path":"desktop.png"}]}'
+    Write-HostApplications $apps
     $configPath = Join-Path $private 'sunshine.conf'
     $log = Join-Path $private 'sunshine.log'
     $config = @(
-        'sunshine_name = Cadrivect', "port = $port", "bind_address = $chosen", 'address_family = ipv4',
+        'sunshine_name = P5Cast', "port = $port", "bind_address = $chosen", 'address_family = ipv4',
         "external_ip = $chosen", 'upnp = disabled', 'origin_web_ui_allowed = lan',
         'lan_encryption_mode = 2', 'wan_encryption_mode = 2', 'system_tray = disabled',
         'install_steam_audio_drivers = disabled', 'nvenc_opengl_vulkan_on_dxgi = disabled', 'nvenc_latency_over_power = disabled',
@@ -253,8 +264,10 @@ function Start-QuietPreview($Launch) {
 }
 function Start-RelayClient {
     if ($Action -ne 'OpenClient' -and (!$Address -or $Address -notmatch '^(?=.{1,253}$)[a-zA-Z0-9][a-zA-Z0-9.-]*$')) { throw 'Enter the host IPv4 address or DNS name.' }
-    if ($Action -eq 'Play' -and $Hdr -and $Codec -eq 'H.264') { throw 'Choose Auto, HEVC, or AV1 for HDR streaming.' }
-    $samePc = $Action -eq 'Play' -and (Test-SamePcTarget $Address)
+    $playback = $Action -in 'Play','PreparePlay'
+    $pairing = $Action -in 'PairClient','PreparePair'
+    if ($playback -and $Hdr -and $Codec -eq 'H.264') { throw 'Choose Auto, HEVC, or AV1 for HDR streaming.' }
+    $samePc = $playback -and (Test-SamePcTarget $Address)
     $binary = Install-Binary moonlight
     if ($samePc) { Confirm-QuietPreviewRuntime $binary }
     $prefsDir = Join-Path (Split-Path $binary) 'Moonlight Game Streaming Project'
@@ -264,17 +277,31 @@ function Start-RelayClient {
         Write-Text $prefs (('[General]','richpresence=false') -join [Environment]::NewLine)
     }
     $arguments = @()
-    if ($Action -eq 'PairClient') {
+    if ($pairing) {
+        if ($Action -eq 'PreparePair' -and !$Pin) {
+            $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+            try {
+                $digits = New-Object byte[] 2
+                do { $rng.GetBytes($digits); $number = [BitConverter]::ToUInt16($digits,0) } while ($number -ge 60000)
+                $Pin = ($number % 10000).ToString('0000')
+            } finally { $rng.Dispose() }
+        }
         $arguments = @('pair',$Address)
         if ($Pin) { $arguments += @('--pin',$Pin) }
-    } elseif ($Action -eq 'Play') {
-        $arguments = @('stream',$Address,'Cadrivect','--audio-on-host')
+    } elseif ($playback) {
+        $arguments = @('stream',$Address,'P5Cast','--audio-on-host')
         if ($Resolution) { $arguments += "--$Resolution" }
         if ($Fps) { $arguments += @('--fps',"$Fps") }
         if ($Mbps) { $arguments += @('--bitrate',([string]($Mbps*1000))) }
         if ($Codec) { $arguments += @('--video-codec',$Codec) }
         if ($Hdr) { $arguments += '--hdr' }
-        if ($Windowed) { $arguments += @('--display-mode','windowed') }
+        if ($Windowed -or $Action -eq 'PreparePlay') { $arguments += @('--display-mode','windowed') }
+    }
+    if ($Action -in 'PreparePlay','PreparePair') {
+        $message = if ($pairing) { "Enter PIN $Pin on the host's Approve PIN screen." }
+            elseif ($samePc) { 'Connecting to this PC with client audio muted to prevent feedback.' }
+            else { 'Connecting to the streaming host.' }
+        return @{ok=$true; executable=$binary; arguments=$arguments; muted=[bool]$samePc; pairing=[bool]$pairing; message=$message}
     }
     $launch = @{FilePath=$binary; WorkingDirectory=(Split-Path $binary); PassThru=$true}
     if ($arguments.Count) { $launch.ArgumentList = $arguments }

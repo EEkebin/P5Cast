@@ -13,6 +13,7 @@ public sealed class DisplayTarget
     public string FriendlyName { get; private set; }
     public bool Primary { get; private set; }
     public bool AdvancedColorEnabled { get; private set; }
+    public double RefreshHz { get; private set; }
     public Rectangle Bounds { get; private set; }
     public Rectangle WorkingArea { get; private set; }
     public string MonitorPath { get; private set; }
@@ -109,6 +110,20 @@ public sealed class DisplayTarget
         foreach(var screen in Enumerate())
             if(String.Equals(screen.DeviceName,deviceName,StringComparison.OrdinalIgnoreCase)) target=screen;
         if(target==null) return false;
+        var player=LocatePlayer(pid);
+        if(player==IntPtr.Zero) return false;
+        IntPtr result;
+        return SendMessageTimeout(player,MoveMessage,target.monitorHandle,IntPtr.Zero,2,2000,out result)!=IntPtr.Zero && result!=IntPtr.Zero;
+    }
+    public static bool PlayerControls(int pid,int mode,int multiplier)
+    {
+        var player=LocatePlayer(pid);
+        if(player==IntPtr.Zero) return false;
+        IntPtr result;
+        return SendMessageTimeout(player,RegisterWindowMessage("Cadrivect.Player.Controls.0.3"),new IntPtr(mode),new IntPtr(multiplier),2,2000,out result)!=IntPtr.Zero && result!=IntPtr.Zero;
+    }
+    static IntPtr LocatePlayer(int pid)
+    {
         IntPtr player=IntPtr.Zero;
         WindowCallback locate=delegate(IntPtr hwnd,IntPtr unused) {
             uint owner;
@@ -117,9 +132,7 @@ public sealed class DisplayTarget
             player=hwnd; return false;
         };
         EnumWindows(locate,IntPtr.Zero);
-        if(player==IntPtr.Zero) return false;
-        IntPtr result;
-        return SendMessageTimeout(player,MoveMessage,target.monitorHandle,IntPtr.Zero,2,2000,out result)!=IntPtr.Zero && result!=IntPtr.Zero;
+        return player;
     }
     public static bool IsPlaybackSource(IntPtr hwnd)
     {
@@ -157,6 +170,7 @@ public sealed class DisplayTarget
                     var src=new SourceName { H=new Header {Type=1,Size=(uint)Marshal.SizeOf(typeof(SourceName)),Adapter=path.Source.Adapter,Id=path.Source.Id} };
                     DisplayTarget target;
                     if(GetSourceName(ref src)!=0 || !targets.TryGetValue(src.Device,out target)) continue;
+                    if(path.Target.Denominator!=0) target.RefreshHz=(double)path.Target.Numerator/path.Target.Denominator;
                     var name=new TargetName { H=new Header {Type=2,Size=(uint)Marshal.SizeOf(typeof(TargetName)),Adapter=path.Target.Adapter,Id=path.Target.Id} };
                     if(GetTargetName(ref name)==0 && !String.IsNullOrWhiteSpace(name.Friendly)) {
                         target.FriendlyName=name.Friendly; target.MonitorPath=name.Path;

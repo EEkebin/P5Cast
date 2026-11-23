@@ -1,6 +1,8 @@
 # Functions shared by the source launch and discovery commands.
 $sourceCache = Join-Path $env:LOCALAPPDATA 'LumaRelay\Sources'
 $chiakiVersion = '1.10.1'
+$chiakiArchiveUrl = "https://github.com/chiaki-ng/chiaki-ng/releases/download/v$chiakiVersion/chiaki-ng-win_x64-MSYS2-portable-$chiakiVersion.zip"
+$chiakiArchiveSha256 = '6ca3f5e6780608104d79345ab7755cfa77fefc33a41ae10651a874c43f54ea57'
 $chiakiDirectory = Join-Path $sourceCache "chiaki-ng-$chiakiVersion-x64"
 $chiakiExe = Join-Path $chiakiDirectory 'chiaki-ng-Win\chiaki.exe'
 $demoCode = Join-Path $PSScriptRoot 'SignalRun.cs'
@@ -43,16 +45,14 @@ function Install-SourceTool([string]$source) {
     try {
         if ($source -eq 'Direct') {
             if (-not [Environment]::Is64BitOperatingSystem) { throw 'The bundled chiaki-ng package requires x64 Windows.' }
-            $url = "https://github.com/chiaki-ng/chiaki-ng/releases/download/v$chiakiVersion/chiaki-ng-win_x64-MSYS2-portable-$chiakiVersion.zip"
             $archive = Join-Path $stage 'chiaki.zip'
-            $expected = '6ca3f5e6780608104d79345ab7755cfa77fefc33a41ae10651a874c43f54ea57'
             $previousProtocols = [Net.ServicePointManager]::SecurityProtocol
             try {
                 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
                 $client = New-Object Net.WebClient
-                try { $client.DownloadFile($url, $archive) } finally { $client.Dispose() }
+                try { $client.DownloadFile($chiakiArchiveUrl, $archive) } finally { $client.Dispose() }
             } finally { [Net.ServicePointManager]::SecurityProtocol = $previousProtocols }
-            if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $expected) {
+            if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $chiakiArchiveSha256) {
                 throw 'The chiaki-ng download did not match the pinned SHA-256.'
             }
             Add-Type -AssemblyName System.IO.Compression.FileSystem

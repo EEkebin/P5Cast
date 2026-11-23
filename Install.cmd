@@ -5,4 +5,4 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-start "" "%LOCALAPPDATA%\Programs\Cadrivect\Cadrivect.exe"
+start "" "%LOCALAPPDATA%\Programs\P5Cast\P5Cast.exe"

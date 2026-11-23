@@ -56,7 +56,7 @@ namespace Cadrivect
 
         SignalRun()
         {
-            Text = "Signal Run | Cadrivect";
+            Text = "Signal Run | P5Cast";
             ClientSize = new Size(960, 540);
             MinimumSize = new Size(500, 310);
             StartPosition = FormStartPosition.CenterScreen;

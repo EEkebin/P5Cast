@@ -156,6 +156,7 @@ internal sealed class NvidiaOpticalFlow : IDisposable
             candidate.Dispose(); reason = error.Message; return false;
         }
     }
+    public void ResetHistory() { first=true; }
     bool ValidInput(Texture2D texture)
     {
         if (texture == null || texture.IsDisposed) return false;

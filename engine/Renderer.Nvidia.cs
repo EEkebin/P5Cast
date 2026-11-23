@@ -19,11 +19,12 @@ internal sealed partial class Renderer
     float frameMilliseconds = 16.67f;
     public int VendorEvaluations { get; private set; }
     public int HardwareMotionPairs { get; private set; }
-    public string ActiveEffect { get { return neuralMode ?? ""; } }
+    public string ActiveEffect { get { return IsVendor(EffectivePictureMode) ? neuralMode ?? "" : ""; } }
 
     public void SetFrameTiming(double delta,bool continuous)
     {
         resetHistory=!continuous;
+        if(!continuous && optical!=null) optical.ResetHistory();
         frameMilliseconds=continuous ? (float)Math.Max(1,Math.Min(120,delta)) : 16.67f;
     }
     void PrepareMotion(GpuImage currentGuide=null,GpuImage previousGuide=null)

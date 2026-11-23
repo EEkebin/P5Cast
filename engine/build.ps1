@@ -35,11 +35,11 @@ $shaderTool = Join-Path $intermediate 'ShaderBake.exe'
 if ($LASTEXITCODE) { throw 'Shader compiler build failed.' }
 & $shaderTool $PSScriptRoot $intermediate
 if ($LASTEXITCODE) { throw 'HLSL compile failed.' }
-$refs = @('/r:System.Windows.Forms.dll','/r:System.Drawing.dll',"/r:$framework\System.Runtime.dll","/r:$framework\System.Runtime.WindowsRuntime.dll")
+$refs = @('/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Web.Extensions.dll',"/r:$framework\System.Runtime.dll","/r:$framework\System.Runtime.WindowsRuntime.dll")
 $refs += Get-ChildItem (Join-Path $env:WINDIR 'System32\WinMetadata') -Filter '*.winmd' | ForEach-Object { "/r:$($_.FullName)" }
 $refs += 'SharpDX','SharpDX.DXGI','SharpDX.Direct3D11' | ForEach-Object { "/r:$intermediate\$_.dll" }
 $resources = Get-ChildItem $intermediate -Filter '*.cso' | ForEach-Object { "/resource:$($_.FullName),$($_.Name)" }
-$playerFiles=@('Player.cs','Renderer.cs','Capture.cs','Renderer.Nvidia.cs','HdrPipeline.cs','DisplayHdr.cs','DisplayTarget.cs',
+$playerFiles=@('Player.cs','EmbeddedPlayback.cs','PlaybackControls.cs','PlaybackGraph.cs','DirectVideo.cs','DemoVideo.cs','GpuCapabilities.cs','Renderer.cs','Capture.cs','Renderer.Nvidia.cs','HdrPipeline.cs','DisplayHdr.cs','DisplayTarget.cs',
     'optical\NvidiaOpticalFlow.cs','nvidia\NgxVideo.cs','rtxvideo\RtxVideo.cs') | ForEach-Object { Join-Path $PSScriptRoot $_ }
 & $csc /nologo /target:winexe /platform:x64 /optimize+ "/win32icon:$PSScriptRoot\..\app\assets\mark.ico" @refs @resources "/out:$OutDir\CadrivectPlayer.exe" @playerFiles
 if ($LASTEXITCODE) { throw 'Player compilation failed.' }
@@ -47,4 +47,5 @@ Copy-Item "$PSScriptRoot\third_party\SharpDX-LICENSE.txt","$PSScriptRoot\third_p
 Copy-Item "$PSScriptRoot\optical\NVIDIA-OPTICAL-FLOW-LICENSE.txt" -Destination $OutDir -Force
 & "$PSScriptRoot\nvidia\Build.ps1" -OutDir $OutDir
 & "$PSScriptRoot\rtxvideo\Build.ps1" -OutDir $OutDir
+& "$PSScriptRoot\direct\Build.ps1" -OutDir $OutDir
 Write-Output (Join-Path $OutDir 'CadrivectPlayer.exe')

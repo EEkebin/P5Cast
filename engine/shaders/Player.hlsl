@@ -4,6 +4,8 @@ cbuffer Frame : register(b0) {
     float phase;
     float2 viewportOrigin;
     float padding;
+    float2 targetSize;
+    float2 reserved;
 };
 Texture2D<float4> image : register(t0);
 Texture2D<float4> previous : register(t1);
@@ -18,8 +20,20 @@ Vertex Fullscreen(uint vertexID : SV_VertexID) {
     v.pos = float4(v.uv * float2(2,-2) + float2(-1,1), 0, 1);
     return v;
 }
+float3 SamplePicture(Vertex v) {
+    uint w,h; image.GetDimensions(w,h);
+    if(all(float2(w,h)==targetSize))
+        return image.Load(int3(uint2(v.pos.xy-viewportOrigin),0)).rgb;
+    if(any(float2(w,h)>targetSize)) {
+        // Integrate four sub-pixel regions when reducing a frame. A single bilinear sample can skip thin strokes.
+        float2 d=0.25/targetSize;
+        return 0.25*(image.SampleLevel(linearClamp,v.uv-d,0).rgb + image.SampleLevel(linearClamp,v.uv+d,0).rgb +
+                     image.SampleLevel(linearClamp,v.uv+float2(d.x,-d.y),0).rgb + image.SampleLevel(linearClamp,v.uv+float2(-d.x,d.y),0).rgb);
+    }
+    return image.SampleLevel(linearClamp,v.uv,0).rgb;
+}
 float4 Original(Vertex v) : SV_Target {
-    return float4(image.SampleLevel(linearClamp,v.uv,0).rgb,1);
+    return float4(SamplePicture(v),1);
 }
 RWStructuredBuffer<uint> difference : register(u0);
 groupshared uint tileChanged;
@@ -57,9 +71,27 @@ float4 Rcas(Vertex v) : SV_Target {
     FsrRcasF(rgb.r,rgb.g,rgb.b,uint2(v.pos.xy-viewportOrigin),constants);
     return float4(rgb,1);
 }
+float4 CubicWeights(float t) {
+    float t2=t*t, t3=t2*t;
+    return float4(-0.5*t+t2-0.5*t3, 1.0-2.5*t2+1.5*t3, 0.5*t+2.0*t2-1.5*t3, -0.5*t2+0.5*t3);
+}
+float3 SharpCenter(Vertex v) {
+    if(any(targetSize<=sourceSize)) return SamplePicture(v);
+    float2 p=v.uv*sourceSize-0.5;
+    int2 base=int2(floor(p));
+    float4 wx=CubicWeights(frac(p.x)), wy=CubicWeights(frac(p.y));
+    float3 result=0, lo=1e20, hi=-1e20;
+    [unroll] for(int y=0;y<4;y++) [unroll] for(int x=0;x<4;x++) {
+        float3 tap=image.Load(int3(clamp(base+int2(x-1,y-1),0,int2(sourceSize)-1),0)).rgb;
+        result+=wx[x]*wy[y]*tap;
+        if((x==1 || x==2) && (y==1 || y==2)) {lo=min(lo,tap);hi=max(hi,tap);}
+    }
+    // Bound the reconstruction to local color values to avoid halos around UI text.
+    return clamp(result,lo,hi);
+}
 float4 Sharp(Vertex v) : SV_Target {
     float2 d=1.0/sourceSize;
-    float3 c=image.SampleLevel(linearClamp,v.uv,0).rgb;
+    float3 c=SharpCenter(v);
     float3 a=image.SampleLevel(linearClamp,v.uv+float2(d.x,0),0).rgb;
     float3 b=image.SampleLevel(linearClamp,v.uv-float2(d.x,0),0).rgb;
     float3 e=image.SampleLevel(linearClamp,v.uv+float2(0,d.y),0).rgb;
@@ -106,9 +138,26 @@ float4 Motion(Vertex v) : SV_Target {
 float4 Interpolate(Vertex v) : SV_Target {
     float3 motion=flow.SampleLevel(linearClamp,v.uv,0).xyz;
     float2 shift=motion.xy/sourceSize;
+    float3 now=image.SampleLevel(linearClamp,v.uv,0).rgb;
+    float3 before=previous.SampleLevel(linearClamp,v.uv,0).rgb;
+    // Block motion from a nearby object must not pull unchanged UI strokes out of position.
+    // Check the surrounding pattern so coincident flat background colors can still receive moving objects.
+    if(any(abs(motion.xy)>0.5) && all(abs(now-before)<0.006)) {
+        float2 d=1.0/sourceSize;
+        float edge=0,delta=0;
+        [unroll] for(int i=0;i<4;i++) {
+            float2 offset=i==0 ? float2(d.x,0) : i==1 ? float2(0,d.y) : i==2 ? float2(-d.x,0) : float2(0,-d.y);
+            float3 nearNow=image.SampleLevel(linearClamp,v.uv+offset,0).rgb;
+            float3 nearBefore=previous.SampleLevel(linearClamp,v.uv+offset,0).rgb;
+            float3 gradient=abs(now-nearNow), change=abs(nearNow-nearBefore);
+            edge=max(edge,max(gradient.x,max(gradient.y,gradient.z)));
+            delta=max(delta,max(change.x,max(change.y,change.z)));
+        }
+        if(edge>0.08 && delta<0.012) return float4(now,1);
+    }
     float3 a=previous.SampleLevel(linearClamp,v.uv-phase*shift,0).rgb;
     float3 b=image.SampleLevel(linearClamp,v.uv+(1-phase)*shift,0).rgb;
     // Poor matches and abrupt cuts favor the nearest real frame.
-    float3 nearest=phase<0.5 ? previous.SampleLevel(linearClamp,v.uv,0).rgb : image.SampleLevel(linearClamp,v.uv,0).rgb;
+    float3 nearest=phase<0.5 ? before : now;
     return float4(lerp(lerp(a,b,phase),nearest,smoothstep(.06,.17,motion.z)),1);
 }

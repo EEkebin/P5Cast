@@ -7,7 +7,7 @@ $relay = Join-Path $PSScriptRoot '..\streaming\Relay.ps1'
 $parseErrors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($relay,[ref]$null,[ref]$parseErrors)
 if ($parseErrors.Count) { throw $parseErrors[0] }
-foreach ($name in 'Test-SamePcTarget','Confirm-QuietPreviewRuntime','Start-QuietPreview','Start-RelayClient','Write-Text') {
+foreach ($name in 'Test-SamePcTarget','Confirm-QuietPreviewRuntime','Start-QuietPreview','Start-RelayClient','Write-Text','Write-HostApplications') {
     $node = $ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$false)
     . ([scriptblock]::Create($node.Extent.Text))
 }
@@ -28,6 +28,17 @@ $fixture = Join-Path $dir 'Moonlight.exe'
 $result = Join-Path $dir 'environment.txt'
 $utf8 = New-Object Text.UTF8Encoding($false)
 try {
+    $appsFile = Join-Path $dir 'apps.json'
+    Write-HostApplications $appsFile
+    $apps = @( (Get-Content -Raw -LiteralPath $appsFile | ConvertFrom-Json).apps )
+    if ($apps.Count -ne 1 -or $apps[0].name -ne 'P5Cast') { throw 'A fresh host advertised the wrong application.' }
+    Write-Text $appsFile '{"env":{},"apps":[{"name":"Cadrivect","image-path":"desktop.png"}]}'
+    Write-HostApplications $appsFile
+    Write-HostApplications $appsFile
+    $apps = @( (Get-Content -Raw -LiteralPath $appsFile | ConvertFrom-Json).apps )
+    if ($apps.Count -ne 2 -or $apps[0].name -ne 'P5Cast' -or $apps[1].name -ne 'Cadrivect' -or $apps[1].'image-path' -ne 'desktop.png') {
+        throw 'The upgraded host did not keep the previous stream entry.'
+    }
     Add-Type -OutputType WindowsApplication -OutputAssembly $fixture -TypeDefinition @'
 using System;
 using System.IO;
@@ -51,6 +62,19 @@ internal static class Probe {
 
     # Substitute the harmless verified test executable for the production hash gate.
     function Confirm-QuietPreviewRuntime($Binary) { if ($Binary -ne $fixture) { throw 'Unexpected test executable.' } }
+    $Action='PreparePlay'
+    $Hdr=$true
+    $Codec='HEVC'
+    $plan=Start-RelayClient
+    if(!$plan.muted -or $plan.pairing -or $plan.arguments -notcontains '--hdr' -or $plan.arguments -notcontains 'windowed' -or (Test-Path -LiteralPath $result)) {
+        throw 'Embedded local stream preparation did not preserve mute, HDR and windowed launch settings.'
+    }
+    $Action='PreparePair'
+    $pair=Start-RelayClient
+    if(!$pair.pairing -or $pair.muted -or $pair.arguments[-1] -notmatch '^[0-9]{4}$' -or !$pair.message.Contains($pair.arguments[-1]) -or (Test-Path -LiteralPath $result)) {
+        throw 'Embedded pairing plan did not provide its PIN without launching the client.'
+    }
+    $Action='Play'; $Hdr=$false; $Codec=$null
     $environmentKeys = @('ML_AUDIO','SDL_AUDIODRIVER','SDL_AUDIO_DRIVER')
     $prior = @($environmentKeys | ForEach-Object { [string][Environment]::GetEnvironmentVariable($_,'Process') })
     foreach ($case in @(@{address='127.0.0.1';expected=@('sdl','dummy','dummy')},@{address='192.0.2.123';expected=$prior})) {
@@ -59,7 +83,7 @@ internal static class Probe {
         $child=Get-Process -Id $reply.processId -ErrorAction SilentlyContinue
         if ($child -and !$child.WaitForExit(5000)) { throw 'Test probe timed out.' }
         $actual=[IO.File]::ReadAllLines($result)
-        if ($actual.Count -ne 4 -or $actual[3] -ne "stream $Address Cadrivect --audio-on-host") { throw 'Unexpected stream command.' }
+        if ($actual.Count -ne 4 -or $actual[3] -ne "stream $Address P5Cast --audio-on-host") { throw 'Unexpected stream command.' }
         for ($i=0;$i -lt $environmentKeys.Count;$i++) {
             if ($actual[$i] -cne $case.expected[$i]) { throw "Incorrect child environment for $Address." }
             if ([string][Environment]::GetEnvironmentVariable($environmentKeys[$i],'Process') -cne $prior[$i]) { throw 'Child audio settings leaked into the relay.' }
@@ -67,7 +91,7 @@ internal static class Probe {
         if (($Address -eq '127.0.0.1') -ne ($reply.clientAudio -eq 'muted')) { throw 'Incorrect client audio status.' }
         Remove-Item -LiteralPath $result
     }
-    'Passed local-address detection, unverified runtime refusal, child-only mute, and remote audio inheritance.'
+    'Passed fresh and upgraded host entries, local-address detection, unverified runtime refusal, child-only mute, and remote audio inheritance.'
 } finally {
     $tempRoot=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
     if ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($dir)) -eq $tempRoot -and [IO.Path]::GetFileName($dir) -match '^Cadrivect-audio-test-[a-f0-9]{32}$') {

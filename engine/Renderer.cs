@@ -37,7 +37,7 @@ internal sealed partial class Renderer : IDisposable
 {
     [StructLayout(LayoutKind.Sequential)] struct FrameInfo
     {
-        public float SourceX,SourceY,OutputX,OutputY,Phase,OriginX,OriginY,Pad;
+        public float SourceX,SourceY,OutputX,OutputY,Phase,OriginX,OriginY,Pad,TargetX,TargetY,Pad1,Pad2;
     }
     public Device Device { get; private set; }
     readonly DeviceContext context;
@@ -56,19 +56,25 @@ internal sealed partial class Renderer : IDisposable
     Size srcSize,outSize,screenSize;
     Rectangle viewport;
     readonly IntPtr hwnd;
-    readonly Size renderLimit;
-    readonly string hdrMode,pictureMode;
+    readonly bool clearOnDispose;
+    Size renderLimit;
+    string hdrMode;
+    string pictureMode,failedMode;
     DisplayHdr outputInfo;
     IntPtr monitor;
     GpuImage raster;
     [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr window,uint flags);
+    [DllImport("dwmapi.dll")] static extern int DwmFlush();
     public bool HdrEnabled { get; private set; }
     public Size RenderSize { get { return outSize; } }
+    public Size InputSize { get { return srcSize; } }
+    public string EffectivePictureMode { get; private set; }
+    public string EffectNotice { get; private set; }
     public Size OutputSize { get { return screenSize; } }
     public string OutputStatus { get { return outputInfo.Summary+" · "+(HdrEnabled ? "HDR10 output" : "SDR output"); } }
     public string DisplayName { get { return outputInfo.DeviceName; } }
     public void InvalidateDisplay() { monitor=IntPtr.Zero; }
-    bool motionReady;
+    bool motionReady,suppressNextPair;
     public int Captured { get; private set; }
     public int Duplicates { get; private set; }
     public int Presented { get; private set; }
@@ -78,10 +84,11 @@ internal sealed partial class Renderer : IDisposable
     public int SampleMaxLuma { get; private set; }
     public int SampledFrames { get; private set; }
     public bool VerifyNextOutput;
-    public Renderer(IntPtr hwnd, Size window,Size limit,string hdr,string picture)
+    public Renderer(IntPtr hwnd, Size window,Size limit,string hdr,string picture,bool clearOnDispose=false)
     {
-        this.hwnd=hwnd; renderLimit=limit; hdrMode=hdr; pictureMode=picture;
-        HdrEnabled=ChooseHdr();
+        this.hwnd=hwnd; this.clearOnDispose=clearOnDispose; renderLimit=limit; hdrMode=hdr; pictureMode=picture;
+        EffectivePictureMode="original"; EffectNotice="";
+        HdrEnabled=ChooseHdr(hdrMode);
         Device device;
         SwapChain chain;
         var desc=new SwapChainDescription {
@@ -94,7 +101,7 @@ internal sealed partial class Renderer : IDisposable
         SampleMinLuma=255;
         using(var dxgi=device.QueryInterface<SharpDX.DXGI.Device1>()) dxgi.MaximumFrameLatency=1;
         using(var factory=swap.GetParent<Factory>()) factory.MakeWindowAssociation(hwnd,WindowAssociationFlags.IgnoreAltEnter);
-        constants=new Buffer(device,32,ResourceUsage.Default,BindFlags.ConstantBuffer,CpuAccessFlags.None,ResourceOptionFlags.None,0);
+        constants=new Buffer(device,48,ResourceUsage.Default,BindFlags.ConstantBuffer,CpuAccessFlags.None,ResourceOptionFlags.None,0);
         changed=new ComputeShader(device,Shader("Changed"));
         changeFlag=new Buffer(device,4,ResourceUsage.Default,BindFlags.UnorderedAccess,CpuAccessFlags.None,ResourceOptionFlags.BufferStructured,4);
         changeView=new UnorderedAccessView(device,changeFlag);
@@ -122,31 +129,59 @@ internal sealed partial class Renderer : IDisposable
         if(window.Width<=0 || window.Height<=0) return;
         var target=MonitorFromWindow(hwnd,2);
         if(window==screenSize && target==monitor) return;
-        if(target!=monitor && display!=null)
-        {
-            bool next=ChooseHdr();
-            if(next!=HdrEnabled) { ReleaseSource(); srcSize=Size.Empty; HasPrevious=false; HdrEnabled=next; }
-        }
+        // Moving an active session onto an SDR-only display keeps the stream running. Switch back
+        // to PQ on return to an HDR display when HDR10 was explicitly selected.
+        bool next=target!=monitor && display!=null ? ChooseHdr(hdrMode=="hdr10" ? "auto" : hdrMode) : HdrEnabled;
+        ConfigureDisplay(window,next,display!=null);
         monitor=target;
-        if(display!=null)
-        {
-            context.OutputMerger.ResetTargets(); display.Dispose(); backBuffer.Dispose();
-            swap.ResizeBuffers(2,window.Width,window.Height,DisplayHdr.OutputFormat(HdrEnabled),SwapChainFlags.None);
-        }
-        outputInfo=DisplayHdr.Configure(swap,HdrEnabled);
-        backBuffer=Texture2D.FromSwapChain<Texture2D>(swap,0);
-        display=new RenderTargetView(Device,backBuffer);
         screenSize=window; SetViewport();
     }
-    bool ChooseHdr()
+    void ConfigureDisplay(Size window,bool hdr,bool resize)
     {
-        if(hdrMode=="off") return false;
+        if(display!=null) { context.OutputMerger.ResetTargets(); display.Dispose(); display=null; }
+        if(backBuffer!=null) { backBuffer.Dispose(); backBuffer=null; }
+        if(resize) swap.ResizeBuffers(2,window.Width,window.Height,DisplayHdr.OutputFormat(hdr),SwapChainFlags.None);
+        var info=DisplayHdr.Configure(swap,hdr);
+        backBuffer=Texture2D.FromSwapChain<Texture2D>(swap,0);
+        display=new RenderTargetView(Device,backBuffer);
+        outputInfo=info;
+        if(HdrEnabled!=hdr)
+        {
+            // WGC and DirectVideo will deliver the corresponding input format on the next frame.
+            ReleaseSource(); srcSize=Size.Empty; ResetFrameHistory(); HdrEnabled=hdr;
+        }
+    }
+    public void SetOutput(Size limit,string hdr)
+    {
+        if(!limit.IsEmpty && (limit.Width<1 || limit.Height<1)) throw new InvalidOperationException("Choose a positive resolution or Native.");
+        if(hdr!="auto" && hdr!="off" && hdr!="hdr10") throw new InvalidOperationException("Choose Auto, SDR or HDR10.");
+        bool next=ChooseHdr(hdr);
+        if(next!=HdrEnabled)
+        {
+            bool old=HdrEnabled;
+            try { ConfigureDisplay(screenSize,next,true); }
+            catch(Exception error)
+            {
+                ConfigureDisplay(screenSize,old,true);
+                throw new InvalidOperationException("Could not switch the display color mode. "+error.Message,error);
+            }
+        }
+        renderLimit=limit; hdrMode=hdr;
+        Size before=outSize; SetViewport();
+        if(outSize!=before) ResetFrameHistory();
+    }
+    bool ChooseHdr(string hdr)
+    {
+        if(hdr=="off") return false;
         if(pictureMode=="rtxvideo")
         {
-            if(hdrMode=="hdr10") throw new InvalidOperationException("RTX Video SR processes SDR. Choose Auto or SDR, or select another picture mode for HDR10.");
+            if(hdr=="hdr10") throw new InvalidOperationException("RTX Video SR processes SDR. Choose Auto or SDR, or select another picture mode for HDR10.");
             return false;
         }
-        return hdrMode=="hdr10" || DisplayHdr.Probe(hwnd).WindowsHdrActive;
+        var output=DisplayHdr.Probe(hwnd);
+        if(hdr=="hdr10" && !output.WindowsHdrActive)
+            throw new InvalidOperationException("HDR10 needs an active Windows HDR display. Select SDR or enable HDR on "+(output.FriendlyName ?? output.DeviceName)+".");
+        return output.WindowsHdrActive;
     }
     void SetViewport()
     {
@@ -182,7 +217,7 @@ internal sealed partial class Renderer : IDisposable
     }
     public bool Receive(Texture2D frame,Rectangle crop,bool deduplicate)
     {
-        bool newSize=srcSize!=crop.Size;
+        bool newSize=srcSize!=crop.Size || curr==null || curr.Texture.Description.Format!=frame.Description.Format;
         if(newSize)
         {
             ReleaseSource(); srcSize=crop.Size;
@@ -196,7 +231,8 @@ internal sealed partial class Renderer : IDisposable
         context.CopySubresourceRegion(frame,0,region,incoming.Texture,0);
         if(!newSize && deduplicate && !PixelsChanged()) { Duplicates++; return false; }
         var temp=prev; prev=curr; curr=incoming; incoming=temp;
-        HasPrevious=!newSize;
+        HasPrevious=!newSize && !suppressNextPair;
+        suppressNextPair=false;
         Captured++; motionReady=false;
         return true;
     }
@@ -211,7 +247,7 @@ internal sealed partial class Renderer : IDisposable
               ShaderResourceView previous=null, ShaderResourceView flow=null)
     {
         var info=new FrameInfo { SourceX=srcSize.Width,SourceY=srcSize.Height,OutputX=outSize.Width,OutputY=outSize.Height,
-                                 Phase=phase,OriginX=area.X,OriginY=area.Y };
+                                 Phase=phase,OriginX=area.X,OriginY=area.Y,TargetX=area.Width,TargetY=area.Height };
         context.UpdateSubresource(ref info,constants);
         context.OutputMerger.SetRenderTargets(target);
         context.Rasterizer.SetViewport(area.X,area.Y,area.Width,area.Height);
@@ -223,14 +259,65 @@ internal sealed partial class Renderer : IDisposable
         context.PixelShader.SetShaderResources(0,unbind);
         context.OutputMerger.ResetTargets();
     }
+    static bool IsVendor(string mode) { return mode=="dlss" || mode=="dlaa" || mode=="rtxvideo"; }
+    static bool IsEffectFailure(Exception error)
+    {
+        var dx=error as SharpDXException;
+        // Device removal, reset, and hung-device errors cannot be repaired by switching shaders.
+        if(dx!=null) return dx.HResult!=unchecked((int)0x887A0005) && dx.HResult!=unchecked((int)0x887A0006) && dx.HResult!=unchecked((int)0x887A0007);
+        return error is InvalidOperationException || error is IOException || error is UnauthorizedAccessException ||
+               error is DllNotFoundException || error is EntryPointNotFoundException || error is BadImageFormatException ||
+               error is ArgumentException || error is OutOfMemoryException;
+    }
+    public void ResetFrameHistory()
+    {
+        HasPrevious=false; suppressNextPair=true; motionReady=false; hdrGuideFrame=-1;
+        if(optical!=null) optical.ResetHistory();
+        resetHistory=true; evaluatedFrame=-1; havePriorEnhanced=false;
+    }
+    public void SetPictureMode(string mode)
+    {
+        if(!IsVendor(mode) && mode!="original" && mode!="sharp" && mode!="fsr") throw new ArgumentException("Unknown picture mode.");
+        if(mode=="rtxvideo" && HdrEnabled) throw new InvalidOperationException("RTX Video SR requires SDR output. Select SDR before switching picture mode.");
+        if(mode==pictureMode && failedMode==null) return;
+        // NGX initialization and shutdown are scoped to the device. Close the old feature before opening a different one.
+        // Keep the captured textures and front buffer intact throughout the switch.
+        ReleaseEffects();
+        ResetFrameHistory();
+        try
+        {
+            if(IsVendor(mode) && curr!=null) EnhancedFrame(mode,false);
+        }
+        catch(Exception error)
+        {
+            if(!IsEffectFailure(error)) throw;
+            ReleaseEffects(); RestoreDrawState();
+            throw new InvalidOperationException("Could not switch picture mode. "+error.Message,error);
+        }
+        pictureMode=mode; failedMode=null; EffectNotice="";
+        EffectivePictureMode=neuralMode ?? mode;
+    }
     public int Show(string mode,float phase,bool samplePixel,bool finishPrevious=false)
     {
         if(curr==null) return 0;
+        finishPrevious=finishPrevious && HasPrevious;
         var source=finishPrevious ? prev.Read:curr.Read;
-        bool vendor=mode=="dlss" || mode=="dlaa" || mode=="rtxvideo";
+        if(mode==failedMode) mode="original";
+        bool vendor=IsVendor(mode);
+        if(vendor)
+        {
+            try { source=EnhancedFrame(mode,finishPrevious); }
+            catch(Exception error)
+            {
+                if(!IsEffectFailure(error)) throw;
+                failedMode=mode; mode="original"; vendor=false;
+                EffectNotice="Showing Original. "+error.Message;
+                ReleaseEffects(); RestoreDrawState();
+            }
+        }
+        EffectivePictureMode=vendor ? neuralMode : mode;
         context.ClearRenderTargetView(display,new RawColor4(0,0,0,1));
         if(HdrEnabled && !vendor) return ShowHdr(mode,phase,samplePixel,finishPrevious);
-        if(vendor) source=EnhancedFrame(mode,finishPrevious);
         if(phase<1 && HasPrevious)
         {
             if(HdrEnabled) PrepareHdrMotion(); else PrepareMotion();
@@ -249,9 +336,13 @@ internal sealed partial class Renderer : IDisposable
         }
         if(mode=="fsr")
         {
-            if(scaled==null) scaled=new GpuImage(Device,outSize.Width,outSize.Height,Format.B8G8R8A8_UNorm,true);
-            Draw("Easu",scaled.Write,new Rectangle(System.Drawing.Point.Empty,outSize),source,phase);
-            DrawFinal("Rcas",scaled.Read,phase);
+            if(srcSize!=outSize)
+            {
+                if(scaled==null) scaled=new GpuImage(Device,outSize.Width,outSize.Height,Format.B8G8R8A8_UNorm,true);
+                Draw(outSize.Width>srcSize.Width ? "Easu" : "Original",scaled.Write,new Rectangle(System.Drawing.Point.Empty,outSize),source,phase);
+                source=scaled.Read;
+            }
+            DrawFinal("Rcas",source,phase);
         }
         else DrawFinal(mode=="sharp" ? "Sharp":"Original",source,phase,null,null,HdrEnabled && vendor);
         return Present(samplePixel);
@@ -325,8 +416,21 @@ internal sealed partial class Renderer : IDisposable
     }
     public void Dispose()
     {
+        if(clearOnDispose && display!=null && WindowsApi.IsWindow(hwnd)) {
+            // The dashboard retains this HWND. DWM can keep its last flip-chain image
+            // even after a GDI repaint, so retire both flip buffers with opaque black.
+            try {
+                for(int i=0;i<2;i++) {
+                    context.ClearRenderTargetView(display,new RawColor4(0,0,0,1));
+                    swap.Present(1,PresentFlags.None);
+                }
+                context.Flush(); DwmFlush();
+            } catch(SharpDXException) { /* A removed device can no longer present. */ }
+        }
         context.ClearState(); ReleaseSource();
-        if(scaled!=null) scaled.Dispose(); display.Dispose(); backBuffer.Dispose();
+        if(scaled!=null) scaled.Dispose();
+        if(display!=null) display.Dispose();
+        if(backBuffer!=null) backBuffer.Dispose();
         if(raster!=null) raster.Dispose();
         foreach(var shader in shaders.Values) shader.Dispose();
         changeView.Dispose(); changeFlag.Dispose(); changeReadback.Dispose(); changed.Dispose();

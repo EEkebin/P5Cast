@@ -6,7 +6,9 @@ using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
+using Cadrivect.Engine;
 
 internal sealed class PlayerWindow : Form
 {
@@ -17,6 +19,8 @@ internal sealed class PlayerWindow : Form
     [DllImport("user32.dll",EntryPoint="GetWindowLongW")] static extern int GetStyle(IntPtr hwnd,int index);
     [DllImport("user32.dll",EntryPoint="SetWindowLongW")] static extern int SetStyle(IntPtr hwnd,int index,int value);
     [DllImport("user32.dll",SetLastError=true)] static extern bool SetWindowPos(IntPtr hwnd,IntPtr after,int x,int y,int w,int h,int flags);
+    [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int RegisterWindowMessage(string name);
+    static readonly int ControlMessage=RegisterWindowMessage("Cadrivect.Player.Controls.0.3");
     bool fullscreen, quitRegistered, displayChanged;
     readonly IntPtr source;
     readonly bool moveSource;
@@ -24,13 +28,15 @@ internal sealed class PlayerWindow : Form
     DisplayTarget target;
     Rectangle restored;
     public bool Compare;
+    public PlaybackControls ControlPanel;
+    public event Action<string,int> SettingsRequested;
     public bool Fullscreen { get { return fullscreen; } }
     public bool Ended { get; private set; }
     public PlayerWindow(IntPtr source,DisplayTarget target,Size chosenSize,bool windowed)
     {
         this.source=source; this.target=target; this.chosenSize=chosenSize;
         moveSource=DisplayTarget.IsPlaybackSource(source);
-        Text="Cadrivect Player"; BackColor=Color.Black; KeyPreview=true;
+        Text="P5Cast Player"; BackColor=Color.Black; KeyPreview=true;
         AutoScaleMode=AutoScaleMode.None;
         StartPosition=FormStartPosition.Manual;
         MinimumSize=new Size(240,150);
@@ -38,6 +44,8 @@ internal sealed class PlayerWindow : Form
         fullscreen=!windowed;
         Bounds=fullscreen ? target.Bounds : restored;
         if(moveSource) target.MoveSourceWindow(source);
+        ContextMenuStrip=new ContextMenuStrip();
+        ContextMenuStrip.Items.Add("Playback controls    Ctrl+Alt+O",null,delegate { if(ControlPanel!=null) ControlPanel.Open(); });
     }
     Rectangle InitialWindow(DisplayTarget display)
     {
@@ -57,23 +65,24 @@ internal sealed class PlayerWindow : Form
     }
     void ApplyBounds(Rectangle rect)
     {
-        if(!SetWindowPos(Handle,new IntPtr(fullscreen ? -1 : -2),rect.X,rect.Y,rect.Width,rect.Height,NoActivateAndFrameChanged))
+        if(!SetWindowPos(Handle,new IntPtr(fullscreen && source!=IntPtr.Zero ? -1 : -2),rect.X,rect.Y,rect.Width,rect.Height,NoActivateAndFrameChanged))
             throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
     }
     public void EnableShortcuts()
     {
         DisplayTarget.MarkPlayer(Handle,true);
         quitRegistered=WindowsApi.RegisterHotKey(Handle,1,0x4003,(int)Keys.Q);
-        if(fullscreen && !quitRegistered)
+        if(fullscreen && !quitRegistered && source!=IntPtr.Zero)
             throw new InvalidOperationException("Ctrl+Alt+Q is already assigned. Close the other player or start in windowed mode.");
         WindowsApi.RegisterHotKey(Handle,2,0x4003,(int)Keys.B);
         WindowsApi.RegisterHotKey(Handle,3,0x4003,(int)Keys.Enter);
         WindowsApi.RegisterHotKey(Handle,4,0x4003,(int)Keys.Right);
+        WindowsApi.RegisterHotKey(Handle,5,0x4003,(int)Keys.O);
         ApplyBounds(fullscreen ? target.Bounds : restored);
     }
     public void ToggleFullscreen()
     {
-        if(!fullscreen && !quitRegistered) return;
+        if(!fullscreen && !quitRegistered && source!=IntPtr.Zero) return;
         target=DisplayTarget.Select(DisplayTarget.DeviceForWindow(Handle),source);
         if(!fullscreen) {
             restored=WindowState==FormWindowState.Normal ? Bounds : RestoreBounds;
@@ -83,7 +92,7 @@ internal sealed class PlayerWindow : Form
         var style=GetStyle(Handle,Style);
         var extended=GetStyle(Handle,ExtendedStyle);
         SetStyle(Handle,Style,fullscreen ? (style & ~OverlappedWindow)|Popup : (style & ~Popup)|OverlappedWindow);
-        SetStyle(Handle,ExtendedStyle,fullscreen ? (extended & ~AppWindow)|OverlayStyles : (extended & ~OverlayStyles)|AppWindow);
+        SetStyle(Handle,ExtendedStyle,fullscreen && source!=IntPtr.Zero ? (extended & ~AppWindow)|OverlayStyles : (extended & ~OverlayStyles)|AppWindow);
         ApplyBounds(fullscreen ? target.Bounds : FitRestored(target));
         if(moveSource && fullscreen) WindowsApi.SetForegroundWindow(source);
     }
@@ -119,11 +128,14 @@ internal sealed class PlayerWindow : Form
         if(fullscreen) ApplyBounds(target.Bounds);
         return true;
     }
-    protected override bool ShowWithoutActivation { get { return fullscreen; } }
+    protected override bool ShowWithoutActivation { get { return fullscreen && source!=IntPtr.Zero; } }
     protected override CreateParams CreateParams
     {
         get { var cp=base.CreateParams;
-            if(fullscreen) { cp.Style=(cp.Style & ~OverlappedWindow)|Popup; cp.ExStyle=(cp.ExStyle & ~AppWindow)|OverlayStyles; }
+            if(fullscreen) {
+                cp.Style=(cp.Style & ~OverlappedWindow)|Popup;
+                cp.ExStyle=source==IntPtr.Zero ? cp.ExStyle|AppWindow : (cp.ExStyle & ~AppWindow)|OverlayStyles;
+            }
             return cp;
         }
     }
@@ -131,6 +143,19 @@ internal sealed class PlayerWindow : Form
     {
         if(e.KeyCode==Keys.Escape) Close(); else if(e.KeyCode==Keys.B) Compare=!Compare;
         base.OnKeyDown(e);
+    }
+    protected override bool ProcessCmdKey(ref Message message,Keys keys)
+    {
+        if(source==IntPtr.Zero && (keys & Keys.Modifiers)==(Keys.Control|Keys.Alt)) {
+            switch(keys & Keys.KeyCode) {
+                case Keys.Enter: ToggleFullscreen(); return true;
+                case Keys.O: if(ControlPanel!=null) ControlPanel.Toggle(); return true;
+                case Keys.Q: Close(); return true;
+                case Keys.Right: CycleDisplay(); return true;
+                case Keys.B: Compare=!Compare; return true;
+            }
+        }
+        return base.ProcessCmdKey(ref message,keys);
     }
     protected override void WndProc(ref Message message)
     {
@@ -140,7 +165,15 @@ internal sealed class PlayerWindow : Form
             if(message.WParam.ToInt32()==2) Compare=!Compare;
             if(message.WParam.ToInt32()==3) ToggleFullscreen();
             if(message.WParam.ToInt32()==4) CycleDisplay();
+            if(message.WParam.ToInt32()==5 && ControlPanel!=null) ControlPanel.Toggle();
             return;
+        }
+        if(message.Msg==ControlMessage) {
+            long mode=message.WParam.ToInt64(), factor=message.LParam.ToInt64();
+            if(ControlPanel==null || mode< -1 || mode>=PlaybackControls.Modes.Length || (factor!= -1 && (factor<1 || factor>4))) return;
+            if(mode== -1 && factor== -1) ControlPanel.Open();
+            else if(SettingsRequested!=null) SettingsRequested(mode== -1 ? null : PlaybackControls.Modes[(int)mode],(int)factor);
+            message.Result=new IntPtr(1); return;
         }
         if(message.Msg==DisplayTarget.MoveMessage) {
             var next=DisplayTarget.FromMonitor(message.WParam);
@@ -153,13 +186,13 @@ internal sealed class PlayerWindow : Form
             target=DisplayTarget.Select(DisplayTarget.DeviceForWindow(Handle),source);
             target.MoveSourceWindow(source);
         }
-        if(fullscreen && message.Msg==0x0084) { message.Result=new IntPtr(-1); return; }
+        if(fullscreen && source!=IntPtr.Zero && message.Msg==0x0084) { message.Result=new IntPtr(-1); return; }
         base.WndProc(ref message);
     }
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         Ended=true; DisplayTarget.MarkPlayer(Handle,false);
-        for(int id=1;id<=4;id++) WindowsApi.UnregisterHotKey(Handle,id);
+        for(int id=1;id<=5;id++) WindowsApi.UnregisterHotKey(Handle,id);
         base.OnFormClosed(e);
     }
 }
@@ -169,7 +202,7 @@ internal sealed class SampleWindow : Form
     public int Tick;
     public SampleWindow()
     {
-        Text="Cadrivect capture test source"; ClientSize=new Size(480,270);
+        Text="P5Cast capture test source"; ClientSize=new Size(480,270);
         StartPosition=FormStartPosition.Manual; Location=new Point(50,60);
         DoubleBuffered=true;
     }
@@ -189,23 +222,41 @@ internal static class Player
         thread.SetApartmentState(ApartmentState.STA); thread.Start(); thread.Join();
         return result;
     }
-    static int Run(string[] args)
+    internal static int Run(string[] args,HostedSurface host=null)
     {
         bool testing=Array.IndexOf(args,"--self-test")>=0;
         var samples=new HashSet<int>();
         var liveFrameAges=new List<double>();
         try
         {
-            WindowsApi.SetProcessDpiAwarenessContext(new IntPtr(-4));
-            Application.EnableVisualStyles();
+            if(Array.IndexOf(args,"--capabilities")>=0) {
+                string json=GpuCapabilities.Probe().ToJson();
+                string output=Option(args,"--report",null);
+                if(output!=null) File.WriteAllText(output,json);
+                Console.WriteLine(json); return 0;
+            }
+            if(host==null) {
+                WindowsApi.SetProcessDpiAwarenessContext(new IntPtr(-4));
+                Application.EnableVisualStyles();
+                if(Array.IndexOf(args,"--surface")>=0) throw new ArgumentException("Use EmbeddedPlayback.Run in the process that owns the playback surface.");
+            }
             bool windowed=Array.IndexOf(args,"--windowed")>=0 || (testing && Array.IndexOf(args,"--fullscreen")<0);
             string displayName=Option(args,"--display","primary");
             string resolution=Option(args,"--resolution","native").ToLowerInvariant();
             Size raster=DisplayTarget.ResolutionLimit(resolution);
             string hdr=Option(args,"--hdr","auto").ToLowerInvariant();
             if(hdr!="auto" && hdr!="off" && hdr!="hdr10") throw new ArgumentException("Choose auto, off, or hdr10 for --hdr.");
-            string mode=Option(args,"--mode","fsr").ToLowerInvariant();
+            string mode=Option(args,"--mode",testing ? "fsr":"original").ToLowerInvariant();
             string filename=Option(args,"--report",null);
+            string pipe=Option(args,"--direct-pipe",null), runtime=Option(args,"--direct-runtime",null);
+            bool direct=pipe!=null;
+            bool demo=Array.IndexOf(args,"--demo")>=0;
+            if(demo && (host==null || direct || Array.IndexOf(args,"--hwnd")>=0)) throw new ArgumentException("The dashboard demo uses only its playback surface.");
+            bool captureWindow=!demo && !direct;
+            if(direct && (testing || string.IsNullOrWhiteSpace(runtime))) throw new ArgumentException("Direct playback requires --direct-runtime and a live source.");
+            string targetOption=Option(args,"--target-fps",direct ? "60":demo ? "30":null);
+            int targetFps=targetOption==null ? 0 : int.Parse(targetOption,CultureInfo.InvariantCulture);
+            if(targetOption!=null && targetFps!=30 && targetFps!=60) throw new ArgumentException("Choose 30 or 60 for --target-fps.");
             int multiplier=int.Parse(Option(args,"--multiplier",testing ? "3":"1"),CultureInfo.InvariantCulture);
             bool vendor=mode=="dlss" || mode=="dlaa" || mode=="rtxvideo";
             if(!vendor && mode!="fsr" && mode!="sharp" && mode!="original") throw new ArgumentException("Unknown picture mode: "+mode);
@@ -215,29 +266,97 @@ internal static class Player
             {
                 IntPtr source;
                 if(testing) { sample.Show(); sample.Update(); source=sample.Handle; }
-                else source=FindSource(args);
-                var destination=DisplayTarget.Select(displayName,source);
-                using(var window=new PlayerWindow(source,destination,raster,windowed))
+                else source=captureWindow ? FindSource(args):IntPtr.Zero;
+                using(var window=host==null ? new PlayerWindow(source,DisplayTarget.Select(displayName,source),raster,windowed):null)
                 {
-                    window.Show(); window.EnableShortcuts();
-                    if(!testing) WindowsApi.SetForegroundWindow(source);
-                    using(var renderer=new Renderer(window.Handle,window.ClientSize,raster,hdr,mode))
-                    using(var capture=new WindowCapture(source,renderer.Device,renderer.HdrEnabled))
+                    if(window!=null) {
+                        window.Show(); window.EnableShortcuts();
+                        if(!testing && !direct) WindowsApi.SetForegroundWindow(source);
+                    }
+                    using(var renderer=new Renderer(host==null ? window.Handle:host.Handle,host==null ? window.ClientSize:host.ClientSize,raster,hdr,mode,host!=null))
+                    using(var capture=captureWindow ? new WindowCapture(source,renderer.Device,renderer.HdrEnabled):null)
+                    using(var decoded=direct ? new DirectVideo(pipe,runtime):null)
+                    using(var offline=demo ? new DemoVideo(renderer,host.Handle,targetFps):null)
+                    using(var controls=host==null ? new PlaybackControls(window,source,mode,multiplier,targetFps):null)
+                    using(var live=filename==null ? null:new LiveReport(filename))
                     {
+                        string requestedMode=null, settingsNotice=null;
+                        int requestedMultiplier=multiplier;
+                        bool changeRequested=false, wasComparing=false,compare=false;
+                        Action<string,int> change=delegate(string picture,int factor) {
+                            if(picture!=null) requestedMode=picture;
+                            if(factor>0) requestedMultiplier=factor;
+                            changeRequested=true;
+                        };
+                        if(controls!=null) {
+                            window.ControlPanel=controls; controls.SettingChanged+=change; window.SettingsRequested+=change;
+                            if(Array.IndexOf(args,"--controls")>=0) controls.Open();
+                        }
                         var clock=Stopwatch.StartNew();
                         double nextSample=0, previousTime=0, period=16.667, due=0, pairStart=0, lastSubmit=-1000;
                         bool verifyOutput=Array.IndexOf(args,"--verify-output")>=0;
                         double nextOutputSample=0;
                         int step=0, count=1, drawTick=0;
-                        double firstInput=0,lastInput=0;
+                        double firstInput=0,lastInput=0,lastRealAge=-1;
+                        double lastSnapshot=0,lastFile=0; int sampleId=0,snapshotInput=0,snapshotPresented=0,snapshotGenerated=0;
                         WindowsApi.timeBeginPeriod(1);
                         try
                         {
-                            while(!window.Ended && WindowsApi.IsWindow(source))
+                            while((host==null ? !window.Ended : host.Exists) && (!captureWindow || WindowsApi.IsWindow(source)))
                             {
-                                Application.DoEvents();
-                                if(window.Ended || (seconds>0 && clock.Elapsed.TotalSeconds>=seconds)) break;
+                                if(host==null) Application.DoEvents(); else host.TakeChanges(change);
+                                if((window!=null && window.Ended) || (seconds>0 && clock.Elapsed.TotalSeconds>=seconds)) break;
+                                compare=host==null ? window.Compare:host.Comparing;
                                 double now=clock.Elapsed.TotalMilliseconds;
+                                bool redraw=false;
+                                string newSize,newHdr;
+                                if(host!=null && host.TakeOutput(out newSize,out newHdr)) {
+                                    try {
+                                        renderer.SetOutput(DisplayTarget.ResolutionLimit(newSize ?? resolution),newHdr ?? hdr);
+                                        resolution=newSize ?? resolution; hdr=newHdr ?? hdr; settingsNotice=null;
+                                        step=0; previousTime=0; redraw=true;
+                                    } catch(InvalidOperationException ex) { settingsNotice=ex.Message; }
+                                }
+                                if(direct && decoded.Closed) {
+                                    if(!string.IsNullOrEmpty(decoded.Error)) throw new IOException(decoded.Error);
+                                    if(renderer.Captured==0) throw new IOException("The Direct session closed before the first video frame.");
+                                    break;
+                                }
+                                if(changeRequested || wasComparing!=compare) {
+                                    if(requestedMode!=null) {
+                                        try {
+                                            renderer.SetPictureMode(requestedMode);
+                                            mode=requestedMode; settingsNotice=null;
+                                        } catch(InvalidOperationException ex) { settingsNotice=ex.Message; }
+                                    }
+                                    multiplier=requestedMultiplier; vendor=mode=="dlss" || mode=="dlaa" || mode=="rtxvideo";
+                                    renderer.ResetFrameHistory(); if(controls!=null) controls.Sync(mode,multiplier);
+                                    step=0; previousTime=0; wasComparing=compare;
+                                    if(renderer.Captured>0) renderer.Show(compare ? "original":mode,1,testing);
+                                    requestedMode=null; changeRequested=false;
+                                }
+                                if(controls!=null) {
+                                    controls.SetNotice(settingsNotice ?? renderer.EffectNotice);
+                                    controls.UpdateLive(now,renderer,compare,lastRealAge,decoded);
+                                }
+                                if((host!=null || live!=null) && now-lastSnapshot>=(host==null ? 1000:250)) {
+                                    double perSecond=1000/(now-lastSnapshot);
+                                    string snapshot=string.Format(CultureInfo.InvariantCulture,
+                                        "{{\"captured\":{0},\"presented\":{1},\"generated\":{2},\"sourceFps\":{3:F1},\"submittedFps\":{4:F1},\"generatedFps\":{5:F1}",
+                                        renderer.Captured,renderer.Presented,renderer.Generated,(renderer.Captured-snapshotInput)*perSecond,
+                                        (renderer.Presented-snapshotPresented)*perSecond,(renderer.Generated-snapshotGenerated)*perSecond)
+                                        +",\"mode\":"+JsonString(mode)+",\"multiplier\":"+multiplier+",\"effectivePictureMode\":"+JsonString(renderer.EffectivePictureMode)
+                                        +",\"effectNotice\":"+JsonString(settingsNotice ?? renderer.EffectNotice)+",\"compare\":"+(compare ? "true":"false")
+                                        +",\"sampleId\":"+(++sampleId)+",\"elapsedMs\":"+Number(now)+",\"display\":"+JsonString(renderer.DisplayName)
+                                        +",\"hdrEnabled\":"+(renderer.HdrEnabled ? "true":"false")+",\"outputWidth\":"+renderer.OutputSize.Width+",\"outputHeight\":"+renderer.OutputSize.Height
+                                        +",\"resolution\":"+JsonString(resolution)+",\"hdrMode\":"+JsonString(hdr)
+                                        +",\"renderWidth\":"+renderer.RenderSize.Width+",\"renderHeight\":"+renderer.RenderSize.Height
+                                        +Telemetry(renderer,decoded,targetFps,compare ? 1:multiplier,lastRealAge,demo)+"}";
+                                    if(host!=null) EmbeddedPlayback.Publish(snapshot);
+                                    if(live!=null && now-lastFile>=1000) { live.Update(snapshot); lastFile=now; }
+                                    lastSnapshot=now; snapshotInput=renderer.Captured;
+                                    snapshotPresented=renderer.Presented; snapshotGenerated=renderer.Generated;
+                                }
                                 if(verifyOutput && now>=nextOutputSample)
                                 {
                                     renderer.VerifyNextOutput=true; nextOutputSample=now+1000;
@@ -246,14 +365,20 @@ internal static class Player
                                 {
                                     sample.Tick=drawTick++/2; sample.Refresh(); nextSample=Math.Max(nextSample+16.667,now+1);
                                 }
-                                if(window.WindowState==FormWindowState.Minimized || WindowsApi.IsIconic(source))
+                                if((host==null ? window.WindowState==FormWindowState.Minimized:host.Hidden) || (captureWindow && WindowsApi.IsIconic(source)))
                                 {
                                     Thread.Sleep(30); step=0; previousTime=0; continue;
                                 }
-                                if(window.ConsumeDisplayChange()) renderer.InvalidateDisplay();
-                                renderer.Resize(window.ClientSize);
+                                if(host==null ? window.ConsumeDisplayChange():host.ConsumeDisplayChange()) { renderer.InvalidateDisplay(); redraw=true; }
+                                Size surfaceSize=host==null ? window.ClientSize:host.ClientSize;
+                                if(surfaceSize!=renderer.OutputSize) redraw=true;
+                                renderer.Resize(surfaceSize);
                                 double timestamp;
-                                if(capture.Read(renderer,multiplier>1 || testing || vendor,out timestamp))
+                                bool deduplicate=multiplier>1 || testing || vendor;
+                                bool fresh=demo ? offline.Read(renderer,out timestamp) : direct ? decoded.Read(renderer,deduplicate,out timestamp) : capture.Read(renderer,deduplicate,out timestamp);
+                                // A paused upstream window may send nothing after resizing its display surface.
+                                if(redraw && !fresh && step==0 && renderer.Captured>0) renderer.Show(compare ? "original":mode,1,testing);
+                                if(fresh)
                                 {
                                     double elapsed=timestamp-previousTime;
                                     bool continuous=renderer.HasPrevious && elapsed>0 && elapsed<120;
@@ -261,16 +386,16 @@ internal static class Player
                                     // Real images always take priority if the next capture arrived early.
                                     if(step>0 && renderer.HasPrevious)
                                     {
-                                        int pixel=renderer.Show(window.Compare ? "original":mode,1,testing,true);
+                                        int pixel=renderer.Show(compare ? "original":mode,1,testing,true);
                                         if(testing) samples.Add(pixel & 0x00ffffff);
                                         lastSubmit=clock.Elapsed.TotalMilliseconds;
-                                        RecordAge(liveFrameAges,previousTime,testing || filename!=null);
+                                        lastRealAge=RecordAge(liveFrameAges,previousTime,testing || filename!=null);
                                     }
                                     if(continuous) period=period*.66 + Math.Max(4,Math.Min(100,elapsed))*.34;
                                     previousTime=timestamp;
                                     if(firstInput==0) firstInput=timestamp;
                                     lastInput=timestamp;
-                                    count=continuous && !window.Compare ? multiplier:1;
+                                    count=continuous && !compare ? multiplier:1;
                                     step=1; pairStart=now;
                                     due=count==1 ? now:Math.Max(now,lastSubmit+period/count);
                                 }
@@ -278,16 +403,17 @@ internal static class Player
                                 {
                                     // When the GPU misses a deadline skip obsolete intermediates.
                                     step=Math.Min(count,Math.Max(step,1+(int)((now-pairStart)/(period/count))));
-                                    int color=renderer.Show(window.Compare ? "original":mode,(float)step/count,testing);
+                                    int color=renderer.Show(compare ? "original":mode,(float)step/count,testing);
                                     if(testing) samples.Add(color & 0x00ffffff);
-                                    if(step==count) RecordAge(liveFrameAges,previousTime,testing || filename!=null);
+                                    if(step==count) lastRealAge=RecordAge(liveFrameAges,previousTime,testing || filename!=null);
                                     step++;
                                     if(step>count) step=0;
                                     lastSubmit=clock.Elapsed.TotalMilliseconds;
                                     due=pairStart+(step-1)*period/count;
                                 }
-                                if(renderer.Captured==0 && now>15000)
-                                    throw new InvalidOperationException("No frames arrived from the selected window. Restore it, start playback, and retry.");
+                                if(renderer.Captured==0 && now>(direct ? 30000:15000))
+                                    throw new InvalidOperationException(direct ? "No video frames arrived from the Direct backend within 30 seconds. Check the console connection and retry."
+                                                                              : "No frames arrived from the selected window. Restore it, start playback, and retry.");
                                 Thread.Sleep(step>0 ? 1:2);
                             }
                         }
@@ -306,10 +432,13 @@ internal static class Player
                             +",\"activeNvidiaEffect\":\""+renderer.ActiveEffect+"\",\"nvidiaEvaluations\":"+renderer.VendorEvaluations
                             +",\"hardwareMotionPairs\":"+renderer.HardwareMotionPairs
                             +",\"display\":"+JsonString(renderer.DisplayName)+",\"resolution\":"+JsonString(resolution)
-                            +",\"fullscreen\":"+(window.Fullscreen ? "true":"false")+",\"hdrEnabled\":"+(renderer.HdrEnabled ? "true":"false")
+                            +",\"embedded\":"+(host!=null ? "true":"false")+",\"fullscreen\":"+(window!=null && window.Fullscreen ? "true":"false")+",\"hdrEnabled\":"+(renderer.HdrEnabled ? "true":"false")
                             +",\"outputWidth\":"+renderer.OutputSize.Width+",\"outputHeight\":"+renderer.OutputSize.Height
                             +",\"renderWidth\":"+renderer.RenderSize.Width+",\"renderHeight\":"+renderer.RenderSize.Height
-                            +",\"outputStatus\":"+JsonString(renderer.OutputStatus)+"}";
+                            +",\"outputStatus\":"+JsonString(renderer.OutputStatus)+",\"effectivePictureMode\":"+JsonString(renderer.EffectivePictureMode)
+                            +",\"effectNotice\":"+JsonString(renderer.EffectNotice)
+                            +",\"medianPcSubmitMs\":"+Number(liveFrameAges.Count==0 ? -1:liveFrameAges[median])
+                            +Telemetry(renderer,decoded,targetFps,compare ? 1:multiplier,lastRealAge,demo)+"}";
                         if(filename!=null) File.WriteAllText(filename,report);
                         Console.WriteLine(report);
                         if(testing && (renderer.Captured<8 || renderer.Presented<8 || samples.Count<5 ||
@@ -321,10 +450,11 @@ internal static class Player
         }
         catch(Exception ex)
         {
+            if(host!=null) { EmbeddedPlayback.Failed(ex.Message); return 1; }
             string log=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"LumaRelay","player-error.log");
             Directory.CreateDirectory(Path.GetDirectoryName(log)); File.WriteAllText(log,DateTime.Now+Environment.NewLine+ex);
             Console.Error.WriteLine(ex.Message);
-            if(!testing && Array.IndexOf(args,"--quiet")<0) MessageBox.Show(ex.Message,"Cadrivect Player",MessageBoxButtons.OK,MessageBoxIcon.Error);
+            if(!testing && Array.IndexOf(args,"--quiet")<0) MessageBox.Show(ex.Message,"P5Cast Player",MessageBoxButtons.OK,MessageBoxIcon.Error);
             return 1;
         }
     }
@@ -345,11 +475,53 @@ internal static class Player
         }
         return text.Append('"').ToString();
     }
-    static void RecordAge(List<double> samples,double timestamp,bool measuring)
+    static string Number(double value)
     {
-        if(!measuring || samples.Count>=20000) return;
+        return value<0 || double.IsNaN(value) || double.IsInfinity(value) ? "null":value.ToString("0.##",CultureInfo.InvariantCulture);
+    }
+    static string Telemetry(Renderer renderer,DirectVideo direct,int targetFps,int factor,double age,bool demo)
+    {
+        Size input=renderer.InputSize;
+        return ",\"inputWidth\":"+input.Width+",\"inputHeight\":"+input.Height+",\"targetFps\":"+Number(targetFps==0 ? -1:targetFps)
+               +",\"targetPresentedFps\":"+Number(targetFps==0 ? -1:targetFps*factor)+",\"lastPcSubmitMs\":"+Number(age)
+               +",\"sourceKind\":"+JsonString(demo ? "demo":direct==null ? "window":"direct")
+               +",\"audioQueueMs\":"+Number(direct==null ? -1:direct.AudioQueueMs)+",\"audioTargetMs\":"+Number(direct==null ? -1:direct.AudioTargetMs)
+               +",\"audioUnderruns\":"+Number(direct==null ? -1:direct.AudioUnderruns)+",\"handshakeRttMs\":"+Number(direct==null ? -1:direct.NetworkRttMs)
+               +",\"decodeMs\":"+Number(direct==null ? -1:direct.DecodeMs)
+               +(direct==null ? "" : ",\"codec\":"+JsonString(direct.CodecName)+",\"bitrateMbps\":"+Number(direct.BitrateMbps));
+    }
+    sealed class LiveReport : IDisposable
+    {
+        readonly string path,temp;
+        Task writer;
+        bool wrote;
+        public LiveReport(string filename)
+        {
+            path=Path.ChangeExtension(filename,".live.json"); temp=path+"."+Guid.NewGuid().ToString("N")+".tmp";
+        }
+        public void Update(string snapshot)
+        {
+            if(writer!=null && !writer.IsCompleted) return;
+            writer=Task.Run(delegate {
+                try {
+                    File.WriteAllText(temp,snapshot);
+                    if(File.Exists(path)) File.Replace(temp,path,null); else File.Move(temp,path);
+                    wrote=true;
+                } catch(IOException) { } catch(UnauthorizedAccessException) { }
+            });
+        }
+        public void Dispose()
+        {
+            if(writer!=null) writer.Wait();
+            try { if(wrote) File.Delete(path); File.Delete(temp); } catch(IOException) { } catch(UnauthorizedAccessException) { }
+        }
+    }
+    static double RecordAge(List<double> samples,double timestamp,bool measuring)
+    {
         double age=Stopwatch.GetTimestamp()*1000.0/Stopwatch.Frequency-timestamp;
-        if(age>=0 && age<1000) samples.Add(age);
+        if(age<0 || age>=1000) return -1;
+        if(measuring && samples.Count<20000) samples.Add(age);
+        return age;
     }
     static IntPtr FindSource(string[] args)
     {

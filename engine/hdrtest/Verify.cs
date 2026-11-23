@@ -33,7 +33,7 @@ class VerifyHdr
         for(int k=0;k<3;k++) v+=To2020[channel,k]*Bars[bar,k]*intensity;
         return (int)Math.Round(Pq(v)*1023);
     }
-    struct Frame { public float sw,sh,ow,oh,phase,x,y,padding; }
+    struct Frame { public float sw,sh,ow,oh,phase,x,y,padding,targetW,targetH,reserved1,reserved2; }
     sealed class Image : IDisposable {
         public Texture2D texture;
         public ShaderResourceView read;
@@ -85,6 +85,62 @@ class VerifyHdr
             } finally { c.UnmapSubresource(staging,0); }
         }
     }
+    // Fixed one-pixel strokes expose filtering errors that flat HDR patches cannot detect.
+    static void CheckText(Assembly compiled,Device d,Buffer cb) {
+        const int w=48,h=24;
+        using(var text=new Image(d,w,h,Format.R8G8B8A8_UNorm))
+        using(var motion=new Image(d,1,1,Format.R16G16B16A16_Float))
+        using(var native=new Image(d,w,h,Format.R8G8B8A8_UNorm))
+        using(var large=new Image(d,w*2,h*2,Format.R8G8B8A8_UNorm))
+        using(var small=new Image(d,w/4,h/4,Format.R8G8B8A8_UNorm)) {
+            int[] pattern=new int[w*h];
+            for(int y=0;y<h;y++) for(int x=0;x<w;x++)
+                pattern[y*w+x]=x%4==0 ? -1 : unchecked((int)0xff000000);
+            var c=d.ImmediateContext;
+            var pin=GCHandle.Alloc(pattern,GCHandleType.Pinned);
+            try { c.UpdateSubresource(new DataBox(pin.AddrOfPinnedObject(),w*4,w*h*4),text.texture,0); }
+            finally { pin.Free(); }
+            // Force an incorrect two-pixel vector across static foreground strokes.
+            c.ClearRenderTargetView(motion.write,new RawColor4(2,0,0,0));
+            Func<string,Image,byte[]> draw=(name,target)=>{
+                var desc=target.texture.Description;
+                var frame=new Frame{sw=w,sh=h,ow=desc.Width,oh=desc.Height,phase=.5f,targetW=desc.Width,targetH=desc.Height,
+                                    x=0,y=0,padding=0,reserved1=0,reserved2=0};
+                c.UpdateSubresource(ref frame,cb);
+                using(var ps=new PixelShader(d,Shader(compiled,name))) {
+                    c.OutputMerger.SetRenderTargets(target.write); c.Rasterizer.SetViewport(0,0,desc.Width,desc.Height);
+                    c.PixelShader.SetShaderResources(0,new[]{text.read,text.read,motion.read});
+                    c.PixelShader.Set(ps); c.Draw(3,0);
+                    c.PixelShader.SetShaderResources(0,new ShaderResourceView[3]); c.OutputMerger.ResetTargets();
+                }
+                desc.Usage=ResourceUsage.Staging; desc.BindFlags=BindFlags.None; desc.CpuAccessFlags=CpuAccessFlags.Read;
+                using(var read=new Texture2D(d,desc)) {
+                    c.CopyResource(target.texture,read);
+                    var data=c.MapSubresource(read,0,MapMode.Read,SharpDX.Direct3D11.MapFlags.None);
+                    try {
+                        byte[] pixels=new byte[desc.Width];
+                        for(int x=0;x<pixels.Length;x++) pixels[x]=Marshal.ReadByte(data.DataPointer,data.RowPitch*(desc.Height/2)+x*4);
+                        return pixels;
+                    } finally { c.UnmapSubresource(read,0); }
+                }
+            };
+            var original=draw("Original",native); var generated=draw("Interpolate",native);
+            for(int x=0;x<w;x++) {
+                if(original[x]!=(pattern[x]&255)) throw new InvalidDataException("Native-scale pixel mismatch.");
+                if(x%4!=2 && generated[x]!=original[x]) throw new InvalidDataException("Intermediated stationary text edge moved.");
+            }
+            var reduced=draw("Original",small);
+            foreach(byte value in reduced) if(Math.Abs(value-64)>1) throw new InvalidDataException("Downsampling skipped a one-pixel stroke.");
+            var linear=draw("Original",large); var sharp=draw("Sharp",large);
+            long linearError=0,sharpError=0;
+            for(int x=4;x<2*w-4;x++) {
+                int exactInk=pattern[x/2]&255;
+                linearError+=Math.Abs(linear[x]-exactInk); sharpError+=Math.Abs(sharp[x]-exactInk);
+            }
+            Console.WriteLine("Text fixture: native pixels exact; static interpolation edges exact; 4x reduction = {0}/255; 2x stroke error Sharp {1} vs bilinear {2}.",reduced[0],sharpError,linearError);
+            if(sharpError>=linearError) throw new InvalidDataException("Sharp lost one-pixel stroke contrast.");
+        }
+    }
     static void Run(Assembly compiled,bool nvidia) {
         using(var d=new Device(DriverType.Hardware,DeviceCreationFlags.BgraSupport))
         using(var src=new Image(d,W,H,Format.R16G16B16A16_Float))
@@ -93,7 +149,7 @@ class VerifyHdr
         using(var enlarged=new Image(d,W*2,H*2,Format.R16G16B16A16_Float))
         using(var hdr10=new Image(d,W*2,H*2,Format.R10G10B10A2_UNorm))
         using(var vs=new VertexShader(d,Shader(compiled,"Fullscreen")))
-        using(var cb=new Buffer(d,32,ResourceUsage.Default,BindFlags.ConstantBuffer,CpuAccessFlags.None,ResourceOptionFlags.None,0))
+        using(var cb=new Buffer(d,48,ResourceUsage.Default,BindFlags.ConstantBuffer,CpuAccessFlags.None,ResourceOptionFlags.None,0))
         using(var sampler=new SamplerState(d,new SamplerStateDescription {
             AddressU=TextureAddressMode.Clamp,AddressV=TextureAddressMode.Clamp,AddressW=TextureAddressMode.Clamp,
             Filter=Filter.MinMagMipLinear,ComparisonFunction=Comparison.Never,MaximumAnisotropy=1,MaximumLod=16})) {
@@ -110,9 +166,10 @@ class VerifyHdr
             c.ClearRenderTargetView(zero.write,new RawColor4(0,0,0,0));
             c.InputAssembler.PrimitiveTopology=PrimitiveTopology.TriangleList;
             c.VertexShader.Set(vs); c.PixelShader.SetConstantBuffer(0,cb); c.PixelShader.SetSampler(0,sampler);
+            CheckText(compiled,d,cb);
             Action<string,Image,Image> draw=(name,input,target)=>{
                 using(var ps=new PixelShader(d,Shader(compiled,name))) {
-                    var info=new Frame{sw=W,sh=H,ow=2*W,oh=2*H,phase=.5f,x=0,y=0,padding=0};
+                    var info=new Frame{sw=W,sh=H,ow=2*W,oh=2*H,phase=.5f,targetW=target.texture.Description.Width,targetH=target.texture.Description.Height};
                     c.UpdateSubresource(ref info,cb);
                     c.OutputMerger.SetRenderTargets(target.write);
                     c.Rasterizer.SetViewport(0,0,target.texture.Description.Width,target.texture.Description.Height);

@@ -1,0 +1,175 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Interop;
+
+namespace Cadrivect
+{
+    internal partial class Dashboard
+    {
+        NetworkPlayer network;
+        bool firstFrame;
+        bool stopRequested;
+        bool Active { get {return rendering!=null || network!=null;} }
+        void MoveDashboard()
+        {
+            var target=UI<ComboBox>("PlaybackDisplay").SelectedItem as DisplayTarget;
+            if(target!=null) target.MoveSourceWindow(new WindowInteropHelper(window).Handle);
+        }
+        void ToggleFullscreen()
+        {
+            if(!fullscreen) {
+                previousWindowState=window.WindowState; window.WindowState=WindowState.Normal;
+                window.WindowStyle=WindowStyle.None; window.WindowState=WindowState.Maximized;
+            } else {
+                window.WindowState=WindowState.Normal; window.WindowStyle=WindowStyle.SingleBorderWindow;
+                window.WindowState=previousWindowState;
+            }
+            fullscreen=!fullscreen; UI<Button>("Fullscreen").Content=fullscreen?"Windowed":"Fullscreen";
+            UI<RowDefinition>("HeaderRow").Height=new GridLength(fullscreen?0:69);
+            UI<RowDefinition>("TransportRow").Height=new GridLength(fullscreen?0:52);
+            UI<RowDefinition>("SettingsRow").Height=new GridLength(fullscreen?0:181);
+            UI<RowDefinition>("StatusRow").Height=fullscreen?new GridLength(0):GridLength.Auto;
+            UI<Grid>("Workspace").Margin=fullscreen?new Thickness(0):new Thickness(16,14,16,12);
+            UI<ColumnDefinition>("MeterColumn").Width=new GridLength(!fullscreen && stats?312:0);
+            window.Focus();
+        }
+        void ToggleStats()
+        {
+            if(fullscreen) ToggleFullscreen();
+            stats=!stats; UI<ColumnDefinition>("MeterColumn").Width=new GridLength(stats?312:0);
+            UI<Border>("MeterHost").Visibility=stats?Visibility.Visible:Visibility.Collapsed;
+        }
+        void UpdateTransport()
+        {
+            UI<Button>("OpenSource").Content=stopping?"Stopping…":preparing?"Cancel":Active?"Stop":source=="Demo"?"Play demo":"Connect";
+            UI<Button>("OpenSource").IsEnabled=!stopping;
+            UI<ComboBox>("SourceChoice").IsEnabled=!preparing && !Active;
+        }
+        void UpdateOutput()
+        {
+            if(rendering!=null) engine.ConfigureOutput(resolutionIds[UI<ComboBox>("RenderResolution").SelectedIndex],hdrIds[UI<ComboBox>("HdrOutput").SelectedIndex]);
+        }
+        void Tick()
+        {
+            if(rendering==null) return;
+            if(stopping) {engine.Stop(); return;}
+            if(directCore!=null && directCore.HasExited) {
+                if(directCore.ExitCode!=0) failure=CoreError(directCore.ExitCode);
+                stopping=true; UpdateTransport(); engine.Stop(); return;
+            }
+            string raw=engine.Snapshot();
+            if(!string.IsNullOrEmpty(raw) && raw!="{}") {
+                var snapshot=json.Deserialize<Dictionary<string,object>>(raw); meter.Update(snapshot);
+                if(!firstFrame && Field(snapshot,"presented")!="0" && Field(snapshot,"presented")!="") {
+                    string label=source=="Demo"?"Offline demo":source=="Direct"?"PS5 connected":"Sony Remote Play";
+                    firstFrame=true; Show(label);
+                }
+            }
+        }
+        void StopPlayback()
+        {
+            stopRequested=true;
+            stopping=preparing || Active;
+            if(network!=null) {var owned=network; network=null; owned.Dispose(); surface.Clear(); stopping=false; Show("Disconnected");}
+            if(rendering!=null) engine.Stop();
+            UpdateTransport();
+        }
+        void Finish()
+        {
+            preparing=stopping=comparing=false;
+            meter.Reset(mode,factor); surface.Clear(); UpdateTransport();
+            if(closing) window.Dispatcher.BeginInvoke(new Action(window.Close));
+        }
+        async Task StartPlayback()
+        {
+            if(preparing || Active) return;
+            preparing=true; firstFrame=false; stopRequested=false; failure=""; UpdateTransport();
+            try {
+                if(engine==null) engine=new EngineSession();
+                var args=new List<string> {"--surface",surface.Handle.ToInt64().ToString(CultureInfo.InvariantCulture),
+                    "--mode",modeIds[mode],"--multiplier",factor.ToString(),"--display","source",
+                    "--resolution",resolutionIds[UI<ComboBox>("RenderResolution").SelectedIndex],
+                    "--hdr",hdrIds[UI<ComboBox>("HdrOutput").SelectedIndex]};
+                if(source=="Direct") {
+                    var console=UI<ComboBox>("ConsolePicker").SelectedItem as DirectConsole;
+                    if(console==null) {OpenPair(); Show("Add your PS5 to play."); return;}
+                    string address=DirectConsole.Host(UI<TextBox>("ConsoleAddress").Text);
+                    consoleAddresses[console.Mac]=address; SaveSettings(); Show("Preparing your PS5 connection…");
+                    string runtime=Field(await Script("sources/Prepare-Decoder.ps1"),"runtime");
+                    if(closing || stopping) {Show("Disconnected"); return;}
+                    if(string.IsNullOrEmpty(runtime)) throw new IOException("The video decoder runtime is unavailable.");
+                    int fps=UI<ComboBox>("DirectFps").SelectedIndex==1?30:60;
+                    var display=DisplayTarget.Select("source",surface.Handle); int hdr=UI<ComboBox>("HdrOutput").SelectedIndex;
+                    int codec=hdr==2 || (hdr==0 && display.AdvancedColorEnabled && mode!=3)?3:2;
+                    string pipe="Cadrivect-Video-"+Guid.NewGuid().ToString("N");
+                    args.AddRange(new[]{"--direct-pipe",pipe,"--direct-runtime",runtime,"--target-fps",fps.ToString()});
+                    directCore=console.Connect(pipe,address,codec,fps);
+                    Show("Connecting to "+console.Name+"…");
+                } else if(source=="Demo") {
+                    args.AddRange(new[]{"--demo","--target-fps","60"}); Show("Starting offline demo…");
+                } else {
+                    using(var sony=Process.GetProcessesByName("RemotePlay").FirstOrDefault(p=>p.MainWindowHandle!=IntPtr.Zero)) {
+                        if(sony==null) throw new InvalidOperationException("Connect in Sony PS Remote Play first, or select Direct to PS5 for built-in pairing and playback.");
+                        args.AddRange(new[]{"--hwnd",sony.MainWindowHandle.ToInt64().ToString(CultureInfo.InvariantCulture)});
+                    }
+                    Show("Capturing your Sony Remote Play session…");
+                }
+                rendering=engine.Start(args.ToArray()); preparing=false; UpdateTransport();
+                int code=await rendering;
+                if(!stopping && directCore!=null && directCore.HasExited && directCore.ExitCode!=0) failure=CoreError(directCore.ExitCode);
+                if(!stopRequested && code!=0 && failure.Length==0) failure=engine.Error();
+                if(!stopRequested && !firstFrame && failure.Length==0) failure="The stream ended before its first picture. Check that the console is awake, then reconnect.";
+                Show(failure.Length>0?failure:"Disconnected",failure.Length>0);
+            } catch(Exception e) {Show(e.GetBaseException().Message,true);}
+            finally {EndPlayback();}
+        }
+        async void EndPlayback()
+        {
+            stopping=true; UpdateTransport();
+            try {
+                if(directCore!=null) {
+                    var owned=directCore; directCore=null;
+                    await Task.Run(delegate {using(owned) {if(!owned.WaitForExit(1500)) StopOwned(owned);}});
+                }
+            } finally {rendering=null; Finish();}
+        }
+        async Task StartNetwork(bool pair)
+        {
+            if(Active || preparing) {Show("Stop the current session first."); return;}
+            string address=ClientAddress();
+            var args=new List<string>{"-Action",pair?"PreparePair":"PreparePlay","-Address",address};
+            int preset=UI<ComboBox>("Quality").SelectedIndex;
+            if(!pair && preset>0) {
+                var resolutions=new[]{"","1080","1440","4K","4K"};
+                var rates=new[]{"","60","120","60","120"}; var mbps=new[]{"","35","65","80","120"};
+                args.AddRange(new[]{"-Resolution",resolutions[preset],"-Fps",rates[preset],"-Mbps",mbps[preset]});
+            }
+            if(!pair && UI<CheckBox>("ClientHdr").IsChecked==true) args.Add("-Hdr");
+            preparing=true; UpdateTransport(); Show("Preparing the network client…");
+            try {
+                var plan=await Script("streaming/Relay.ps1",args.ToArray());
+                if(stopping || closing) return;
+                NetworkPlayer owned=null;
+                owned=NetworkPlayer.Start(surface.Handle,plan,message=>Show(message),code=>{
+                    if(network!=owned) return;
+                    network=null; Finish(); Show(code==0?"Network session ended.":"Network session ended (code "+code+").",code!=0);
+                });
+                network=owned; Show(Field(plan,"message"));
+            } finally {preparing=false; if(network==null) Finish(); else UpdateTransport();}
+        }
+        static string CoreError(int code)
+        {
+            if(code==24 || code==25) return "The PS5 requires its user login PIN. Unlock the active console profile and reconnect.";
+            if(code==26) return "The audio output could not start. Select an available Windows playback device and reconnect.";
+            if(code==23) return "The PS5 session disconnected. Check that the console is awake and its address is reachable.";
+            return "The direct streaming engine stopped (code "+code+").";
+        }
+    }
+}

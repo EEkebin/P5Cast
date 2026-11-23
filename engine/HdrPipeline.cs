@@ -71,10 +71,15 @@ internal sealed partial class Renderer
         {
             // EASU/RCAS require a bounded perceptual signal. Store PQ BT.2020 in FP16 throughout both passes.
             HdrScratch(ref hdrFsrInput,srcSize,HdrFloatFormat);
-            HdrScratch(ref hdrFsrScaled,outSize,HdrFloatFormat);
             Draw("HdrToPq",hdrFsrInput.Write,srcArea,source,1);
-            Draw("Easu",hdrFsrScaled.Write,outputArea,hdrFsrInput.Read,1);
-            Draw("Rcas",target,targetArea,hdrFsrScaled.Read,1);
+            source=hdrFsrInput.Read;
+            if(srcSize!=outSize)
+            {
+                HdrScratch(ref hdrFsrScaled,outSize,HdrFloatFormat);
+                Draw(outSize.Width>srcSize.Width ? "Easu" : "Original",hdrFsrScaled.Write,outputArea,source,1);
+                source=hdrFsrScaled.Read;
+            }
+            Draw("Rcas",target,targetArea,source,1);
         }
         else
         {

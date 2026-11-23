@@ -19,17 +19,17 @@ float3 PqAt(float2 uv) {
     return EncodePq80(LinearScRgbTo2020(image.SampleLevel(linearClamp,uv,0).rgb));
 }
 float4 HdrToPq(Vertex v) : SV_Target {
-    return float4(PqAt(v.uv),1);
+    return float4(EncodePq80(LinearScRgbTo2020(SamplePicture(v))),1);
 }
 float4 HdrToLinear2020(Vertex v) : SV_Target {
-    return float4(max(0,LinearScRgbTo2020(image.SampleLevel(linearClamp,v.uv,0).rgb)),1);
+    return float4(max(0,LinearScRgbTo2020(SamplePicture(v))),1);
 }
 float4 HdrLinear2020ToPq(Vertex v) : SV_Target {
-    return float4(EncodePq80(image.SampleLevel(linearClamp,v.uv,0).rgb),1);
+    return float4(EncodePq80(SamplePicture(v)),1);
 }
 float4 HdrSharpToPq(Vertex v) : SV_Target {
     float2 stepSize = 1.0 / sourceSize;
-    float3 center = PqAt(v.uv);
+    float3 center = EncodePq80(LinearScRgbTo2020(SharpCenter(v)));
     float3 neighbors = PqAt(v.uv+float2(stepSize.x,0)) + PqAt(v.uv-float2(stepSize.x,0))
                      + PqAt(v.uv+float2(0,stepSize.y)) + PqAt(v.uv-float2(0,stepSize.y));
     return float4(saturate(center + 0.12 * (4.0 * center - neighbors)),1);

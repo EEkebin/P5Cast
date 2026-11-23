@@ -1,69 +1,82 @@
-# Cadrivect
+# P5Cast
 
-A Windows x64 player and streaming host for PS5 Remote Play. Play on the host PC, or pair another device and stream the host’s display and sound. Cadrivect has its own dashboard and Direct3D 11 player. Sony Remote Play, chiaki-ng, Sunshine, and Moonlight run as separate applications.
+P5Cast is a Windows x64 app for playing a PS5 over a network. The dashboard contains the video surface, fullscreen control, picture settings and live frame-rate dial. Direct to PS5 connects to the console and decodes its stream on this PC. Sony Remote Play uses an existing session in Sony’s app. The optional PC host lets a second device play the enhanced output over a LAN or private VPN.
 
-## Try it on one PC
+## Try it offline
 
-Download the Windows x64 ZIP from the [private releases](https://github.com/EEkebin/Cadrivect/releases), extract the whole folder, and open **Cadrivect.exe**. For Start menu entries, run **Install.cmd** from the extracted folder. The installer copies the app into your Windows user profile. Use the same package on the client PC.
+Extract the entire Windows x64 ZIP and open `P5Cast.exe`. To install it for your Windows user and add Start menu entries, run **Install.cmd** from the extracted folder. The release includes a SHA-256 checksum. [Private Windows releases](https://github.com/EEkebin/P5Cast/releases)
 
-1. Choose **Play → Arcade demo → Play demo**. Steer through gates with the arrow keys or A/D. Space boosts, M toggles sound, and F11 toggles fullscreen. The demo also accepts an XInput controller.
-2. To try the GPU player, leave the demo running, return to Cadrivect, select **AMD FSR 1** and **2×**, and click **Open enhanced view**. The player opens on the chosen playback display. **Ctrl+Alt+B** compares against the original view. **Ctrl+Alt+Q** closes the enhanced view.
-3. For a PS5, choose **PS Remote Play → Open Remote Play** and connect in the Sony app using your existing pairing. Alternatively, choose **Direct to PS5 → Open direct client** and register your console in chiaki-ng. Once the game is visible, open the enhanced view. Keep the source window restored. Audio and controller input continue through the source app. [Sony setup](https://www.playstation.com/en-us/support/games/playstation-remote-play-on-pc-and-mac/) · [chiaki-ng setup](https://chiaki-ng.github.io/chiaki-ng/setup/configuration/)
+The installer places the app in `%LOCALAPPDATA%\Programs\P5Cast` and adds **P5Cast** and **P5Cast Client** under **Start → P5Cast**. Existing console registrations, preferences and network pairings carry over when upgrading from Cadrivect.
+
+1. Open **Play**, choose **Offline demo**, then **Play demo**. A 960×540 scene runs inside the dashboard. Use the arrow keys or A/D to steer and Space to accelerate. The demo runs without a console, network connection, decoder download or controller.
+2. The **Stats** panel is visible at startup. Begin with **Original** and interpolation **Off**. Try **Sharpen**, **AMD FSR 1** or an available NVIDIA mode, then compare with **Compare original**. Pick **2×**, **3×** or **4×** to test interpolation.
+3. Use **Fullscreen** or F11 for edge-to-edge video. Press Escape or double-click the picture to return. **Stop** turns the same video area black and clears the live measurements. With the dashboard focused, Ctrl+Alt+O toggles Stats, Ctrl+Alt+B toggles comparison, and Ctrl+Alt+Q stops playback.
+
+## Connect to a PS5
+
+| Source | How to connect | Audio and controls |
+| --- | --- | --- |
+| **Direct to PS5** | Choose a paired console and enter its reachable LAN address. Select a stream target of 30 or 60 fps, then **Connect**. The native helper requests a 1080p console stream. | The native helper decodes stereo Opus, plays it on the Windows audio device and sends input from the first SDL-compatible controller. |
+| **Sony Remote Play** | Open Sony’s installed PC app, connect to the console using its existing pairing, and leave its window restored. Select **Sony Remote Play → Connect** in P5Cast. | Sony’s app plays audio and handles controller input. P5Cast captures its client area and processes the video. [Sony’s PC setup](https://remoteplay.dl.playstation.net/remoteplay/lang/en/1100001.html) |
+
+**Pair a console for Direct.** On the PS5, enable **Settings → System → Remote Play → Enable Remote Play**. In P5Cast, choose **Direct to PS5 → Add console**. Enter the console’s address and the Base64 PSN Account ID for the profile you play on. On the console, select **Link Device** and enter its eight-digit code in P5Cast. The app prefills the account ID when it can identify a single account from previous registrations. Select **Pair console**, choose the saved console, and **Connect**. The Account ID represents eight bytes and differs from your online display name. The upstream registration guide describes how to obtain it. [Registration and Account ID guide](https://chiaki-ng.github.io/chiaki-ng/setup/configuration/#registering-your-playstation)
+
+P5Cast stores new Direct registration keys with Windows encryption scoped to the current user. Existing compatible chiaki-ng registrations under that Windows user can also appear in **Paired console**. The Sony app keeps its own pairing. Direct needs a reachable, awake console with the intended user available. The native connection uses the console address; a private VPN must provide a route to it for play away from home.
+
+On first use, Direct prepares its FFmpeg decoder. It reuses verified libraries from a compatible local portable installation or downloads the pinned upstream archive, verifies it, and extracts three DLLs. The cache is checked on subsequent launches. Once prepared and paired, Direct can play over the local network without a P5Cast cloud service. The offline demo works before this step. [Decoder preparation](sources/Prepare-Decoder.ps1)
+
+## Picture quality and HDR
+
+The PS5 sends compressed video. Direct decodes those pixels once before enhancement. Hosting the PC adds another lossy encode. The playback resolution controls local processing and presentation. A 4K presentation can upscale the console’s 1080p input.
+
+| Picture mode | Processing |
+| --- | --- |
+| **Original** | Preserves native-size texels, fits the picture to the window and samples multiple regions when reducing it. |
+| **Sharpen** | Uses bounded cubic reconstruction during enlargement and a spatial detail filter to improve edges and fine lettering. |
+| **AMD FSR 1** | Uses AMD’s EASU for enlargement and RCAS for sharpening. Native-size input skips the enlargement pass. |
+| **NVIDIA RTX Video SR** | Runs the NVIDIA RTX Video SDK at High quality on SDR video. Select SDR to make this mode available during HDR playback. |
+| **NVIDIA DLSS / DLAA** | Uses the NVIDIA NGX runtime in SDR or floating-point HDR. DLSS uses DLAA when the input already meets or exceeds the processing resolution. These modes are experimental on finished console video. Motion comes from the decoded pictures; original game depth and camera jitter are unavailable. |
+
+NVIDIA choices appear enabled after the app runs a capability test on the actual Direct3D adapter. Optical-flow hardware supplies motion estimates where supported; other adapters use a GPU block matcher. P5Cast’s interpolation inserts frames between source pictures. Its 2×–4× multipliers are targets. Interpolation adds processing delay and can distort moving text or objects. Native NVIDIA DLSS Frame Generation is unavailable in this build. [NVIDIA DLSS SDK](https://github.com/NVIDIA/DLSS) · [NVIDIA RTX Video SDK](https://developer.nvidia.com/rtx-video-sdk)
+
+Choose a **Playback display**, a **Resolution** cap or **Native**, and **Color output**. **Auto** uses HDR10 when Windows HDR is active on the selected display, with SDR for RTX Video SR. Explicit **HDR10** requires an HDR-enabled display and a presentation surface that supports 10-bit PQ/BT.2020. Changing output settings during playback affects local presentation. Direct negotiates the console’s stream format when connecting; reconnect to request a different console format. Direct supports 10-bit HEVC HDR and maps HDR input to SDR for an SDR display. Sony capture uses floating-point scRGB for HDR. Follow Sony’s own Windows HDR setup for its client. [Sony HDR setup](https://remoteplay.dl.playstation.net/remoteplay/lang/en/1100001.html)
+
+## Reading Stats
+
+The semicircular dial uses one 0–240+ FPS scale. Blue shows input, amber shows generated frames, and mint shows presented frames. The white triangular marker shows the target. The numeric legend preserves measured values above 240 FPS. **Target** is the requested presentation rate, **Input** counts accepted source frames, **Presented** counts submissions to the Windows swap chain, and **Generated** counts interpolated frames included in Presented. Display scan-out can differ. A dash indicates that the relevant source has no measurement.
+
+For Direct, **Video bitrate** measures incoming compressed video. **Video decode** measures the local decoding step. **Receive → submit** starts at local packet receipt and ends at presentation submission. **Audio queue** measures buffered audio in the native player and excludes Windows mixer and device buffers. **Handshake RTT** is a round-trip estimate from session setup. Controller-to-screen latency requires an external measurement. Sony capture reports **Capture → submit** and leaves console network telemetry unavailable.
 
 ## Play from another device
 
-1. On the host, open **Host**, select its LAN or private VPN IPv4 address and the display to share, then click **Start sharing**. This starts an encrypted Sunshine session that shares the desktop and system audio. A paired client can send keyboard, mouse, and supported gamepad input. Keep the host awake with its display active. Stop and restart sharing to change the shared display.
-2. On another Windows PC, open **Cadrivect Client** from the Start menu, or select **Client** in the portable app. Enter the host address and click **Pair with host**. Enter the displayed PIN on the host and click **Approve PIN**.
-3. Select a stream profile. For an HDR-capable client display, enable **Request an HDR stream** and use Auto, HEVC, or AV1. Then click **Start stream**. Switch the host into the game or its enhanced view. A supported Moonlight client on a handheld can also connect to the same address and launch the **Cadrivect** application entry.
-4. **Ctrl+Alt+Shift+Q** ends a Moonlight PC session. On the host, click **Stop sharing** when finished. The host runs independently of the dashboard, so reopen the dashboard if needed. While hosting, **Manage paired clients → Load devices** lists clients and lets you revoke individual pairings.
+1. On the PC running the game, open **Host**, choose a private LAN or VPN IPv4 address and the display to share, then select **Start sharing**. Sunshine shares the selected desktop and system audio. Stop and restart sharing to change the captured monitor.
+2. On another Windows PC, open **P5Cast Client** or the **Client** tab. Enter the host address, select **Pair with host**, and enter the client’s PIN under **Approve PIN** on the host. This pairing is between the two computers.
+3. Select a stream profile and **Start stream**. For HDR, use an HDR-capable host display and client display, enable **Request an HDR stream**, and use Auto, HEVC or AV1. The dashboard hosts Moonlight’s client surface. Third-party Moonlight clients can launch the host’s **P5Cast** application entry.
+4. Use **Stop sharing** to end the host service. **Manage paired clients** lists paired devices and supports revocation. A same-PC preview keeps sound on the host to avoid playing it twice.
 
-When the dashboard connects to its own PC, it starts a video-only Moonlight preview. The source audio still plays once on the host. A client on another device receives the stream audio normally.
+Upgraded hosts also publish their previous application name so existing Moonlight shortcuts still work.
 
-For internet play, connect both devices to the same private VPN first, then bind the host to its VPN address and enter that address on the client. LAN connections require the host firewall to allow Sunshine from the client. Cadrivect leaves router and firewall configuration to the owner. An external device and a real internet connection are needed to validate bandwidth, firewall access, and latency on your network.
+The host must remain awake and reachable. Configure the host firewall for the private network and, for internet play, connect both devices through a private VPN. Remote gamepad forwarding requires a compatible virtual gamepad driver on the host. End-to-end performance depends on both devices, the network path and the chosen bitrate. [Sunshine Windows setup](https://docs.lizardbyte.dev/projects/sunshine/latest/md_docs_2getting__started.html#windows) · [Moonlight](https://github.com/moonlight-stream/moonlight-qt)
 
-**Remote controllers.** Local play uses the controller support of Sony or chiaki-ng. To forward a gamepad from Moonlight, Sunshine needs a compatible virtual gamepad driver on the host. The Host page links to upstream setup. The keyboard-driven demo works without that driver. The direct client also offers its own input configuration. [Sunshine Windows driver options](https://docs.lizardbyte.dev/projects/sunshine/latest/md_docs_2getting__started.html#windows)
+## Dependencies and local data
 
-## Picture quality
+The dashboard and Direct3D player are P5Cast code. `CadrivectDirect.exe` is a background helper built against libchiaki; its license, build instructions and source archive ship with the helper. Direct play runs without the chiaki-ng desktop app or Qt. The three first-use FFmpeg DLLs come from the pinned upstream portable release and report GPL version 3 or later. The decoder bridge uses FFmpeg headers under the accompanying LGPL terms. Source and hashes for the FFmpeg release, Sunshine and Moonlight are recorded in the project. [Direct helper and notices](sources/native/README.md) · [FFmpeg runtime pins](sources/Prepare-Decoder.ps1) · [Network package pins](streaming/packages.json)
 
-- **Direct to PS5** on the device you are playing on receives the console stream in one hop. This avoids another video encode. After local registration, chiaki-ng also supports remote connections through PlayStation Network on compatible networks. [Remote connection guide](https://chiaki-ng.github.io/chiaki-ng/setup/remoteconnection/)
-- **Host streaming** uses the host GPU and sends a fresh compressed video stream plus Opus audio. Both the PS5 source and the hosted output are lossy. For the least conversion, play directly. For a lightweight client, use the host. Match the output to the client display and select a bitrate the network can sustain.
-- **AMD FSR 1** runs the published EASU and RCAS shaders on the captured picture. **Sharpen** uses a separate spatial filter. **Original** uses ordinary sampling.
-- **2×, 3× and 4× interpolation** estimate motion from consecutive captured pictures. These are target multipliers. Display refresh, capture cadence and GPU load cap the visible result. Fast pans, cuts, and HUDs can show artifacts. **Off** gives the shortest processing path.
-- **NVIDIA RTX Video Super Resolution** applies the RTX Video SDK's High setting to captured SDR video. Choose this first if you want to clean up an SDR stream. Auto uses SDR presentation for this mode. [NVIDIA RTX Video SDK](https://developer.nvidia.com/rtx-video-sdk)
-- **NVIDIA DLSS and DLAA** use the NVIDIA NGX runtime. DLSS enlarges the source when the output is larger and selects DLAA when the source already fills or exceeds the requested resolution. Explicit DLAA always processes the original size. Both modes are experimental on finished video. The player estimates motion and supplies a flat depth plane and zero camera jitter. Use **Ctrl+Alt+B** to compare moving text, fences, or fast pans. [NVIDIA DLSS SDK](https://github.com/NVIDIA/DLSS)
-- **Hardware motion estimation** uses NVIDIA Optical Flow when available. A GPU block matcher supports other adapters. Cadrivect’s interpolator consumes this motion to generate intermediate frames. The session report records the active NVIDIA effect, successful evaluations, and hardware motion pairs.
-
-## Displays and HDR
-
-Choose the **Playback display** by its Windows number and model. The app defaults to your primary display and remembers your selection. While playing, use **Ctrl+Alt+Enter** to toggle fullscreen, **Ctrl+Alt+Right** to cycle displays, or drag the window by its title bar. Selecting a different display in the dashboard moves the active player. **Resolution** caps the processing size while keeping the aspect ratio. Native uses the available window or display size. These controls preserve your desktop resolution.
-
-**Auto** presents HDR10 on a display where Windows HDR is active, and SDR on an SDR display. The RTX Video SR mode uses its SDR pipeline. Explicit **HDR10** checks both the display and swap chain before starting. HDR10 captures floating-point scRGB, preserves highlight range through processing, and presents a 10-bit PQ/BT.2020 signal. Windows and the panel control final presentation. SDR video on an HDR display retains the luminance supplied by Windows. For native HDR from the console, enable HDR on the PS5 and Windows display, install the Microsoft HEVC Video Extension, and select **Enable HDR** under **Video Quality for Remote Play** in the Sony client. [Sony Windows HDR setup](https://remoteplay.dl.playstation.net/remoteplay/lang/en/1100001.html)
-
-## Components and local data
-
-Sony mode launches the installed official client. Direct mode downloads the pinned upstream chiaki-ng portable release on first use. Host and Client download pinned portable Sunshine and Moonlight builds from their upstream GitHub releases. The scripts compare SHA-256 digests before extraction. Component versions and digests are in [SourceTools.ps1](sources/SourceTools.ps1) and [packages.json](streaming/packages.json).
-
-Builds are unsigned. The release includes a SHA-256 checksum and the private repository contains the build scripts. Hardware capture uses Windows Graphics Capture, SharpDX 4.2.0, and the AMD FSR 1 headers. The packaged GPU binaries include the SharpDX and FidelityFX notices.
-
-Cadrivect keeps the original `%LOCALAPPDATA%\LumaRelay` profile for preferences, streaming tools and client pairings. NVIDIA caches use `%LOCALAPPDATA%\Cadrivect`. Sony and chiaki-ng manage their own console pairing data. [chiaki-ng](https://github.com/chiaki-ng/chiaki-ng) · [Sunshine](https://github.com/SunshineStream/Sunshine) · [Moonlight](https://github.com/moonlight-stream/moonlight-qt)
-
-This software contains source code provided by NVIDIA Corporation. The NVIDIA components are supplied under the NVIDIA RTX SDK terms included in `engine/bin/NVIDIA-RTX-LICENSE.txt` and `engine/bin/NVIDIA_RTX_Video_SDK_License.pdf`. The release includes signed NVIDIA runtimes and Cadrivect’s unsigned integration binaries.
+The release includes unsigned P5Cast binaries, signed NVIDIA runtimes, and the SharpDX, FidelityFX, NVIDIA Optical Flow and NVIDIA RTX SDK notices. This software contains source code provided by NVIDIA Corporation. New Direct pairing data, FFmpeg and NVIDIA caches live under `%LOCALAPPDATA%\Cadrivect`. Existing dashboard preferences, cached streaming tools and Sunshine pairings use `%LOCALAPPDATA%\LumaRelay`.
 
 ## Build and test
 
-Use Windows 11 x64 with a logged-in desktop, .NET Framework 4.8, Windows PowerShell 5.1, and a hardware Direct3D 11 adapter. The first build retrieves hash-pinned SharpDX packages, NVIDIA SDK files and Microsoft C++ build tools as needed. NVIDIA enhancement modes require a compatible RTX GPU and driver. The ZIP includes the runtime files.
+Use Windows 11 x64, .NET Framework 4.8, Windows PowerShell 5.1, a hardware Direct3D 11 adapter and Git for Windows. First builds download the pinned compilers, source packages and SDK inputs. The package contains the native core and graphics runtimes. The following tests use synthetic video and do not need a PS5.
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Build.ps1
-.\Cadrivect.exe
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Smoke-Dashboard.ps1
-$player = Start-Process .\engine\bin\CadrivectPlayer.exe -ArgumentList '--self-test --mode fsr --multiplier 3' -Wait -PassThru
-$player.ExitCode
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Package.ps1
+.\Build.ps1
+.\P5Cast.exe
+.\tests\Smoke-Decoder.ps1
+.\tests\Smoke-Embedded.ps1
+.\engine\hdrtest\Verify.ps1
+.\Package.ps1
 ```
 
-For standalone demo or host/client tests, close PS Remote Play and confirm the Sony session has disconnected before starting the test. Keep the console awake by leaving the rest-mode box unchecked. The dashboard smoke test operates a temporary demo and verifies real UI actions. The player self-test captures an animated window and samples GPU output. Console pairing, physical DualSense input, and WAN play need separate testing with your equipment.
+The decoder test compares every YUV sample in lossless H.264, HEVC and HEVC Main 10 fixtures. The embedded test renders fixture packets in a WPF child surface. The HDR test checks GPU transfer functions and a one-pixel stroke target. A physical controller, the actual console and a second client on the intended network are needed to check their behavior together. [Player diagnostics and CLI](engine/README.md)
 
-## Future platforms
-
-Linux (Arch and Ubuntu) and macOS on MacBooks are planned desktop targets. An Android client would use the phone as the screen and its paired physical controller for input. Direct-to-PS5 play would avoid a second encode. Connecting through the PC host would let the host handle graphics processing. On-device Android upscaling will depend on measured latency and sustained performance. The current Cadrivect release targets Windows.
+The current app targets Windows. Linux, macOS and Android are future platform targets.

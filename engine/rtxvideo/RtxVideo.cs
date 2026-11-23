@@ -9,17 +9,20 @@ internal sealed class RtxVideo : IDisposable
     const string RuntimeHash = "C3D88EEA5FF7A548EDEFA66414CF6E77464D0947277C904F324DD23ABF58A1ED";
     IntPtr session;
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.AssemblyDirectory | DllImportSearchPath.System32)]
     [DllImport(Bridge, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode, ExactSpelling = true)]
     static extern uint VideoCreate(IntPtr device, string cache, string featurePath, out IntPtr session);
+    [DefaultDllImportSearchPaths(DllImportSearchPath.AssemblyDirectory | DllImportSearchPath.System32)]
     [DllImport(Bridge, CallingConvention = CallingConvention.Cdecl)]
     static extern uint VideoEvaluate(IntPtr session, IntPtr ctx, IntPtr input, IntPtr output,
         int srcWidth, int srcHeight, int dstWidth, int dstHeight, int quality);
+    [DefaultDllImportSearchPaths(DllImportSearchPath.AssemblyDirectory | DllImportSearchPath.System32)]
     [DllImport(Bridge, CallingConvention = CallingConvention.Cdecl)]
     static extern void VideoDestroy(IntPtr session);
 
     internal RtxVideo(IntPtr device)
     {
-        string featureDirectory = AppDomain.CurrentDomain.BaseDirectory;
+        string featureDirectory = Path.GetDirectoryName(typeof(RtxVideo).Assembly.Location);
         string runtime = Path.Combine(featureDirectory, "nvngx_vsr.dll");
         using (var hasher = SHA256.Create())
         using (var stream = File.OpenRead(runtime))

@@ -19,7 +19,9 @@ The installer places the app in `%LOCALAPPDATA%\Programs\P5Cast` and adds **P5Ca
 | **Direct to PS5** | Choose a paired console and enter its reachable LAN address. Choose 30 or 60 FPS under **Stream quality**, then **Connect**. The native helper requests a 1080p console stream. | The native helper decodes stereo Opus, plays it on the Windows audio device and sends input from the first SDL-compatible controller. |
 | **Sony Remote Play** | Open Sony’s installed PC app, connect to the console using its existing pairing, and leave its window restored. Select **Sony Remote Play → Connect** in P5Cast. | Sony’s app plays audio and handles controller input. P5Cast captures its client area and processes the video. [Sony’s PC setup](https://remoteplay.dl.playstation.net/remoteplay/lang/en/1100001.html) |
 
-Under **Play**, **Console** contains pairing, address and stop behavior. **Stream quality** sets the next Direct connection's target frame rate and requested video bitrate. **Display** controls the local monitor, resolution and HDR. The sidebar keeps the FPS dial visible above collapsible **Picture** and **Stream diagnostics** sections.
+Under **Play**, **Console** contains pairing, address and stop behavior. **Stream quality** sets the next Direct connection's target frame rate and requested video bitrate. **Display** controls the monitor, resolution, color output and video renderer. The sidebar keeps the FPS dial visible above collapsible **Picture** and **Stream diagnostics** sections.
+
+Choose **Play → Display → Video renderer** while playback is stopped, then start **Offline demo** or connect. **Auto** uses Direct3D 11 on Windows and supports HDR. **Direct3D 12**, **Vulkan**, and **OpenGL** present the finished SDR frames through the selected API. Windows still uses Direct3D 11 for capture and effects. The additional GPU readback and upload can increase latency, especially at high resolutions. Your renderer choice persists, and switching back to Direct3D 11 restores your color setting. The separate Moonlight network client manages its own graphics output.
 
 Direct defaults to a **100 Mbps video request**, the top setting offered by the pinned chiaki-ng client. Choose a lower target for slower links. The PS5 varies its compressed output with the scene and connection. It also chooses the Opus audio bitrate. In **Stream diagnostics**, compare requested and received video rates and inspect received audio bitrate, sample rate, channels and queue duration. [Upstream PS5 bitrate settings](https://github.com/streetpea/chiaki-ng/blob/v1.10.1/gui/src/qml/SettingsDialog.qml#L1400-L1420)
 
@@ -92,4 +94,12 @@ Use Windows 11 x64, .NET Framework 4.8, Windows PowerShell 5.1, a hardware Direc
 
 The decoder test compares every YUV sample in lossless H.264, HEVC and HEVC Main 10 fixtures. The embedded test renders fixture packets in a WPF child surface. The HDR test checks GPU transfer functions and a one-pixel stroke target. A physical controller, the actual console and a second client on the intended network are needed to check their behavior together. [Player diagnostics and CLI](engine/README.md)
 
-The current app targets Windows. Linux, macOS and Android are future platform targets.
+The installable app targets Windows x64. The portable SDL3 presentation library accepts BGRA frames from a host-owned SDL window. Linux hosts can select Vulkan or OpenGL, macOS hosts can select Metal, and Android hosts can request Vulkan or OpenGL ES 2. Device drivers determine availability. Ports still need a native application shell, decoder integration, audio and gamepad handling. [Portable presenter and CMake build](engine/presentation)
+
+To exercise the portable library on a Linux desktop or Mac with SDL3 development files and CMake installed, run these commands from the repository root. The test opens a graphics context and submits frames using each platform's configured drivers.
+
+```sh
+cmake -S engine/presentation -B /tmp/p5cast-presentation -DBUILD_TESTING=ON
+cmake --build /tmp/p5cast-presentation
+ctest --test-dir /tmp/p5cast-presentation --output-on-failure
+```

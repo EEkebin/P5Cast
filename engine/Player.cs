@@ -244,6 +244,7 @@ internal static class Player
             string displayName=Option(args,"--display","primary");
             string resolution=Option(args,"--resolution","native").ToLowerInvariant();
             Size raster=DisplayTarget.ResolutionLimit(resolution);
+            string backend=Presentation.Resolve(Option(args,"--renderer","auto"));
             string hdr=Option(args,"--hdr","auto").ToLowerInvariant();
             if(hdr!="auto" && hdr!="off" && hdr!="hdr10") throw new ArgumentException("Choose auto, off, or hdr10 for --hdr.");
             string mode=Option(args,"--mode",testing ? "fsr":"original").ToLowerInvariant();
@@ -273,7 +274,7 @@ internal static class Player
                         window.Show(); window.EnableShortcuts();
                         if(!testing && !direct) WindowsApi.SetForegroundWindow(source);
                     }
-                    using(var renderer=new Renderer(host==null ? window.Handle:host.Handle,host==null ? window.ClientSize:host.ClientSize,raster,hdr,mode,host!=null))
+                    using(var renderer=new Renderer(host==null ? window.Handle:host.Handle,host==null ? window.ClientSize:host.ClientSize,raster,hdr,mode,host!=null,backend))
                     using(var capture=captureWindow ? new WindowCapture(source,renderer.Device,renderer.HdrEnabled):null)
                     using(var decoded=direct ? new DirectVideo(pipe,runtime):null)
                     using(var offline=demo ? new DemoVideo(renderer,host.Handle,targetFps):null)
@@ -304,7 +305,9 @@ internal static class Player
                         {
                             while((host==null ? !window.Ended : host.Exists) && (!captureWindow || WindowsApi.IsWindow(source)))
                             {
-                                if(host==null) Application.DoEvents(); else host.TakeChanges(change);
+                                // The portable presenter owns a child HWND on this playback thread.
+                                if(host==null || renderer.Backend!="d3d11") Application.DoEvents();
+                                if(host!=null) host.TakeChanges(change);
                                 if((window!=null && window.Ended) || (seconds>0 && clock.Elapsed.TotalSeconds>=seconds)) break;
                                 compare=host==null ? window.Compare:host.Comparing;
                                 double now=clock.Elapsed.TotalMilliseconds;
@@ -483,7 +486,7 @@ internal static class Player
     {
         Size input=renderer.InputSize;
         var audio=direct==null ? null:direct.Audio;
-        return ",\"inputWidth\":"+input.Width+",\"inputHeight\":"+input.Height+",\"targetFps\":"+Number(targetFps==0 ? -1:targetFps)
+        return ",\"renderer\":"+JsonString(renderer.Backend)+",\"processingRenderer\":\"d3d11\""+",\"inputWidth\":"+input.Width+",\"inputHeight\":"+input.Height+",\"targetFps\":"+Number(targetFps==0 ? -1:targetFps)
                +",\"targetPresentedFps\":"+Number(targetFps==0 ? -1:targetFps*factor)+",\"lastPcSubmitMs\":"+Number(age)
                +",\"sourceKind\":"+JsonString(demo ? "demo":direct==null ? "window":"direct")
                +",\"audioQueueMs\":"+Number(audio==null ? -1:audio.QueueMs)+",\"audioTargetMs\":"+Number(audio==null ? -1:audio.TargetMs)

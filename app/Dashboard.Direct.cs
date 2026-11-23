@@ -55,10 +55,21 @@ namespace Cadrivect
             UI<Button>("OpenSource").Content=stopping?"Stopping…":preparing || waitingForConsole?"Cancel":Active?"Stop":source=="Demo"?"Play demo":"Connect";
             UI<Button>("OpenSource").IsEnabled=!stopping && !requestingRest;
             bool canSelect=!preparing && !Active;
+            UI<ComboBox>("VideoRenderer").IsEnabled=canSelect;
             UI<ComboBox>("ConsolePicker").IsEnabled=canSelect;
             UI<TextBox>("ConsoleAddress").IsEnabled=canSelect;
             UI<Button>("AddConsole").IsEnabled=canSelect;
             UI<ComboBox>("SourceChoice").IsEnabled=!preparing && !Active;
+        }
+        void RefreshRendererOutput()
+        {
+            var color=UI<ComboBox>("HdrOutput");
+            bool sdr=UsesSdrPresenter;
+            color.SelectedIndex=sdr?1:preferredHdr;
+            color.IsEnabled=!sdr;
+            UI<TextBlock>("RendererHint").Text=sdr
+                ? "SDR output. Windows processes effects in Direct3D 11. Stop playback to change renderer."
+                : "Direct3D 11 supports HDR output. Stop playback to change renderer.";
         }
         void UpdateOutput()
         {
@@ -107,7 +118,7 @@ namespace Cadrivect
             try {
                 if(engine==null) engine=new EngineSession();
                 var args=new List<string> {"--surface",surface.Handle.ToInt64().ToString(CultureInfo.InvariantCulture),
-                    "--mode",modeIds[mode],"--multiplier",factor.ToString(),"--display","source",
+                    "--mode",modeIds[mode],"--multiplier",factor.ToString(),"--display","source","--renderer",SelectedRenderer,
                     "--resolution",resolutionIds[UI<ComboBox>("RenderResolution").SelectedIndex],
                     "--hdr",hdrIds[UI<ComboBox>("HdrOutput").SelectedIndex]};
                 if(source=="Direct") {

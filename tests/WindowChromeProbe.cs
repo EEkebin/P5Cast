@@ -214,6 +214,26 @@ internal static class WindowChromeProbe
             Note("Fullscreen entered from maximized restored the exact work area and title bar.");
             Click("OpenSource");
             await Until(delegate{return status.Text=="Disconnected";},"Offline demo did not disconnect.");
+            if(Environment.GetEnvironmentVariable("P5CAST_PROBE_RENDERERS")=="1") {
+                Click("DisplayGroup");
+                var choice=Find<ComboBox>("VideoRenderer");
+                var api=AppDomain.CurrentDomain.GetAssemblies().Select(a=>a.GetType("Cadrivect.Engine.EmbeddedPlayback")).First(t=>t!=null);
+                var snapshot=api.GetMethod("Snapshot");
+                string[] keys={"d3d12","vulkan","opengl","d3d11"};
+                string[] labels={"Direct3D 12","Vulkan","OpenGL","Direct3D 11"};
+                for(int i=0;i<keys.Length;++i) {
+                    choice.SelectedItem=labels[i];
+                    Require(choice.IsEnabled && choice.SelectedItem.ToString()==labels[i],"Renderer selection failed.");
+                    Click("OpenSource");
+                    await Until(delegate{return status.Text=="Offline demo";},"Offline demo failed to present with "+labels[i]+".");
+                    string frame=(string)snapshot.Invoke(null,null);
+                    Require(frame.Contains("\"renderer\":\""+keys[i]+"\"") && !choice.IsEnabled && Video()==video,
+                            "Selected renderer was not presenting on the embedded surface: "+frame);
+                    Click("OpenSource");
+                    await Until(delegate{return status.Text=="Disconnected" && choice.IsEnabled;},"Renderer did not release the surface.");
+                    Note(labels[i]+" presented through the dashboard and released the same playback surface.");
+                }
+            }
             completed=true; Click("CloseWindow");
         } catch(Exception e) {
             failure=e;

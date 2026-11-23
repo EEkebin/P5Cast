@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$Version = '0.5.1',[string]$BuildDir=$PSScriptRoot)
+param([string]$Version = '0.6.0',[string]$BuildDir=$PSScriptRoot)
 $ErrorActionPreference = 'Stop'
 if ($Version -notmatch '^\d+\.\d+\.\d+(-[a-z0-9.-]+)?$') { throw 'Invalid version.' }
 $dist = Join-Path $PSScriptRoot 'dist'
@@ -20,7 +20,8 @@ try {
     }
     $runtimeFiles = @('CadrivectPlayer.exe','SharpDX.dll','SharpDX.Direct3D11.dll','SharpDX.DXGI.dll','SharpDX-LICENSE.txt','FSR-LICENSE.txt',
         'Cadrivect.Ngx.dll','nvngx_dlss.dll','NVIDIA-RTX-LICENSE.txt','Cadrivect.RtxVideo.dll','nvngx_vsr.dll',
-        'NVIDIA_RTX_Video_SDK_License.pdf','NVIDIA-OPTICAL-FLOW-LICENSE.txt','Cadrivect.Decoder.dll','FFmpeg-LICENSE.txt')
+        'NVIDIA_RTX_Video_SDK_License.pdf','NVIDIA-OPTICAL-FLOW-LICENSE.txt','Cadrivect.Decoder.dll','FFmpeg-LICENSE.txt',
+        'P5Cast.Presentation.dll','SDL3.dll','SDL3-LICENSE.txt')
     foreach ($file in $runtimeFiles) {
         Copy-Item -LiteralPath (Join-Path $BuildDir "engine\bin\$file") -Destination (Join-Path $bundle "engine\bin\$file")
     }

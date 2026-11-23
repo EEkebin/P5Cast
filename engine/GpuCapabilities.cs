@@ -145,6 +145,12 @@ internal sealed class GpuCapabilities
         foreach(string id in new[]{"dlss","dlaa","rtxvideo","opticalFlow","nativeFrameGeneration"})
             json.Append(',').Append(Quote(id)).Append(Supports(id) ? ":true" : ":false")
                 .Append(',').Append(Quote(id+"Reason")).Append(':').Append(Quote(Reason(id)));
-        return json.Append('}').ToString();
+        json.Append(",\"presentationDrivers\":[");
+        bool first=true;
+        foreach(string id in Presentation.BuiltDrivers()) {
+            if(!first) json.Append(',');
+            json.Append(Quote(id)); first=false;
+        }
+        return json.Append("]}").ToString();
     }
 }

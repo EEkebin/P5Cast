@@ -42,6 +42,8 @@ internal sealed partial class Renderer : IDisposable
     public Device Device { get; private set; }
     readonly DeviceContext context;
     readonly SwapChain swap;
+    readonly Presentation presentation;
+    public string Backend { get; private set; }
     readonly Buffer constants;
     readonly ComputeShader changed;
     readonly Buffer changeFlag,changeReadback;
@@ -84,40 +86,48 @@ internal sealed partial class Renderer : IDisposable
     public int SampleMaxLuma { get; private set; }
     public int SampledFrames { get; private set; }
     public bool VerifyNextOutput;
-    public Renderer(IntPtr hwnd, Size window,Size limit,string hdr,string picture,bool clearOnDispose=false)
+    public Renderer(IntPtr hwnd, Size window,Size limit,string hdr,string picture,bool clearOnDispose=false,string backend="auto")
     {
         this.hwnd=hwnd; this.clearOnDispose=clearOnDispose; renderLimit=limit; hdrMode=hdr; pictureMode=picture;
         EffectivePictureMode="original"; EffectNotice="";
+        Backend=Presentation.Resolve(backend);
         HdrEnabled=ChooseHdr(hdrMode);
-        Device device;
-        SwapChain chain;
-        var desc=new SwapChainDescription {
-            BufferCount=2, Flags=SwapChainFlags.None, IsWindowed=true, OutputHandle=hwnd,
-            ModeDescription=new ModeDescription(window.Width,window.Height,new Rational(0,1),DisplayHdr.OutputFormat(HdrEnabled)),
-            Usage=Usage.RenderTargetOutput,SampleDescription=new SampleDescription(1,0),SwapEffect=SwapEffect.FlipDiscard
-        };
-        Device.CreateWithSwapChain(DriverType.Hardware, DeviceCreationFlags.BgraSupport,desc,out device,out chain);
-        Device=device; swap=chain; context=device.ImmediateContext;
-        SampleMinLuma=255;
-        using(var dxgi=device.QueryInterface<SharpDX.DXGI.Device1>()) dxgi.MaximumFrameLatency=1;
-        using(var factory=swap.GetParent<Factory>()) factory.MakeWindowAssociation(hwnd,WindowAssociationFlags.IgnoreAltEnter);
-        constants=new Buffer(device,48,ResourceUsage.Default,BindFlags.ConstantBuffer,CpuAccessFlags.None,ResourceOptionFlags.None,0);
-        changed=new ComputeShader(device,Shader("Changed"));
-        changeFlag=new Buffer(device,4,ResourceUsage.Default,BindFlags.UnorderedAccess,CpuAccessFlags.None,ResourceOptionFlags.BufferStructured,4);
-        changeView=new UnorderedAccessView(device,changeFlag);
-        changeReadback=new Buffer(device,4,ResourceUsage.Staging,BindFlags.None,CpuAccessFlags.Read,ResourceOptionFlags.None,0);
-        var sampling=SamplerStateDescription.Default();
-        sampling.Filter=Filter.MinMagMipLinear; sampling.AddressU=sampling.AddressV=sampling.AddressW=TextureAddressMode.Clamp;
-        sampler=new SamplerState(device,sampling);
-        vertex=new VertexShader(device,Shader("Fullscreen"));
-        foreach(string name in new [] {"Original","Sharp","Easu","Rcas","Motion","Interpolate","OpticalField","NgxVectors"})
-            shaders.Add(name,new PixelShader(device,Shader(name)));
-        InitHdrShaders();
-        context.InputAssembler.PrimitiveTopology=PrimitiveTopology.TriangleList;
-        context.VertexShader.Set(vertex);
-        context.PixelShader.SetSampler(0,sampler);
-        context.PixelShader.SetConstantBuffer(0,constants);
-        Resize(window);
+        try {
+            if(Backend=="d3d11") {
+                var desc=new SwapChainDescription {
+                    BufferCount=2, Flags=SwapChainFlags.None, IsWindowed=true, OutputHandle=hwnd,
+                    ModeDescription=new ModeDescription(window.Width,window.Height,new Rational(0,1),DisplayHdr.OutputFormat(HdrEnabled)),
+                    Usage=Usage.RenderTargetOutput,SampleDescription=new SampleDescription(1,0),SwapEffect=SwapEffect.FlipDiscard
+                };
+                Device device; SwapChain chain;
+                Device.CreateWithSwapChain(DriverType.Hardware,DeviceCreationFlags.BgraSupport,desc,out device,out chain);
+                Device=device; swap=chain;
+                using(var factory=swap.GetParent<Factory>()) factory.MakeWindowAssociation(hwnd,WindowAssociationFlags.IgnoreAltEnter);
+            } else {
+                Device=new Device(DriverType.Hardware,DeviceCreationFlags.BgraSupport);
+                presentation=new Presentation(hwnd,Backend,window);
+            }
+            context=Device.ImmediateContext;
+            SampleMinLuma=255;
+            using(var dxgi=Device.QueryInterface<SharpDX.DXGI.Device1>()) dxgi.MaximumFrameLatency=1;
+            constants=new Buffer(Device,48,ResourceUsage.Default,BindFlags.ConstantBuffer,CpuAccessFlags.None,ResourceOptionFlags.None,0);
+            changed=new ComputeShader(Device,Shader("Changed"));
+            changeFlag=new Buffer(Device,4,ResourceUsage.Default,BindFlags.UnorderedAccess,CpuAccessFlags.None,ResourceOptionFlags.BufferStructured,4);
+            changeView=new UnorderedAccessView(Device,changeFlag);
+            changeReadback=new Buffer(Device,4,ResourceUsage.Staging,BindFlags.None,CpuAccessFlags.Read,ResourceOptionFlags.None,0);
+            var sampling=SamplerStateDescription.Default();
+            sampling.Filter=Filter.MinMagMipLinear; sampling.AddressU=sampling.AddressV=sampling.AddressW=TextureAddressMode.Clamp;
+            sampler=new SamplerState(Device,sampling);
+            vertex=new VertexShader(Device,Shader("Fullscreen"));
+            foreach(string name in new [] {"Original","Sharp","Easu","Rcas","Motion","Interpolate","OpticalField","NgxVectors"})
+                shaders.Add(name,new PixelShader(Device,Shader(name)));
+            InitHdrShaders();
+            context.InputAssembler.PrimitiveTopology=PrimitiveTopology.TriangleList;
+            context.VertexShader.Set(vertex);
+            context.PixelShader.SetSampler(0,sampler);
+            context.PixelShader.SetConstantBuffer(0,constants);
+            Resize(window);
+        } catch { Dispose(); throw; }
     }
     static byte[] Shader(string name)
     {
@@ -140,11 +150,15 @@ internal sealed partial class Renderer : IDisposable
     {
         if(display!=null) { context.OutputMerger.ResetTargets(); display.Dispose(); display=null; }
         if(backBuffer!=null) { backBuffer.Dispose(); backBuffer=null; }
-        if(resize) swap.ResizeBuffers(2,window.Width,window.Height,DisplayHdr.OutputFormat(hdr),SwapChainFlags.None);
-        var info=DisplayHdr.Configure(swap,hdr);
-        backBuffer=Texture2D.FromSwapChain<Texture2D>(swap,0);
+        if(presentation==null) {
+            if(resize) swap.ResizeBuffers(2,window.Width,window.Height,DisplayHdr.OutputFormat(hdr),SwapChainFlags.None);
+            outputInfo=DisplayHdr.Configure(swap,hdr);
+            backBuffer=Texture2D.FromSwapChain<Texture2D>(swap,0);
+        } else {
+            outputInfo=DisplayHdr.Probe(hwnd);
+            backBuffer=presentation.CreateTarget(Device,window);
+        }
         display=new RenderTargetView(Device,backBuffer);
-        outputInfo=info;
         if(HdrEnabled!=hdr)
         {
             // WGC and DirectVideo will deliver the corresponding input format on the next frame.
@@ -173,6 +187,10 @@ internal sealed partial class Renderer : IDisposable
     bool ChooseHdr(string hdr)
     {
         if(hdr=="off") return false;
+        if(Backend!="d3d11") {
+            if(hdr=="hdr10") throw new InvalidOperationException("HDR10 output requires Direct3D 11. Choose Auto or SDR color output for "+Backend+".");
+            return false;
+        }
         if(pictureMode=="rtxvideo")
         {
             if(hdr=="hdr10") throw new InvalidOperationException("RTX Video SR processes SDR. Choose Auto or SDR, or select another picture mode for HDR10.");
@@ -367,7 +385,9 @@ internal sealed partial class Renderer : IDisposable
             VerifyNextOutput=false;
         }
         int pixel=samplePixel ? ReadCenterPixel() : 0;
-        swap.Present(0,PresentFlags.None); Presented++;
+        if(presentation==null) swap.Present(0,PresentFlags.None);
+        else presentation.Present(context,backBuffer,screenSize);
+        Presented++;
         return pixel;
     }
     void SampleOutput()
@@ -416,7 +436,7 @@ internal sealed partial class Renderer : IDisposable
     }
     public void Dispose()
     {
-        if(clearOnDispose && display!=null && WindowsApi.IsWindow(hwnd)) {
+        if(clearOnDispose && swap!=null && display!=null && WindowsApi.IsWindow(hwnd)) {
             // The dashboard retains this HWND. DWM can keep its last flip-chain image
             // even after a GDI repaint, so retire both flip buffers with opaque black.
             try {
@@ -427,13 +447,15 @@ internal sealed partial class Renderer : IDisposable
                 context.Flush(); DwmFlush();
             } catch(SharpDXException) { /* A removed device can no longer present. */ }
         }
-        context.ClearState(); ReleaseSource();
+        if(context!=null) context.ClearState();
+        ReleaseSource();
         if(scaled!=null) scaled.Dispose();
         if(display!=null) display.Dispose();
         if(backBuffer!=null) backBuffer.Dispose();
         if(raster!=null) raster.Dispose();
         foreach(var shader in shaders.Values) shader.Dispose();
-        changeView.Dispose(); changeFlag.Dispose(); changeReadback.Dispose(); changed.Dispose();
-        vertex.Dispose(); sampler.Dispose(); constants.Dispose(); swap.Dispose(); context.Dispose(); Device.Dispose();
+        foreach(IDisposable item in new IDisposable[]{changeView,changeFlag,changeReadback,changed,vertex,sampler,
+                constants,swap,presentation,context,Device})
+            if(item!=null) item.Dispose();
     }
 }

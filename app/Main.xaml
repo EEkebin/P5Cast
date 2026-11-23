@@ -148,10 +148,13 @@
             </Grid>
             <TextBlock Style="{StaticResource Detail}" Margin="0,6,0,0" Text="Changes apply on your next connection. The PS5 sets the Opus audio bitrate."/>
           </StackPanel>
-          <Grid Name="DisplaySettings" Visibility="Collapsed"><Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+          <Grid Name="DisplaySettings" Visibility="Collapsed"><Grid.ColumnDefinitions><ColumnDefinition Width="1.5*"/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
             <StackPanel Margin="0,0,12,0"><TextBlock Text="Playback display" Margin="0,0,0,5"/><ComboBox Name="PlaybackDisplay"/></StackPanel>
             <StackPanel Grid.Column="1" Margin="0,0,12,0"><TextBlock Text="Render resolution" Margin="0,0,0,5"/><ComboBox Name="RenderResolution"/></StackPanel>
-            <StackPanel Grid.Column="2"><TextBlock Text="Color output" Margin="0,0,0,5"/><ComboBox Name="HdrOutput"/></StackPanel>
+            <StackPanel Grid.Column="2" Margin="0,0,12,0"><TextBlock Text="Color output" Margin="0,0,0,5"/><ComboBox Name="HdrOutput"/></StackPanel>
+            <StackPanel Grid.Column="3"><TextBlock Text="Video renderer" Margin="0,0,0,5"/><ComboBox Name="VideoRenderer" AutomationProperties.Name="Video renderer" ToolTip="Choose the graphics API that presents video in the player."/></StackPanel>
+            <TextBlock Grid.Row="1" Grid.ColumnSpan="4" Name="RendererHint" Style="{StaticResource Detail}" Margin="0,6,0,0" TextWrapping="Wrap"/>
           </Grid>
           <StackPanel Name="DiscordSettings" Visibility="Collapsed">
             <WrapPanel>

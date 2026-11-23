@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.5.1.0")]
+[assembly: AssemblyVersion("0.6.0.0")]
 
 namespace Cadrivect
 {
@@ -61,6 +61,21 @@ namespace Cadrivect
         readonly string[] titles = { "Direct to PS5", "Sony Remote Play", "Offline demo" };
         readonly string[] modeIds = { "original", "sharp", "fsr", "rtxvideo", "dlss", "dlaa" };
         readonly string[] hdrIds = { "auto","off","hdr10" };
+        readonly string[] rendererIds = { "auto","d3d11","d3d12","vulkan","opengl" };
+        internal static string RendererName(string id)
+        {
+            switch(id) {
+                case "auto": return "Auto";
+                case "d3d11": return "Direct3D 11";
+                case "d3d12": return "Direct3D 12";
+                case "vulkan": return "Vulkan";
+                case "opengl": return "OpenGL";
+                default: return "—";
+            }
+        }
+        int preferredHdr;
+        string SelectedRenderer { get { return rendererIds[UI<ComboBox>("VideoRenderer").SelectedIndex]; } }
+        bool UsesSdrPresenter { get { return SelectedRenderer!="auto" && SelectedRenderer!="d3d11"; } }
         readonly string[] resolutionIds = { "native","720","1080","1440","4k" };
         readonly int[] directRates={2,5,15,30,50,75,100};
         readonly int[] networkRates={0,35,65,100,150,250,500};
@@ -119,10 +134,18 @@ namespace Cadrivect
                 if(!refreshingDisplays && window.IsLoaded) MoveDashboard();
             };
             UI<ComboBox>("HdrOutput").ItemsSource=new[]{"Auto","SDR","HDR10"};
-            UI<ComboBox>("HdrOutput").SelectedIndex=ParseIndex(saved,"hdr",0,hdrIds.Length);
+            preferredHdr=ParseIndex(saved,"hdr",0,hdrIds.Length);
+            var rendererChoice=UI<ComboBox>("VideoRenderer");
+            rendererChoice.ItemsSource=rendererIds.Select(RendererName).ToArray();
+            rendererChoice.SelectedIndex=Math.Max(0,Array.IndexOf(rendererIds,Field(saved,"renderer")));
+            rendererChoice.SelectionChanged+=delegate {RefreshRendererOutput();};
+            RefreshRendererOutput();
             UI<ComboBox>("RenderResolution").ItemsSource=new[]{"Native","720p","1080p","1440p","4K"};
             UI<ComboBox>("RenderResolution").SelectedIndex=ParseIndex(saved,"resolution",0,resolutionIds.Length);
-            UI<ComboBox>("HdrOutput").SelectionChanged+=delegate {UpdateOutput();};
+            UI<ComboBox>("HdrOutput").SelectionChanged+=delegate {
+                if(!UsesSdrPresenter) preferredHdr=UI<ComboBox>("HdrOutput").SelectedIndex;
+                UpdateOutput();
+            };
             UI<ComboBox>("RenderResolution").SelectionChanged+=delegate {UpdateOutput();};
             UI<ComboBox>("Quality").ItemsSource = new[] { "Use Moonlight settings", "1080p · 60 FPS · 35 Mbps", "1440p · 120 FPS · 65 Mbps", "4K · 60 FPS · 80 Mbps", "4K · 120 FPS · 120 Mbps" };
             UI<ComboBox>("Quality").SelectedIndex = ParseIndex(saved,"quality",0,5);
@@ -496,7 +519,7 @@ namespace Cadrivect
                 var settings = new { sidebarOpen=stats, discordPresence=UI<CheckBox>("SharePresence").IsChecked==true,
                     discordGame=UI<CheckBox>("ShareGame").IsChecked==true,discordProject=UI<CheckBox>("ShareProject").IsChecked==true,stopChoices=stopChoices,directMbps=DirectKbps()/1000, relayMbps=networkRates[UI<ComboBox>("NetworkBitrate").SelectedIndex],audioLayout=UI<ComboBox>("NetworkAudio").SelectedIndex,pictureDefaults=1, mode=mode, multiplier=factor-1,
                     consoleMac=console==null?"":console.Mac,consoleAddresses=consoleAddresses,directFps=UI<ComboBox>("DirectFps").SelectedIndex,
-                    display=SelectedDisplayName(), resolution=UI<ComboBox>("RenderResolution").SelectedIndex,hdr=UI<ComboBox>("HdrOutput").SelectedIndex,
+                    display=SelectedDisplayName(), resolution=UI<ComboBox>("RenderResolution").SelectedIndex,hdr=preferredHdr,renderer=SelectedRenderer,
                     maximized=(fullscreen?previousWindowState:window.WindowState)==WindowState.Maximized,
                     clientHdr=UI<CheckBox>("ClientHdr").IsChecked==true,hostDisplay=hostTarget==null ? "" : hostTarget.DeviceName,
                     address=UI<TextBox>("HostAddress").Text.Trim(), bind=SelectedIP(), source=source, page=page, quality=UI<ComboBox>("Quality").SelectedIndex };

@@ -115,6 +115,7 @@ namespace Cadrivect
             Subheading(diagnostics,"Video");
             AddMetric(diagnostics,"size","Input → output","Incoming frame size and presentation surface size in pixels.");
             AddMetric(diagnostics,"format","Video format","Source codec and active output color mode.");
+            AddMetric(diagnostics,"renderer","Video renderer","Graphics API currently presenting frames to the display.");
             AddMetric(diagnostics,"requested","Requested bitrate","Configured bitrate requested from the PS5 when connecting.");
             AddMetric(diagnostics,"bitrate","Received bitrate","Measured compressed video arriving from the PS5.");
             AddMetric(diagnostics,"decode","Video decode","Time spent decoding the latest video frame.");
@@ -329,6 +330,7 @@ namespace Cadrivect
             dial.SetRates(rates[0],rates[1],rates[2],rates[3]);
             string input=Dimensions(snapshot,"input"),output=Dimensions(snapshot,"output");
             values["size"].Text=input=="—" && output=="—" ? "—" : input+" → "+output;
+            values["renderer"].Text=Dashboard.RendererName(Text(snapshot,"renderer"));
             string codec=Text(snapshot,"codec"); bool? hdrFlag=Flag(snapshot,"hdrEnabled");
             string color=hdrFlag.HasValue ? (hdrFlag.Value ? "HDR10":"SDR") : "";
             values["format"].Text=string.IsNullOrEmpty(codec) ? (color.Length==0 ? "—":color) : codec+(color.Length==0 ? "" : " · "+color);

@@ -1,5 +1,6 @@
 [CmdletBinding()]
-param([string]$PlayerExe,[string]$DirectRuntime,[string]$OutputDirectory)
+param([string]$PlayerExe,[string]$DirectRuntime,[string]$OutputDirectory,
+      [ValidateSet('auto','d3d11','d3d12','vulkan','opengl')][string]$Renderer='auto')
 $ErrorActionPreference='Stop'
 $repo=Split-Path $PSScriptRoot
 if (!$PlayerExe) { $PlayerExe=Join-Path $repo 'engine\bin\CadrivectPlayer.exe' }
@@ -16,7 +17,7 @@ $refs+=@('PresentationCore','PresentationFramework','WindowsBase') | ForEach-Obj
 $probe=Join-Path $OutputDirectory 'EmbeddedProbe.exe'
 & "$framework\csc.exe" /nologo /optimize+ /platform:x64 @refs "/out:$probe" "$PSScriptRoot\EmbeddedProbe.cs"
 if ($LASTEXITCODE) { throw 'Embedded WPF probe compilation failed.' }
-& $probe $PlayerExe $DirectRuntime "$PSScriptRoot\fixtures\text.h264" "$PSScriptRoot\fixtures\text-inverted.h264" "$OutputDirectory\report.json"
+& $probe $PlayerExe $DirectRuntime "$PSScriptRoot\fixtures\text.h264" "$PSScriptRoot\fixtures\text-inverted.h264" "$OutputDirectory\report.json" $Renderer
 if ($LASTEXITCODE) { throw "Embedded playback test failed. Inspect $OutputDirectory" }
-& $probe $PlayerExe $DirectRuntime "$PSScriptRoot\fixtures\text.h264" "$PSScriptRoot\fixtures\text-inverted.h264" "$OutputDirectory\report.json" --offscreen-capture
+& $probe $PlayerExe $DirectRuntime "$PSScriptRoot\fixtures\text.h264" "$PSScriptRoot\fixtures\text-inverted.h264" "$OutputDirectory\report.json" $Renderer --offscreen-capture
 if ($LASTEXITCODE) { throw "Offscreen window-capture test failed. Inspect $OutputDirectory" }

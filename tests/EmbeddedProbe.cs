@@ -118,7 +118,13 @@ internal static class EmbeddedProbe
         var thread=new Thread(delegate() { completed((int)api.GetMethod("Run").Invoke(null,new object[]{options})); });
         thread.IsBackground=true; thread.SetApartmentState(ApartmentState.STA); thread.Start(); return thread;
     }
-    static int CheckCapture(Type api,string report) {
+    static void CheckRenderer(Dictionary<string,object> report,string renderer) {
+        string active=renderer=="auto" ? "d3d11" : renderer;
+        Check((string)report["renderer"]==active && (string)report["processingRenderer"]=="d3d11",
+              "The selected presentation API was not used.");
+        if(active!="d3d11") Check(!(bool)report["hdrEnabled"],"The SDR presenter reported HDR output.");
+    }
+    static int CheckCapture(Type api,string report,string renderer) {
         var clock=Stopwatch.StartNew(); int result=-1; var serializer=new JavaScriptSerializer();
         IntPtr desktop=GetThreadDesktop(GetCurrentThreadId()); var host=new VideoHost();
         var window=new Window {Title="WPF capture test",Content=host,Width=650,Height=390,Left=-17800,Top=-14000,
@@ -138,7 +144,7 @@ internal static class EmbeddedProbe
                 var withSource=VisibleWindows(desktop);
                 string capturedReport=Path.ChangeExtension(report,".window.json");
                 worker=Start(api,new[]{"--surface",surface,"--hwnd",source.Handle.ToInt64().ToString(CultureInfo.InvariantCulture),
-                    "--hdr","off","--seconds","3","--verify-output","--report",capturedReport},delegate(int value){result=value;});
+                    "--renderer",renderer,"--hdr","off","--seconds","3","--verify-output","--report",capturedReport},delegate(int value){result=value;});
                 clock.Restart(); int lastColor=-1;
                 while(worker.IsAlive && clock.ElapsedMilliseconds<8000) {
                     int color=(int)(clock.ElapsedMilliseconds/90)%2;
@@ -147,6 +153,7 @@ internal static class EmbeddedProbe
                 }
                 Check(!worker.IsAlive && result==0,"Embedded WGC failed: "+api.GetProperty("Error").GetValue(null,null));
                 var wgc=serializer.Deserialize<Dictionary<string,object>>(File.ReadAllText(capturedReport));
+                CheckRenderer(wgc,renderer);
                 Check((string)wgc["sourceKind"]=="window" && Convert.ToInt32(wgc["captured"])>=3 && Convert.ToInt32(wgc["sampleMaxLuma"])>Convert.ToInt32(wgc["sampleMinLuma"]),
                       "Embedded WGC captured no changing pixels.");
                 Console.WriteLine("Passed existing window capture into WPF child. "+capturedReport);
@@ -158,13 +165,14 @@ internal static class EmbeddedProbe
     [STAThread] static int Main(string[] args)
     {
         string id="CadrivectEmbedded"+Guid.NewGuid().ToString("N");
-        if(args.Length==5) return RunOnDesktop(args,id);
-        if(args.Length!=6 || (args[5]!="--inactive-desktop" && args[5]!="--offscreen-capture")) return 2;
+        if(args.Length==6) return RunOnDesktop(args,id);
+        if(args.Length!=7 || (args[6]!="--inactive-desktop" && args[6]!="--offscreen-capture")) return 2;
+        string renderer=args[5];
         IntPtr desktop=GetThreadDesktop(GetCurrentThreadId());
         var serializer=new JavaScriptSerializer();
         Exception failure=null; int result=-1,exitCode=1;
         var api=Assembly.LoadFrom(Path.GetFullPath(args[0])).GetType("Cadrivect.Engine.EmbeddedPlayback",true);
-        if(args[5]=="--offscreen-capture") return CheckCapture(api,args[4]);
+        if(args[6]=="--offscreen-capture") return CheckCapture(api,args[4],renderer);
         var host=new VideoHost(); var window=new Window { Title="WPF host test",Width=700,Height=420,Content=host };
         var end=new ManualResetEvent(false); var pause=new ManualResetEvent(false); Thread worker=null;
         try {
@@ -172,7 +180,7 @@ internal static class EmbeddedProbe
             var initial=VisibleWindows(desktop);
             Check(initial.Contains(new WindowInteropHelper(window).Handle) && host.Handle!=IntPtr.Zero,"WPF dashboard/child not ready, desktop visible count="+initial.Count+", child="+host.Handle);
             string[] options={"--surface",host.Handle.ToInt64().ToString(CultureInfo.InvariantCulture),"--direct-pipe",id,
-                "--direct-runtime",args[1],"--hdr","off","--target-fps","30","--verify-output","--report",args[4]};
+                "--direct-runtime",args[1],"--renderer",renderer,"--hdr","off","--target-fps","30","--verify-output","--report",args[4]};
             worker=new Thread(delegate() {
                 try {
                     result=(int)api.GetMethod("Run").Invoke(null,new object[]{options});
@@ -215,6 +223,7 @@ internal static class EmbeddedProbe
             while(worker.IsAlive && clock.ElapsedMilliseconds<19000) Pump();
             Check(!worker.IsAlive && result==0 && !(bool)api.GetProperty("Running").GetValue(null,null),"Embedded worker failed to stop.");
             var report=serializer.Deserialize<Dictionary<string,object>>(File.ReadAllText(args[4]));
+            CheckRenderer(report,renderer);
             Check((bool)report["embedded"] && Convert.ToInt32(report["sampledFrames"])>1 && Convert.ToInt32(report["sampleMaxLuma"])>Convert.ToInt32(report["sampleMinLuma"]),
                   "GPU output had no changing sampled luminance.");
             Console.WriteLine("Passed WPF child-HWND playback, GPU pixel readback, live resize/configuration, comparison and stop with unchanged visible top-level HWNDs. "+args[4]);
@@ -222,7 +231,7 @@ internal static class EmbeddedProbe
             window.Width=1510; window.Height=925; window.UpdateLayout(); Pump();
             string demoReport=Path.ChangeExtension(args[4],".demo.json");
             string surface=host.Handle.ToInt64().ToString(CultureInfo.InvariantCulture);
-            worker=Start(api,new[]{"--surface",surface,"--demo","--hdr","off","--verify-output","--report",demoReport},delegate(int value){result=value;});
+            worker=Start(api,new[]{"--surface",surface,"--demo","--renderer",renderer,"--hdr","off","--verify-output","--report",demoReport},delegate(int value){result=value;});
             stage=0; clock.Restart();
             while(worker.IsAlive && clock.ElapsedMilliseconds<10000) {
                 Pump(); var data=serializer.Deserialize<Dictionary<string,object>>((string)api.GetMethod("Snapshot").Invoke(null,null));
@@ -239,16 +248,21 @@ internal static class EmbeddedProbe
             }
             Check(stage==2 && result==0,"Embedded demo/live output change failed. "+api.GetProperty("Error").GetValue(null,null));
             var measured=serializer.Deserialize<Dictionary<string,object>>(File.ReadAllText(demoReport));
+            CheckRenderer(measured,renderer);
             Check(Convert.ToInt32(measured["sampledFrames"])>=2 && Convert.ToInt32(measured["sampleMaxLuma"])>Convert.ToInt32(measured["sampleMinLuma"]),
                   "Offline motion scene did not produce measurable changing samples.");
             Console.WriteLine("Passed offline GPU scene and live output settings. "+demoReport);
-            worker=Start(api,new[]{"--surface",surface,"--direct-pipe",id+"Pending","--direct-runtime",args[1],"--hdr","off"},delegate(int value){result=value;});
+            worker=Start(api,new[]{"--surface",surface,"--direct-pipe",id+"Pending","--direct-runtime",args[1],"--renderer",renderer,"--hdr","off"},delegate(int value){result=value;});
             clock.Restart();
             while(clock.ElapsedMilliseconds<450) Pump();
             api.GetMethod("Stop").Invoke(null,null);
             while(worker.IsAlive && clock.ElapsedMilliseconds<2400) Pump();
             Check(!worker.IsAlive && result==0,"Stopping before a Direct pipe connection did not complete.");
             Console.WriteLine("Passed cancellation before the first Direct connection.");
+            worker=Start(api,new[]{"--surface",surface,"--demo","--renderer","metal","--hdr","off"},delegate(int value){result=value;});
+            clock.Restart(); while(worker.IsAlive && clock.ElapsedMilliseconds<3000) Pump();
+            Check(!worker.IsAlive && result!=0 && ((string)api.GetProperty("Error").GetValue(null,null)).Contains("metal"),
+                  "A Windows request for Metal should fail explicitly.");
             exitCode=0;
         } catch(Exception e) { Console.Error.WriteLine(e); File.WriteAllText(args[4]+".error.txt",e.ToString()); }
         finally {

@@ -70,6 +70,9 @@ try {
     $null=$busyMethod.Invoke($meter,@($false))
     Require ($neuralPanel.Visibility -eq 'Collapsed') 'Completed setup removes the download action'
     $pictureButtons=$meter.GetType().GetField('modes','Instance,NonPublic').GetValue($meter)
+    Require ($pictureButtons[8].Parent -eq $pictureButtons[2].Parent) 'NIS and spatial FSR share a row'
+    Require ($pictureButtons[3].Parent -eq $pictureButtons[6].Parent -and $pictureButtons[6].Parent -ne $pictureButtons[2].Parent) 'RTX Video SR and temporal FSR share a separate row'
+    Require ($pictureButtons[4].Parent -eq $pictureButtons[5].Parent -and $pictureButtons[5].Parent -eq $pictureButtons[7].Parent) 'The DLSS family shares a group'
     Require (!$pictureButtons[8].IsEnabled) 'NIS waits for the selected graphics device probe'
     $caps['adapter']='AMD test adapter'; $caps['nis']=$true
     $caps['fsr-temporal']=$true; $caps['fsrVersion']='4.1.2'

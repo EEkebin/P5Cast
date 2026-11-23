@@ -148,8 +148,6 @@ namespace Cadrivect
             Separator(fixedMeter);
             var picture=AddGroup(sections,"Picture","PictureGroup");
             string group=Guid.NewGuid().ToString("N");
-            var modeGrid=new UniformGrid {Rows=0,Columns=2,Margin=new Thickness(-2,1,-2,0)};
-            picture.Children.Add(modeGrid);
             for(int i=0;i<modes.Length;i++)
             {
                 var button=new RadioButton {GroupName="Picture"+group,Content=ModeLabels[i],Template=ChipTemplate};
@@ -160,8 +158,10 @@ namespace Cadrivect
                     selectedMode=index; RefreshQualityChoice(); SendSettings();
                 };
             }
-            // Keep saved mode IDs stable while grouping the two FSR choices together.
-            foreach(int index in new[]{0,1,6,2,8,3,4,5,7}) modeGrid.Children.Add(modes[index]);
+            AddPictureRow(picture,null,"original","sharp");
+            AddPictureRow(picture,"Spatial upscaling","nis","fsr");
+            AddPictureRow(picture,"Video & temporal upscaling","rtxvideo","fsr-temporal");
+            AddPictureRow(picture,"NVIDIA DLSS","dlss","dlaa","dlss-nr");
             qualityGroup=new StackPanel {Margin=new Thickness(0,7,0,0)};
             picture.Children.Add(qualityGroup);
             var qualityHeader=new DockPanel {Margin=new Thickness(0,0,0,3)};
@@ -211,8 +211,8 @@ namespace Cadrivect
             AutomationProperties.SetAutomationId(pictureSize,"Metric_size");
             AutomationProperties.SetAutomationId(pictureScale,"Metric_scale");
             picture.Children.Add(pictureSize);
-            var interpolation=Label("Frame interpolation",Muted,11,FontWeights.SemiBold);
-            interpolation.Margin=new Thickness(0,9,0,2); picture.Children.Add(interpolation);
+            Subheading(picture,"Frame generation");
+            picture.Children.Add(Label("P5Cast interpolation",Muted,11,FontWeights.Normal));
             var factorGrid=new UniformGrid {Rows=1,Columns=4,Margin=new Thickness(-2,0,-2,0)};
             picture.Children.Add(factorGrid);
             for(int i=0;i<4;i++)
@@ -220,12 +220,13 @@ namespace Cadrivect
                 int factor=i+1;
                 var button=new RadioButton {GroupName="Rate"+group,Content=i==0 ? "Off" : factor+"×",Template=ChipTemplate};
                 StyleChip(button); factors[i]=button;
+                AutomationProperties.SetName(button,i==0 ? "Frame generation off" : "P5Cast interpolation "+factor+"×");
                 button.ToolTip=i==0 ? "Present captured frames only." : "P5Cast uses motion estimated from the video to present up to "+factor+" frames per source frame.";
                 button.Checked+=delegate {if(syncing) return; selectedFactor=factor; FrameGenerationProvider="p5cast"; SendSettings();};
                 factorGrid.Children.Add(button);
             }
             FrameGenerationProvider="p5cast";
-            amdGeneration=new RadioButton {GroupName="Rate"+group,Content="AMD FSR 2×",Template=ChipTemplate};
+            amdGeneration=new RadioButton {GroupName="Rate"+group,Content="AMD FSR frame generation · 2×",Template=ChipTemplate};
             StyleChip(amdGeneration); AutomationProperties.SetAutomationId(amdGeneration,"AmdFrameGeneration");
             amdGeneration.Checked+=delegate {
                 if(syncing) return;
@@ -361,6 +362,14 @@ namespace Cadrivect
         {
             var label=Label(title,Mint,12,FontWeights.SemiBold);
             label.Margin=new Thickness(0,8,0,2); parent.Children.Add(label);
+        }
+        void AddPictureRow(Panel parent,string title,params string[] ids)
+        {
+            if(title!=null) Subheading(parent,title);
+            var grid=new UniformGrid {Columns=2,Margin=new Thickness(-2,1,-2,0)};
+            AutomationProperties.SetName(grid,title ?? "Basic picture modes");
+            foreach(string id in ids) grid.Children.Add(modes[Array.IndexOf(ModeIds,id)]);
+            parent.Children.Add(grid);
         }
         static ControlTemplate MakeGroupTemplate()
         {

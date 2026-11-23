@@ -70,8 +70,11 @@ try {
     $null=$busyMethod.Invoke($meter,@($false))
     Require ($neuralPanel.Visibility -eq 'Collapsed') 'Completed setup removes the download action'
     $pictureButtons=$meter.GetType().GetField('modes','Instance,NonPublic').GetValue($meter)
+    Require (!$pictureButtons[8].IsEnabled) 'NIS waits for the selected graphics device probe'
+    $caps['adapter']='AMD test adapter'; $caps['nis']=$true
     $caps['fsr-temporal']=$true; $caps['fsrVersion']='4.1.2'
     $meter.SetCapabilities($caps)
+    Require ($pictureButtons[8].IsEnabled -and $pictureButtons[8].ToolTip -like 'NVIDIA Image Scaling*') 'NIS eligibility follows shader capability on any GPU vendor'
     Require ($pictureButtons[2].Content -like 'FSR 1*Spatial' -and $pictureButtons[6].Content -like 'FSR 4.1.2*Temporal') 'Spatial FSR is separate from the detected temporal provider'
     $meter.SetCapabilities($null)
     Require ($pictureButtons[6].Content -eq 'FSR Temporal') 'Switching backends clears a stale temporal version'

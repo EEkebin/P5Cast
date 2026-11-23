@@ -435,6 +435,20 @@ internal static partial class WindowChromeProbe
                         await CheckWipeInput(snapshot,keys[i]);
                     if(renderCheck=="hdr") {
                         Require(frame.Contains("\"hdrEnabled\":"+(expectHdr?"true":"false")),"Unexpected output color mode: "+frame);
+                        var meter=Find<Border>("MeterHost");
+                        var nis=(RadioButton)FindVisual(meter,"RadioButton",e=>AutomationProperties.GetAutomationId(e)=="Picture_nis");
+                        Require(nis!=null,"The Picture drawer has no NIS selection.");
+                        await Until(()=>!Equals(nis.ToolTip,"Checking GPU support."),labels[i]+" NIS probe did not finish.",45000);
+                        if(keys[i]=="opengl") Require(!nis.IsEnabled,"OpenGL advertised NIS without an implementation.");
+                        else if(nis.IsEnabled) {
+                            nis.IsChecked=true;
+                            await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"effectivePictureMode\":\"nis\"") &&
+                                ((string)snapshot.Invoke(null,null)).Contains("\"activeNisFilter\":\"NVScaler\""),
+                                labels[i]+" failed to run NIS from the Picture drawer.",12000);
+                            ((RadioButton)FindVisual(meter,"RadioButton",e=>AutomationProperties.GetAutomationId(e)=="Picture_original")).IsChecked=true;
+                            await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"effectivePictureMode\":\"original\""),"Could not switch back to Original.");
+                            Note(labels[i]+" ran NVIDIA Image Scaling through the Picture drawer.");
+                        }
                         if(expectHdr) {
                             Require(frame.Contains("\"presenterHdr10\":true") && frame.Contains("\"presentationColorSpace\":\"BT.2020 PQ\"") &&
                                 frame.Contains("\"presenterHdrFormat\":\"RGB10A2_UNORM\""),"Missing negotiated HDR10 surface: "+frame);

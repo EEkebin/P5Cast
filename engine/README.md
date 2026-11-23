@@ -72,4 +72,6 @@ On an HDR-enabled Windows monitor, run `.\engine\presentation\Build.ps1 -VerifyH
 
 ## Dependencies
 
+The player embeds NVIDIA Image Scaling SDK 1.0.3's spatial filter shaders and coefficients. The MIT license ships in the Windows package. [NIS integration and pinned sources](nis/README.md)
+
 The Windows render host uses .NET Framework 4.8 and SharpDX 4.2.0. HLSL is compiled at build time and embedded in the player assembly. The FSR 1 headers are pinned to AMD commit `a21ffb8f6c13233ba336352bdff293894c706575`. Signed NVIDIA runtimes and their notices ship beside the engine. [AMD FidelityFX FSR](https://github.com/GPUOpen-Effects/FidelityFX-FSR/tree/a21ffb8f6c13233ba336352bdff293894c706575) · [SharpDX 4.2.0](https://github.com/sharpdx/SharpDX/tree/v4.2.0) · [NGX integration](nvidia/README.md) · [RTX Video integration](rtxvideo/README.md)

@@ -1,0 +1,3 @@
+# Keep the upstream blobs byte-for-byte, including their line endings and spaces.
+NIS_* -text -whitespace
+LICENSE.txt -text -whitespace

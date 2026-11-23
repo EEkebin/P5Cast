@@ -12,7 +12,7 @@ using System.Windows.Forms;
 // independent of the SDR/HDR video swap chain. It has no taskbar or Alt+Tab entry.
 internal sealed class PlaybackControls : Form
 {
-    internal static readonly string[] Modes={"original","sharp","fsr","rtxvideo","dlss","dlaa","fsr-temporal","dlss-nr"};
+    internal static readonly string[] Modes=PictureLabels.Ids;
     static readonly string[] Names=PictureLabels.Modes;
     static readonly Color Surface=Color.FromArgb(19,30,35), Idle=Color.FromArgb(31,45,51),
         Edge=Color.FromArgb(63,81,87), TextColor=Color.FromArgb(235,244,243),
@@ -76,6 +76,10 @@ internal sealed class PlaybackControls : Form
         for(int i=0;i<modes.Length;i++) {
             int index=i; var button=MakeButton(Names[i],delegate { Request(Modes[index],-1); });
             button.AccessibleName="Picture: "+Names[i];
+            if(Modes[i]=="nis") {
+                button.Enabled=false;
+                tips.SetToolTip(button,NisScaler.SupportsBackend(backend) ? "Checking NVIDIA Image Scaling support…" : NisScaler.BackendReason);
+            }
             Add(button,16+(i%3)*110,283+(i/3)*35,104,30,13); modes[i]=button;
         }
         Add(Label("Frame generation",TextColor),16,396,220,20,14);
@@ -167,7 +171,12 @@ internal sealed class PlaybackControls : Form
                     }
                     for(int i=3;i<modes.Length;i++) {
                         string mode=Modes[i]; object supported,reason;
-                        if(values.TryGetValue(mode,out supported) && supported is bool && !(bool)supported) {
+                        if(!values.TryGetValue(mode,out supported) || !(supported is bool)) continue;
+                        if(mode=="nis" && (bool)supported) {
+                            modes[i].Enabled=true;
+                            tips.SetToolTip(modes[i],"NVIDIA Image Scaling · Upscale or sharpen at native resolution");
+                        }
+                        if(!(bool)supported) {
                             modes[i].Enabled=false;
                             if(values.TryGetValue(mode+"Reason",out reason)) {
                                 modes[i].AccessibleDescription=Convert.ToString(reason); tips.SetToolTip(modes[i],Convert.ToString(reason));

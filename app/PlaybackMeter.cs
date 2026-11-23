@@ -16,10 +16,11 @@ namespace Cadrivect
 {
     internal sealed class PlaybackMeter : UserControl
     {
-        static readonly string[] ModeIds={"original","sharp","fsr","rtxvideo","dlss","dlaa","fsr-temporal","dlss-nr"};
+        static readonly string[] ModeIds=PictureLabels.Ids;
         static readonly string[] ModeLabels=PictureLabels.Modes;
         static readonly string[] Descriptions={"Display the source picture.","Sharpen edges at the source resolution.","AMD FSR 1 enlarges and sharpens each decoded frame independently.",
-            "NVIDIA RTX Video Super Resolution for SDR video.","Experimental DLSS with motion estimated from the stream.","Experimental DLAA at the source resolution.","AMD temporal upscaling. The SDK selects a provider supported by the GPU.","Experimental DLSS 5 neural rendering at source resolution. Uses motion estimated from the PS5 video. Requires Vulkan, SDR and a compatible RTX GPU."};
+            "NVIDIA RTX Video Super Resolution for SDR video.","Experimental DLSS with motion estimated from the stream.","Experimental DLAA at the source resolution.","AMD temporal upscaling. The SDK selects a provider supported by the GPU.","Experimental DLSS 5 neural rendering at source resolution. Uses motion estimated from the PS5 video. Requires Vulkan, SDR and a compatible RTX GPU.",
+            "NVIDIA Image Scaling. Enlarges and sharpens each frame independently, or sharpens at native resolution."};
         const string Ink="Theme.Text", Muted="Theme.Muted", Line="Theme.Border";
         const string Mint="Theme.Accent", Amber="Theme.Generated";
         static readonly ControlTemplate ChipTemplate=MakeChipTemplate();
@@ -160,7 +161,7 @@ namespace Cadrivect
                 };
             }
             // Keep saved mode IDs stable while grouping the two FSR choices together.
-            foreach(int index in new[]{0,1,6,2,4,5,3,7}) modeGrid.Children.Add(modes[index]);
+            foreach(int index in new[]{0,1,6,2,8,3,4,5,7}) modeGrid.Children.Add(modes[index]);
             qualityGroup=new StackPanel {Margin=new Thickness(0,7,0,0)};
             picture.Children.Add(qualityGroup);
             var qualityHeader=new DockPanel {Margin=new Thickness(0,0,0,3)};
@@ -539,7 +540,10 @@ namespace Cadrivect
             }
             pictureSize.Text=Dimensions(iw,ih)+" → "+Dimensions(ow,oh);
             bool native=iw==ow && ih==oh;
-            if(native) pictureScale.Text=Text(data,"effectivePictureMode")=="dlaa" ? "1× · DLAA" : "1× · Native";
+            if(native) {
+                string mode=Text(data,"effectivePictureMode");
+                pictureScale.Text=mode=="dlaa" ? "1× · DLAA" : mode=="nis" ? "1× · NIS sharpen" : "1× · Native";
+            }
             else pictureScale.Text=Metric(ow/iw,"×","0.##")+(ow>iw ? " upscale" : " downscale");
         }
         public void Update(Dictionary<string,object> snapshot)

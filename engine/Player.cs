@@ -267,7 +267,8 @@ internal static class Player
             if(targetOption!=null && targetFps!=30 && targetFps!=60) throw new ArgumentException("Choose 30 or 60 for --target-fps.");
             int multiplier=int.Parse(Option(args,"--multiplier",testing ? "3":"1"),CultureInfo.InvariantCulture);
             bool vendor=Renderer.IsVendor(mode);
-            if(!vendor && mode!="fsr" && mode!="sharp" && mode!="original") throw new ArgumentException("Unknown picture mode: "+mode);
+            if(Array.IndexOf(PictureLabels.Ids,mode)<0) throw new ArgumentException("Unknown picture mode: "+mode);
+            if(mode=="nis" && !NisScaler.SupportsBackend(backend)) throw new ArgumentException(NisScaler.BackendReason);
             string generation=Option(args,"--frame-generation","p5cast").ToLowerInvariant();
             if(generation!="p5cast" && generation!="amd") throw new ArgumentException("Choose p5cast or amd for --frame-generation.");
             if(generation=="amd" && multiplier!=2) throw new ArgumentException("AMD frame generation requires --multiplier 2.");
@@ -571,6 +572,7 @@ internal static class Player
                +",\"presenterHdrFormat\":"+(renderer.PresenterHdr10 ? "\"RGB10A2_UNORM\"":"null")
                +",\"outputNotice\":"+JsonString(renderer.OutputNotice)
                +",\"activeFrameGenerationVersion\":"+JsonString(renderer.ActiveFrameGenerationVersion)
+               +",\"activeNisFilter\":"+JsonString(renderer.ActiveNisFilter)+",\"nisEvaluations\":"+renderer.NisEvaluations
                +",\"fsrVersion\":"+JsonString(renderer.ActiveFsrVersion)+",\"fsrEvaluations\":"+renderer.FsrEvaluations
                +",\"dlssModelHint\":"+JsonString(renderer.DlssModelHint)+",\"dlssQuality\":"+JsonString(renderer.DlssQuality)+",\"activeDlssQuality\":"+JsonString(renderer.ActiveDlssQuality)
                +",\"renderer\":"+JsonString(renderer.Backend)+",\"processingRenderer\":"+JsonString(renderer.Backend)+",\"inputWidth\":"+input.Width+",\"inputHeight\":"+input.Height+",\"targetFps\":"+Number(targetFps==0 ? -1:targetFps)

@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param([string]$PlayerExe,
-      [string]$Display,[switch]$MeasureOnly,[string]$OutputDirectory)
+      [string]$Display,[switch]$MeasureOnly,[string]$OutputDirectory,[switch]$CheckNis)
 $ErrorActionPreference='Stop'
 if(!$PlayerExe){$PlayerExe=Join-Path (Split-Path $PSScriptRoot) 'engine\bin\CadrivectPlayer.exe'}
 $PlayerExe=(Resolve-Path -LiteralPath $PlayerExe).Path
@@ -19,13 +19,14 @@ try {
         $refs+="/r:$path"
     }
     $exe=Join-Path $stage 'NgxQualityProbe.exe'
-    & "$fx\csc.exe" /nologo /optimize+ /platform:x64 /main:NgxQualityRunner @refs "/out:$exe" "$PSScriptRoot\EmbeddedProbe.cs" "$PSScriptRoot\ComparisonProbe.cs" "$PSScriptRoot\NgxQualityProbe.cs"
-    if($LASTEXITCODE){throw 'Could not compile the NGX quality fixture.'}
+    $entry=if($CheckNis){'NisQualityRunner'}else{'NgxQualityRunner'}
+    & "$fx\csc.exe" /nologo /optimize+ /platform:x64 "/main:$entry" @refs "/out:$exe" "$PSScriptRoot\EmbeddedProbe.cs" "$PSScriptRoot\ComparisonProbe.cs" "$PSScriptRoot\NgxQualityProbe.cs" "$PSScriptRoot\NisQualityProbe.cs"
+    if($LASTEXITCODE){throw "Could not compile $entry."}
     if(!$Display){$Display='auto'}
     $mode=if($MeasureOnly){'measure'}else{'verify'}
     $crops=if($OutputDirectory){[IO.Path]::GetFullPath($OutputDirectory)}else{'-'}
     & $exe $PlayerExe $Display $mode $crops
-    if($LASTEXITCODE){throw 'NGX quality fixture failed.'}
+    if($LASTEXITCODE){throw "$entry failed."}
 } finally {
     $target=[IO.Path]::GetFullPath($stage)
     if([IO.Path]::GetDirectoryName($target) -eq $tmpRoot -and [IO.Path]::GetFileName($target) -eq $id){Remove-Item -Recurse -Force -LiteralPath $target}

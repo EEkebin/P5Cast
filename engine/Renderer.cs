@@ -173,7 +173,7 @@ internal sealed partial class Renderer : IDisposable
         if(mode=="fsr-temporal") return backend=="d3d12" || backend=="vulkan";
         return backend=="d3d11" || backend=="d3d12";
     }
-    static byte[] Shader(string name)
+    internal static byte[] Shader(string name)
     {
         using(var data=Assembly.GetExecutingAssembly().GetManifestResourceStream(name+".cso"))
         using(var stream=new MemoryStream()) { data.CopyTo(stream); return stream.ToArray(); }
@@ -196,7 +196,7 @@ internal sealed partial class Renderer : IDisposable
             long frequency=System.Diagnostics.Stopwatch.Frequency;
             // DLSS and RTX Video rebuild size-dependent resources. Keep the current
             // video running through a short drawer animation, then evaluate at its final size.
-            bool resizingUpscaler=pictureMode=="dlss" || pictureMode=="rtxvideo" || pictureMode=="fsr-temporal";
+            bool resizingUpscaler=pictureMode=="nis" || pictureMode=="dlss" || pictureMode=="rtxvideo" || pictureMode=="fsr-temporal";
             long settle=frequency/(resizingUpscaler ? 30 : 60);
             long maximumWait=frequency/(resizingUpscaler ? 5 : 15);
             if(now-sizeChangedAt<settle && now-resizeStartedAt<maximumWait) return false;
@@ -356,7 +356,7 @@ internal sealed partial class Renderer : IDisposable
     }
     Size ProcessingSize(string mode)
     {
-        return mode=="fsr" || mode=="fsr-temporal" || mode=="dlss" || mode=="rtxvideo" ? upscaleTarget : srcSize;
+        return mode=="nis" || mode=="fsr" || mode=="fsr-temporal" || mode=="dlss" || mode=="rtxvideo" ? upscaleTarget : srcSize;
     }
     void SetProcessingSize(Size next)
     {
@@ -404,6 +404,7 @@ internal sealed partial class Renderer : IDisposable
     }
     void ReleaseSource()
     {
+        ReleaseNis();
         ReleaseAmdFrames();
         ReleaseNvidia();
         ReleaseHdr();
@@ -459,13 +460,22 @@ internal sealed partial class Renderer : IDisposable
     }
     public void SetPictureMode(string mode)
     {
-        if(!IsVendor(mode) && mode!="original" && mode!="sharp" && mode!="fsr") throw new ArgumentException("Unknown picture mode.");
+        if(!IsVendor(mode) && mode!="original" && mode!="sharp" && mode!="fsr" && mode!="nis") throw new ArgumentException("Unknown picture mode.");
+        if(mode=="nis" && !NisScaler.SupportsBackend(Backend)) throw new InvalidOperationException(NisScaler.BackendReason);
         if(mode=="dlss-nr" && HdrEnabled) throw new InvalidOperationException(NeuralRendering.HdrReason);
         if(mode=="rtxvideo" && HdrEnabled) throw new InvalidOperationException("RTX Video SR requires SDR output. Select SDR before switching picture mode.");
         if(mode==pictureMode && failedMode==null) return;
+        // Verify NIS at the current stream and target dimensions before releasing a working effect.
+        if(mode=="nis" && curr!=null) try { EvaluateNis(curr.Read,1,ProcessingSize(mode)); }
+        catch(Exception error) {
+            if(!IsEffectFailure(error)) throw;
+            ReleaseNis(); RestoreDrawState();
+            throw new InvalidOperationException("Could not switch to NVIDIA Image Scaling. "+error.Message,error);
+        }
         // NGX initialization and shutdown are scoped to the device. Close the old feature before opening a different one.
         // Keep the captured textures and front buffer intact throughout the switch.
         ReleaseEffects();
+        if(mode!="nis") ReleaseNis();
         ResetFrameHistory();
         try
         {
@@ -553,7 +563,8 @@ internal sealed partial class Renderer : IDisposable
                 source=mixed.Read; Generated++;
             }
         }
-        if(mode=="fsr")
+        if(mode=="nis") DrawNis(source,phase,viewport);
+        else if(mode=="fsr")
         {
             if(srcSize!=outSize)
             {

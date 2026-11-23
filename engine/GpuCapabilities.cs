@@ -20,6 +20,7 @@ internal sealed class GpuCapabilities
     public bool NativeFrameGeneration { get { return false; } }
     string fgReason="AMD frame generation requires Direct3D 12 or Vulkan.",fgVersion="";
     string fsrReason="Temporal FSR requires Direct3D 12 or Vulkan.",fsrVersion="";
+    string nisReason=NisScaler.BackendReason;
     string dlssReason,dlaaReason,rtxReason,flowReason;
     string neuralRenderingReason=NeuralRendering.BackendReason;
     bool neuralRuntimeDownloadAvailable;
@@ -37,6 +38,7 @@ internal sealed class GpuCapabilities
             using(var adapter=dxgi.Adapter)
             {
                 result.Adapter=adapter.Description.Description.TrimEnd('\0',' ');
+                if(NisScaler.SupportsBackend(backend)) result.nisReason=NisScaler.Probe(device);
                 if(Renderer.HasVendorBridge(backend,"fsr-temporal"))
                     result.fsrReason=result.CheckVideo(device,"fsr-temporal",backend);
                 if(backend=="d3d12" || backend=="vulkan") {
@@ -62,7 +64,7 @@ internal sealed class GpuCapabilities
                 }
             }
         }
-        catch(Exception e) { result.AllUnavailable(e.Message);result.fsrReason=result.fgReason=e.Message; }
+        catch(Exception e) { result.AllUnavailable(e.Message);result.nisReason=result.fsrReason=result.fgReason=e.Message; }
         return result;
     }
     void AllUnavailable(string message) { dlssReason=dlaaReason=rtxReason=flowReason=neuralRenderingReason=message;neuralRuntimeDownloadAvailable=false; }
@@ -147,6 +149,7 @@ internal sealed class GpuCapabilities
     {
         switch(mode)
         {
+            case "nis": return nisReason ?? "";
             case "dlss": return dlssReason ?? "";
             case "dlaa": return dlaaReason ?? "";
             case "dlss-nr": return neuralRenderingReason ?? "";
@@ -177,7 +180,7 @@ internal sealed class GpuCapabilities
         json.Append(",\"fsrVersion\":").Append(Quote(fsrReason==null ? fsrVersion : ""));
         json.Append(",\"amdFrameGenerationVersion\":").Append(Quote(fgReason==null ? fgVersion : ""));
         json.Append(",\"dlssNeuralRuntimeDownloadAvailable\":").Append(neuralRuntimeDownloadAvailable ? "true":"false");
-        foreach(string id in new[]{"dlss","dlaa","dlss-nr","rtxvideo","fsr-temporal","amdFrameGeneration","opticalFlow","nativeFrameGeneration"})
+        foreach(string id in new[]{"dlss","dlaa","dlss-nr","rtxvideo","fsr-temporal","nis","amdFrameGeneration","opticalFlow","nativeFrameGeneration"})
             json.Append(',').Append(Quote(id)).Append(Supports(id) ? ":true" : ":false")
                 .Append(',').Append(Quote(id+"Reason")).Append(':').Append(Quote(Reason(id)));
         json.Append(",\"presentationDrivers\":[");

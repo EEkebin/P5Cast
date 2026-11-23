@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.19.0.0")]
+[assembly: AssemblyVersion("0.20.0.0")]
 
 namespace Cadrivect
 {
@@ -61,7 +61,7 @@ namespace Cadrivect
         readonly string preferences = Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA") ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LumaRelay", "dashboard.json");
         readonly string[] names = { "Direct", "Sony", "Demo" };
         readonly string[] titles = { "Direct to PS5", "Sony Remote Play", "Offline demo" };
-        readonly string[] modeIds = { "original", "sharp", "fsr", "rtxvideo", "dlss", "dlaa", "fsr-temporal", "dlss-nr" };
+        static readonly string[] modeIds=PictureLabels.Ids;
         readonly string[] hdrIds = { "auto","off","hdr10" };
         readonly string[] rendererIds = { "auto","d3d11","d3d12","vulkan","opengl" };
         internal static string RendererName(string id)

@@ -61,6 +61,10 @@ internal sealed partial class Renderer
             source=hdrMixed.Read;
             Generated++;
         }
+        if(mode=="nis") {
+            DrawNis(source,phase,area,clip);
+            return;
+        }
         if(mode=="original") {
             Draw("HdrToPq",display,area,source,1,clip:clip);
             return;

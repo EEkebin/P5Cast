@@ -92,6 +92,7 @@ The PS5 sends compressed video. Direct decodes those pixels once before enhancem
 | --- | --- |
 | **Original** | Preserves native-size texels, fits the picture to the window and samples multiple regions when reducing it. |
 | **Sharpen** | Applies a spatial detail filter to edges and fine lettering at the incoming video resolution. |
+| **NIS · Spatial** | NVIDIA Image Scaling runs on each decoded frame. It scales and sharpens when the playback area and resolution limit allow enlargement, and uses native-resolution sharpening otherwise. Available in SDR and HDR10 on Direct3D 11, Direct3D 12 and Vulkan after a GPU check. [NVIDIA Image Scaling SDK](https://github.com/NVIDIAGameWorks/NVIDIAImageScaling) |
 | **FSR 1 · Spatial** | Uses AMD’s EASU for enlargement and RCAS for sharpening. Native-size input skips the enlargement pass. |
 | **FSR Temporal** | Uses the AMD FSR SDK on D3D12 or Vulkan. The button shows the provider the GPU can run, for example **FSR 3.1.6 · Temporal** on the RTX 4090. AMD supplies FSR 4.1.2 for eligible Radeon hardware and FSR 3.1.6 for other compatible GPUs, including the tested RTX 4090. The temporal upscaler uses an estimated HUD mask to reduce trails and color loss on moving text. |
 | **DLSS 5 NR** | Experimental NVIDIA neural rendering at the source resolution. Select Vulkan and SDR. A compatible RTX GPU, the optional NVIDIA runtime and a successful on-device image test are required. |

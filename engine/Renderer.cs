@@ -144,7 +144,7 @@ internal sealed partial class Renderer : IDisposable
             blend.RenderTarget[0]=targetBlend;
             handleBlend=new BlendState(Device,blend);
             vertex=new VertexShader(Device,Shader("Fullscreen"));
-            foreach(string name in new [] {"Original","Sharp","Easu","Rcas","Motion","Interpolate","OpticalField","NgxVectors","PreserveNgxStrokes","WipeDivider","WipeHandle","InspectionLoupe"})
+            foreach(string name in new [] {"Original","Sharp","Easu","Rcas","Motion","Interpolate","OpticalField","NgxVectors","PreserveNgxStrokes","FitNgxFrame","WipeDivider","WipeHandle","InspectionLoupe"})
                 shaders.Add(name,new PixelShader(Device,Shader(name)));
             InitHdrShaders();
             context.InputAssembler.PrimitiveTopology=PrimitiveTopology.TriangleList;
@@ -521,6 +521,8 @@ internal sealed partial class Renderer : IDisposable
             }
             DrawFinal("Rcas",source,phase,viewport);
         }
+        else if((mode=="dlss" || mode=="dlaa") && neuralSize!=viewport.Size)
+            Draw("FitNgxFrame",display,viewport,source,HdrEnabled ? 1 : 0,finishPrevious && havePriorEnhanced ? prev.Read : curr.Read);
         else DrawFinal(mode=="sharp" ? "Sharp":"Original",source,phase,viewport,null,null,HdrEnabled && vendor);
         return Present(samplePixel,holdOriginal);
     }

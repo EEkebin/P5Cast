@@ -40,6 +40,11 @@ internal static partial class EmbeddedProbe {
     static int Texel(int x,int y,int frame) {
         if(y<72) return Math.Min(4,x/128);
         if(y>=250 && y<324 && x<300) return 6+MenuCoverage[(y-250)*300+x];
+        if(y>=250 && y<324 && x>=320) {
+            int localX=(x-320+frame*5)%300, localY=y-250;
+            if(localY>56 && localX>=42 && localX<210) return 3; // moving solid highlight/bar
+            return 6+MenuCoverage[localY*300+localX]; // scrolling text changes position every frame
+        }
         bool ink=false;
         if(x<320 && y>=112 && y<240) {
             int cell=x%36, row=(y-112)%24;
@@ -55,26 +60,26 @@ internal static partial class EmbeddedProbe {
         return (ushort)(((exponent+15)<<10)+(int)Math.Round((value/Math.Pow(2,exponent)-1)*1024));
     }
     static void UploadQualityFrame(Device device,Texture2D texture,int frame,bool hdr) {
-        const int count=InputW*InputH;
+        int width=texture.Description.Width,height=texture.Description.Height,count=width*height;
         if(hdr) {
             // Exactly representable positive half values; scRGB 1.0 means 80 cd/m².
             var neutral=new ushort[262];
             new ushort[]{0,0x3c00,0x4100,0x4a40,0x4000,0x4100}.CopyTo(neutral,0);
             for(int i=0;i<256;i++) neutral[i+6]=PositiveHalf(2.5*Math.Pow(i/255.0,2.2)); // 0, 80, 200, 1000 nits, colored patch, text.
             var pixels=new ushort[count*4];
-            for(int y=0;y<InputH;y++) for(int x=0;x<InputW;x++) {
-                int i=4*(InputW*y+x),p=Texel(x,y,frame);
+            for(int y=0;y<height;y++) for(int x=0;x<width;x++) {
+                int i=4*(width*y+x),p=Texel(x%InputW,y%InputH,frame);
                 pixels[i]=neutral[p]; pixels[i+1]=p==4?(ushort)0x3800:neutral[p];
                 pixels[i+2]=p==4?(ushort)0x3400:neutral[p]; pixels[i+3]=0x3c00;
             }
-            device.ImmediateContext.UpdateSubresource(pixels,texture,0,InputW*8,0);
+            device.ImmediateContext.UpdateSubresource(pixels,texture,0,width*8,0);
         } else {
             var palette=new uint[262];
             new uint[]{0xff000000,0xff808080,0xffe0e0e0,0xffffffff,0xffe08040,0xffffffff}.CopyTo(palette,0);
             for(uint i=0;i<256;i++) palette[i+6]=0xff000000|i*0x010101;
             var pixels=new uint[count];
-            for(int y=0;y<InputH;y++) for(int x=0;x<InputW;x++) pixels[y*InputW+x]=palette[Texel(x,y,frame)];
-            device.ImmediateContext.UpdateSubresource(pixels,texture,0,InputW*4,0);
+            for(int y=0;y<height;y++) for(int x=0;x<width;x++) pixels[y*width+x]=palette[Texel(x%InputW,y%InputH,frame)];
+            device.ImmediateContext.UpdateSubresource(pixels,texture,0,width*4,0);
         }
     }
     static int[] ReadPresentedTexture(Device device,Texture2D source) {
@@ -169,6 +174,7 @@ internal static partial class EmbeddedProbe {
         // Compare identical output coordinates across the whole glyph, including its antialiased edges.
         valid&=menuDelta.Average()<=(hdr?.01:.03) && strokeDelta.Average()<=(hdr?.007:.03);
         valid&=Math.Abs(outputMedian/referenceMedian-1)<.065;
+        valid&=MeasureMovingWhites(baseline,image,OutputW,new Rectangle(486,375,454,109),hdr,mode);
         int changed=0,sceneSamples=0;
         for(int y=174;y<350;y+=2) for(int x=490;x<940;x+=2) {
             int i=y*OutputW+x; sceneSamples++;
@@ -177,6 +183,54 @@ internal static partial class EmbeddedProbe {
         Console.WriteLine("{0} {1} moving scene samples changed {2}/{3}",hdr?"HDR":"SDR",mode,changed,sceneSamples);
         Check(changed>sceneSamples/20,"NGX must still change moving, textured content.");
         return valid;
+    }
+    static bool MeasureMovingWhites(int[] baseline,int[] image,int width,Rectangle region,bool hdr,string mode) {
+        var whiteLoss=new List<double>();
+        for(int y=region.Top;y<region.Bottom;y++) for(int x=region.Left;x<region.Right;x++) {
+            int i=y*width+x;
+            double reference=Code(baseline[i],0,hdr),output=Code(image[i],0,hdr);
+            if(hdr) {reference=Nits(reference); output=Nits(output);}
+            if(reference<(hdr?120:.82)) continue;
+            whiteLoss.Add(Math.Max(0,1-output/reference));
+        }
+        Check(whiteLoss.Count>500,"Moving white HUD fixture is missing.");
+        double peakLoss=whiteLoss.Max(), p99Loss=Quantile(whiteLoss,.99);
+        Console.WriteLine("{0} {1} scrolling HUD white loss vs Original: p99 {2:P2}, maximum {3:P2} ({4} pixels)",
+            hdr?"HDR":"SDR",mode,p99Loss,peakLoss,whiteLoss.Count);
+        return p99Loss<.016 && peakLoss<.035;
+    }
+    static bool CheckFullHdFit(Type type,object renderer,Device device,FieldInfo backBuffer,bool hdr) {
+        var fullHd=new Size(1920,1080);
+        bool pass=true;
+        using(var input=new Texture2D(device,new Texture2DDescription{Width=fullHd.Width,Height=fullHd.Height,
+            Format=hdr?Format.R16G16B16A16_Float:Format.B8G8R8A8_UNorm,ArraySize=1,MipLevels=1,
+            SampleDescription=new SampleDescription(1,0),BindFlags=BindFlags.ShaderResource})) {
+            foreach(var fit in new[]{new Size(1595,897),new Size(2560,1440)}) {
+                type.GetMethod("Resize").Invoke(renderer,new object[]{fit});
+                type.GetMethod("SetPictureMode").Invoke(renderer,new object[]{"original"});
+                int[] baseline=null;
+                foreach(string mode in new[]{"original","dlss"}) {
+                    type.GetMethod("SetPictureMode").Invoke(renderer,new object[]{mode});
+                    for(int frame=0;frame<5;frame++) {
+                        UploadQualityFrame(device,input,frame,hdr);
+                        type.GetMethod("Receive").Invoke(renderer,new object[]{input,new Rectangle(System.Drawing.Point.Empty,fullHd),false});
+                        type.GetMethod("SetFrameTiming").Invoke(renderer,new object[]{16.67,frame>0});
+                        type.GetMethod("Show").Invoke(renderer,new object[]{mode,1f,false,false});
+                    }
+                    var pixels=ReadPresentedTexture(device,(Texture2D)backBuffer.GetValue(renderer));
+                    if(mode=="original") {baseline=pixels;continue;}
+                    bool enlarged=fit.Width>fullHd.Width;
+                    string effect=enlarged?"dlss":"dlaa";
+                    Check((Size)type.GetProperty("RenderSize").GetValue(renderer,null)==(enlarged?fit:fullHd) &&
+                          (string)type.GetProperty("EffectivePictureMode").GetValue(renderer,null)==effect,
+                          "Full HD fit did not use the expected NVIDIA reconstruction.");
+                    double scale=(double)fit.Height/fullHd.Height;
+                    var crop=new Rectangle((int)(324*scale),(int)(250*scale),(int)(290*scale),(int)(73*scale));
+                    pass&=MeasureMovingWhites(baseline,pixels,fit.Width,crop,hdr,effect+" at "+fit.Width+"x"+fit.Height);
+                }
+            }
+        }
+        return pass;
     }
     public static int RunQuality(string[] args) {
         if(args.Length==4) return RunOnDesktop(args,"P5CastNgx"+Guid.NewGuid().ToString("N"));
@@ -281,6 +335,7 @@ internal static partial class EmbeddedProbe {
                                   "RTX Video SR did not produce the enlarged video resolution.");
                         }
                     }
+                    pass&=CheckFullHdFit(type,renderer,device,backBuffer,hdr);
                 }
                 window.Close();
             }

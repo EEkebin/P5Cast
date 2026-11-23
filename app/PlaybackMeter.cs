@@ -38,7 +38,7 @@ namespace Cadrivect
         readonly RadioButton[] modes=new RadioButton[6], factors=new RadioButton[4];
         readonly TextBlock sourceValue,generatedValue,targetValue;
         readonly Dictionary<string,TextBlock> values=new Dictionary<string,TextBlock>();
-        readonly TextBlock submitLabel,notice;
+        readonly TextBlock submitLabel,notice,pictureScale,pictureSize;
         readonly FrameRateDial dial=new FrameRateDial();
         Dictionary<string,object> gpu;
         int selectedMode,selectedFactor=1;
@@ -81,6 +81,18 @@ namespace Cadrivect
                 };
                 modeGrid.Children.Add(button);
             }
+            var resolutionHeader=new DockPanel {Margin=new Thickness(0,7,0,0)};
+            pictureScale=Label("",Mint,11,FontWeights.SemiBold);
+            DockPanel.SetDock(pictureScale,Dock.Right);
+            resolutionHeader.Children.Add(pictureScale);
+            resolutionHeader.Children.Add(Label("Input → output",Muted,11,FontWeights.Normal));
+            picture.Children.Add(resolutionHeader);
+            pictureSize=Label("Waiting for video",Ink,13,FontWeights.SemiBold);
+            pictureSize.TextWrapping=TextWrapping.Wrap;
+            pictureSize.ToolTip="Incoming pixels → processed pixels before the picture is fitted to the playback area.";
+            AutomationProperties.SetAutomationId(pictureSize,"Metric_size");
+            AutomationProperties.SetAutomationId(pictureScale,"Metric_scale");
+            picture.Children.Add(pictureSize);
             var interpolation=Label("Frame interpolation",Muted,11,FontWeights.SemiBold);
             interpolation.Margin=new Thickness(0,9,0,2); picture.Children.Add(interpolation);
             var factorGrid=new UniformGrid {Rows=1,Columns=4,Margin=new Thickness(-2,0,-2,0)};
@@ -145,7 +157,6 @@ namespace Cadrivect
             Separator(sections);
             var diagnostics=AddGroup(sections,"Stream diagnostics","StreamDiagnosticsGroup");
             Subheading(diagnostics,"Video");
-            AddMetric(diagnostics,"size","Input → output","Incoming video resolution and video resolution after processing. Output grows only when an upscaler enlarges the frame.");
             AddMetric(diagnostics,"format","Video format","Source codec and active output color mode.");
             AddMetric(diagnostics,"surface","Playback area","Size of the player surface in screen pixels, including any black bars.");
             AddMetric(diagnostics,"refresh","Display refresh","Active Windows display mode in Hz. The FPS dial counts submitted frames.");
@@ -317,6 +328,7 @@ namespace Cadrivect
             finally {syncing=false;}
             hdr=false; lastSample=-1; pendingSettings=DateTime.MinValue; dial.SetRates(double.NaN,double.NaN,double.NaN,double.NaN);
             sourceValue.Text=generatedValue.Text="—"; targetValue.Text="Target —";
+            pictureSize.Text="Waiting for video"; pictureScale.Text="";
             foreach(var label in values.Values) label.Text="—";
             values["format"].ToolTip=null;
             ShowRequested(directSelected);
@@ -362,10 +374,21 @@ namespace Cadrivect
         {
             return double.IsNaN(value) ? "—" : value.ToString(format,CultureInfo.CurrentCulture)+unit;
         }
-        static string Dimensions(Dictionary<string,object> data,string prefix)
+        static string Dimensions(double w,double h)
         {
-            double w=Number(data,prefix+"Width"), h=Number(data,prefix+"Height");
             return w>0 && h>0 ? w.ToString("0")+"×"+h.ToString("0") : "—";
+        }
+        void UpdatePictureSize(Dictionary<string,object> data)
+        {
+            double iw=Number(data,"inputWidth"),ih=Number(data,"inputHeight");
+            double ow=Number(data,"outputWidth"),oh=Number(data,"outputHeight");
+            if(!(iw>0 && ih>0 && ow>0 && oh>0)) {
+                pictureSize.Text="Waiting for video"; pictureScale.Text=""; return;
+            }
+            pictureSize.Text=Dimensions(iw,ih)+" → "+Dimensions(ow,oh);
+            bool native=iw==ow && ih==oh;
+            if(native) pictureScale.Text=Text(data,"effectivePictureMode")=="dlaa" ? "1× · DLAA" : "1× · Native";
+            else pictureScale.Text=Metric(ow/iw,"×","0.##")+(ow>iw ? " upscale" : " downscale");
         }
         public void Update(Dictionary<string,object> snapshot)
         {
@@ -383,9 +406,8 @@ namespace Cadrivect
             generatedValue.Text=Metric(generated,"","0.#");
             dial.SetRates(target,originals,output,generated);
             values["incomingFps"].Text=Metric(waiting ? double.NaN : Number(snapshot,"sourceFps"),"","0.#");
-            string input=Dimensions(snapshot,"input"),outputSize=Dimensions(snapshot,"output");
-            values["size"].Text=input=="—" && outputSize=="—" ? "—" : input+" → "+outputSize;
-            values["surface"].Text=Dimensions(snapshot,"surface");
+            UpdatePictureSize(snapshot);
+            values["surface"].Text=Dimensions(Number(snapshot,"surfaceWidth"),Number(snapshot,"surfaceHeight"));
             values["refresh"].Text=Metric(Number(snapshot,"displayRefreshHz")," Hz","0.##");
             values["renderer"].Text=Dashboard.RendererName(Text(snapshot,"renderer"));
             string codec=Text(snapshot,"codec"); bool? hdrFlag=Flag(snapshot,"presenterHdr10") ?? Flag(snapshot,"hdrEnabled");
@@ -425,7 +447,7 @@ namespace Cadrivect
             } finally {syncing=false;}
             string message=Text(snapshot,"effectNotice");
             int active=Array.IndexOf(ModeIds,effective);
-            if(string.IsNullOrEmpty(message) && comparing!=true && active>=0 && mode>=0 && active!=mode) message="Active picture · "+ModeLabels[active];
+            if(string.IsNullOrEmpty(message) && comparing!=true && active>=0 && mode>=0 && active!=mode && effective!="dlaa") message="Active picture · "+ModeLabels[active];
             notice.Text=message ?? ""; notice.Visibility=string.IsNullOrEmpty(message) ? Visibility.Collapsed : Visibility.Visible;
         }
 

@@ -27,6 +27,15 @@ float4 HdrToLinear2020(Vertex v) : SV_Target {
 float4 HdrLinear2020ToPq(Vertex v) : SV_Target {
     return float4(EncodePq80(SamplePicture(v)),1);
 }
+float4 FitNgxFrame(Vertex v) : SV_Target {
+    // Finishing the enhanced texture at a different size can filter a bright
+    // stroke twice. Match Original's source footprint at this display pixel.
+    bool hdr=phase>0;
+    float3 reference=SamplePictureTexture(previous,v);
+    if(hdr) reference=LinearScRgbTo2020(reference);
+    float3 color=PreserveSourceWhite(SamplePicture(v),reference,hdr);
+    return float4(hdr ? EncodePq80(color) : color,1);
+}
 float4 HdrSharpToPq(Vertex v) : SV_Target {
     float2 stepSize = 1.0 / sourceSize;
     float3 center = EncodePq80(LinearScRgbTo2020(SharpCenter(v)));

@@ -21,18 +21,19 @@ Vertex Fullscreen(uint vertexID : SV_VertexID) {
     v.pos = float4(v.uv * float2(2,-2) + float2(-1,1), 0, 1);
     return v;
 }
-float3 SamplePicture(Vertex v) {
-    uint w,h; image.GetDimensions(w,h);
+float3 SamplePictureTexture(Texture2D<float4> picture,Vertex v) {
+    uint w,h; picture.GetDimensions(w,h);
     if(all(float2(w,h)==targetSize))
-        return image.Load(int3(uint2(v.pos.xy-viewportOrigin),0)).rgb;
+        return picture.Load(int3(uint2(v.pos.xy-viewportOrigin),0)).rgb;
     if(any(float2(w,h)>targetSize)) {
         // Integrate four sub-pixel regions when reducing a frame. A single bilinear sample can skip thin strokes.
         float2 d=0.25/targetSize;
-        return 0.25*(image.SampleLevel(linearClamp,v.uv-d,0).rgb + image.SampleLevel(linearClamp,v.uv+d,0).rgb +
-                     image.SampleLevel(linearClamp,v.uv+float2(d.x,-d.y),0).rgb + image.SampleLevel(linearClamp,v.uv+float2(-d.x,d.y),0).rgb);
+        return 0.25*(picture.SampleLevel(linearClamp,v.uv-d,0).rgb + picture.SampleLevel(linearClamp,v.uv+d,0).rgb +
+                     picture.SampleLevel(linearClamp,v.uv+float2(d.x,-d.y),0).rgb + picture.SampleLevel(linearClamp,v.uv+float2(-d.x,d.y),0).rgb);
     }
-    return image.SampleLevel(linearClamp,v.uv,0).rgb;
+    return picture.SampleLevel(linearClamp,v.uv,0).rgb;
 }
+float3 SamplePicture(Vertex v) { return SamplePictureTexture(image,v); }
 float4 Original(Vertex v) : SV_Target {
     return float4(SamplePicture(v),1);
 }
@@ -157,6 +158,19 @@ NgxGuidance NgxVectors(Vertex v) {
     return guide;
 }
 float max4(float4 values) {return max(max(values.x,values.y),max(values.z,values.w));}
+// A decoded white HUD element can move independently of the scenery that supplied
+// our estimated motion. Bound lost brightness against the current frame, including
+// partly covered pixels; no temporal stability or inferred glyph width is required.
+float3 PreserveSourceWhite(float3 enhanced,float3 reference,bool hdr) {
+    float hi=max(reference.r,max(reference.g,reference.b)),lo=min(reference.r,min(reference.g,reference.b));
+    float neutral=1-smoothstep(0.05,0.14,(hi-lo)/max(hi,0.001));
+    float3 weights=hdr ? float3(0.2627,0.6780,0.0593) : float3(0.2126,0.7152,0.0722);
+    float white=dot(reference,weights);
+    float strength=neutral*(hdr ? smoothstep(0.55,1.5,white) : smoothstep(0.55,0.82,white));
+    float loss=white-dot(enhanced,weights);
+    // Keep small model differences within half a percent of the source white.
+    return lerp(enhanced,reference,strength*saturate(1-0.005*white/max(loss,0.000001)));
+}
 float4 PreserveNgxStrokes(Vertex v) : SV_Target {
     float3 enhanced=image.Load(int3(int2(v.pos.xy),0)).rgb;
     // Include the neighboring source texels that contribute antialiased coverage
@@ -165,13 +179,12 @@ float4 PreserveNgxStrokes(Vertex v) : SV_Target {
     float ink=max(max4(flow.GatherRed(linearClamp,v.uv-halfTexel)),max4(flow.GatherRed(linearClamp,v.uv+halfTexel)));
     ink=max(ink,max(max4(flow.GatherRed(linearClamp,v.uv+float2(halfTexel.x,-halfTexel.y))),
                     max4(flow.GatherRed(linearClamp,v.uv+float2(-halfTexel.x,halfTexel.y)))));
-    if(ink==0) return float4(enhanced,1);
     float3 reference=previous.SampleLevel(linearClamp,v.uv,0).rgb;
     float floorValue=phase>0 ? 0.00001 : 1.0/255.0;
     float3 error=abs(enhanced-reference)/max(floorValue,0.025*abs(reference));
     float excess=max(error.r,max(error.g,error.b));
     float correction=1.0-rcp(max(1.0,excess));
-    return float4(lerp(enhanced,reference,ink*correction),1);
+    return float4(PreserveSourceWhite(lerp(enhanced,reference,ink*correction),reference,phase>0),1);
 }
 float patchError(float2 uv,float2 offset) {
     float score=0;

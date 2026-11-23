@@ -158,6 +158,17 @@ internal static partial class WindowChromeProbe
     static RadioButton ViewButton(string id) {
         return (RadioButton)FindVisual(Find<Border>("MeterHost"),"RadioButton",e=>AutomationProperties.GetAutomationId(e)==id);
     }
+    static TextBlock PictureMetric(string id) {
+        return (TextBlock)FindVisual(Find<Border>("MeterHost"),"TextBlock",e=>AutomationProperties.GetAutomationId(e)==id);
+    }
+    static async Task CheckPictureSize(Dictionary<string,object> frame) {
+        string dimensions=frame["inputWidth"]+"×"+frame["inputHeight"]+" → "+frame["outputWidth"]+"×"+frame["outputHeight"];
+        bool native=Equals(frame["inputWidth"],frame["outputWidth"]) && Equals(frame["inputHeight"],frame["outputHeight"]);
+        string scale=native ? ((string)frame["effectivePictureMode"]=="dlaa" ? "1× · DLAA" : "1× · Native")
+            : (Convert.ToDouble(frame["outputWidth"])/Convert.ToDouble(frame["inputWidth"])).ToString("0.##")+"× upscale";
+        var sizeMetric=PictureMetric("Metric_size"); var scaleMetric=PictureMetric("Metric_scale");
+        await Until(()=>sizeMetric.Text==dimensions && scaleMetric.Text==scale,"Picture readout did not show "+dimensions+" / "+scale+".");
+    }
     static async Task CheckFullscreenFrame(Action toggle,Func<bool> hasGeometry,string direction) {
         var api=AppDomain.CurrentDomain.GetAssemblies().Select(a=>a.GetType("Cadrivect.Engine.EmbeddedPlayback")).First(t=>t!=null);
         var read=api.GetMethod("Snapshot");
@@ -175,6 +186,7 @@ internal static partial class WindowChromeProbe
                 Convert.ToInt32(data["presented"])>before;
         },"Video stopped presenting at the new size on "+direction+".");
         var resized=snapshot();
+        await CheckPictureSize(resized);
         if((string)resized["effectivePictureMode"]=="original")
             Require(Equals(resized["inputWidth"],resized["outputWidth"]) && Equals(resized["inputHeight"],resized["outputHeight"]),
                     "Changing fullscreen resized native video output.");
@@ -327,6 +339,8 @@ internal static partial class WindowChromeProbe
             RequireButtonPixel(close,work.Right-1,work.Top+16);
             Note("The topmost pixel reaches each title-bar action; the upper-right corner and rightmost pixel reach Close.");
             var status=Find<TextBlock>("Status");
+            Require(PictureMetric("Metric_size").Text=="Waiting for video" && PictureMetric("Metric_scale").Text=="",
+                "An idle dashboard should wait for actual input and output dimensions.");
             var statusBar=ScreenRect(Find<Border>("StatusFooter"));
             Require(Math.Abs(maximizedHeader.Left-work.Left)<=2 && Math.Abs(maximizedHeader.Top-work.Top)<=2 &&
                 Math.Abs(maximizedHeader.Right-work.Right)<=2 && Math.Abs(statusBar.Bottom-work.Bottom)<=2,
@@ -441,6 +455,13 @@ internal static partial class WindowChromeProbe
                                             "Fullscreen lost DLSS or HDR10.");
                                     await CheckFullscreenFrame(()=>SendMessage(video,0x203,IntPtr.Zero,IntPtr.Zero),
                                         ()=>Fits(Rect(video),restored,2),"DLSS HDR exit fullscreen");
+                                    var dlaa=(RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"DLAA"));
+                                    if(dlaa.IsEnabled) {
+                                        dlaa.IsChecked=true;
+                                        await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"effectivePictureMode\":\"dlaa\""),"DLAA did not activate.");
+                                        await CheckPictureSize(new System.Web.Script.Serialization.JavaScriptSerializer()
+                                            .Deserialize<Dictionary<string,object>>((string)snapshot.Invoke(null,null)));
+                                    }
                                     ((RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"Original"))).IsChecked=true;
                                 }
                             }

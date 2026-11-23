@@ -17,13 +17,15 @@ $menu = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)
 $group = Join-Path $menu 'P5Cast'
 [IO.Directory]::CreateDirectory($group) | Out-Null
 $shell = New-Object -ComObject WScript.Shell
-foreach ($name in 'P5Cast','P5Cast Client') {
-    $shortcut = $shell.CreateShortcut((Join-Path $group "$name.lnk"))
-    $shortcut.TargetPath = $installed
-    $shortcut.IconLocation = "$installed,0"
-    $shortcut.WorkingDirectory = $app
-    $shortcut.Arguments = if ($name -like '*Client') { '--client' } else { '' }
-    $shortcut.Save()
+$shortcut = $shell.CreateShortcut((Join-Path $group 'P5Cast.lnk'))
+$shortcut.TargetPath = $installed
+$shortcut.IconLocation = "$installed,0"
+$shortcut.WorkingDirectory = $app
+$shortcut.Arguments = ''
+$shortcut.Save()
+$oldClientShortcut = Join-Path $group 'P5Cast Client.lnk'
+if (Test-Path -LiteralPath $oldClientShortcut -PathType Leaf) {
+    Remove-Item -LiteralPath $oldClientShortcut
 }
 foreach ($oldProduct in 'Cadrivect','LumaRelay') {
     $previous = Join-Path $env:LOCALAPPDATA "Programs\$oldProduct\$oldProduct.exe"

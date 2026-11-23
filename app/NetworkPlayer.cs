@@ -29,6 +29,9 @@ namespace Cadrivect
         SafeFileHandle job;
         bool disposed;
         long nextScan;
+        internal bool HasVideo { get {return stream!=IntPtr.Zero;} }
+
+        internal string Error {get; private set;}
 
         public static NetworkPlayer Start(IntPtr host, IDictionary<string,object> plan, Action<string> status, Action<int> ended)
         {
@@ -211,8 +214,8 @@ namespace Cadrivect
         void Fail(string message)
         {
             if (disposed) return;
+            Error=message;
             Finish(true);
-            if (status != null) status(message);
             if (ended != null) ended(-1);
         }
 

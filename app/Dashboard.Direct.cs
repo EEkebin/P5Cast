@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
@@ -55,9 +56,21 @@ namespace Cadrivect
         }
         void UpdateTransport()
         {
-            bool waitingForConsole=directCore!=null && !firstFrame;
-            UI<Button>("OpenSource").Content=stopping?"Stopping…":preparing || waitingForConsole?"Cancel":Active?"Stop":source=="Demo"?"Play demo":"Connect";
-            UI<Button>("OpenSource").IsEnabled=!stopping && !requestingRest;
+            var button=UI<Button>("OpenSource");
+            var glyph=button.Content as TransportGlyph;
+            if(glyph==null) button.Content=glyph=new TransportGlyph();
+            bool ending=stopping || requestingRest;
+            bool connecting=preparing || (rendering!=null && !firstFrame) || (network!=null && !network.HasVideo);
+            string action=source=="Demo" ? "Play demo" : source=="Direct" ? "Connect to PS5" : "Connect to Sony Remote Play";
+            if(ending) action="Stopping playback";
+            else if(connecting) action="Cancel connection";
+            else if(Active) action="Stop playback";
+            string state=ending ? "Stopping" : connecting ? "Connecting" : Active ? "Playing" : "Ready";
+            button.IsEnabled=!ending;
+            button.ToolTip=connecting && !ending ? "Connecting… Click to cancel." : action;
+            AutomationProperties.SetName(button,action);
+            AutomationProperties.SetItemStatus(button,state);
+            glyph.SetState(ending || connecting ? TransportGlyph.Shape.Spinner : Active ? TransportGlyph.Shape.Stop : TransportGlyph.Shape.Play);
             bool canSelect=!preparing && !Active;
             UI<ComboBox>("VideoRenderer").IsEnabled=canSelect;
             UI<ComboBox>("ConsolePicker").IsEnabled=canSelect;
@@ -114,6 +127,8 @@ namespace Cadrivect
         }
         void StopPlayback()
         {
+            if(!stopRequested && (preparing || Active) && !closing && !stopping)
+                Show(preparing || (rendering!=null && !firstFrame) ? "Cancelling connection…" : "Disconnecting…");
             stopRequested=true;
             if(wakeCheck!=null) wakeCheck.Cancel();
             stopping=preparing || Active;
@@ -207,16 +222,17 @@ namespace Cadrivect
             int layout=UI<ComboBox>("NetworkAudio").SelectedIndex;
             if(!pair && layout>0) args.AddRange(new[]{"-AudioLayout",audioLayouts[layout]});
             if(!pair && UI<CheckBox>("ClientHdr").IsChecked==true) args.Add("-Hdr");
-            preparing=true; UpdateTransport(); Show("Preparing the network client…");
+            preparing=true; stopRequested=false; UpdateTransport(); Show("Preparing the network client…");
             try {
                 var plan=await Script("streaming/Relay.ps1",args.ToArray());
-                if(stopping || closing) return;
+                if(stopping || closing) {Show("Disconnected"); return;}
                 NetworkPlayer owned=null;
-                owned=NetworkPlayer.Start(surface.Handle,plan,message=>Show(message),code=>{
+                owned=NetworkPlayer.Start(surface.Handle,plan,message=>{Show(message); UpdateTransport();},code=>{
                     if(network!=owned) return;
-                    network=null; Finish(); Show(code==0?"Network session ended.":"Network session ended (code "+code+").",code!=0);
+                    network=null; Finish();
+                    Show(owned.Error ?? (code==0?"Network session ended.":"Network session ended (code "+code+")."),code!=0);
                 });
-                network=owned; Show(Field(plan,"message"));
+                network=owned;
             } finally {preparing=false; if(network==null) Finish(); else UpdateTransport();}
         }
         static string CoreError(int code)

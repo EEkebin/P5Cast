@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.10.0.0")]
+[assembly: AssemblyVersion("0.11.0.0")]
 
 namespace Cadrivect
 {
@@ -112,6 +112,7 @@ namespace Cadrivect
         internal Dashboard(Window w, bool client)
         {
             window = w;
+            InitStatusHistory();
             window.Icon = new BitmapImage(new Uri(Path.Combine(Program.Root,"app","assets","mark.ico")));
             UI<Border>("VideoHost").Child=surface;
             surface.DoubleClicked+=ToggleFullscreen;
@@ -223,7 +224,8 @@ namespace Cadrivect
             window.PreviewKeyDown+=async delegate(object sender,KeyEventArgs e) {
                 bool chord=(Keyboard.Modifiers & (ModifierKeys.Control|ModifierKeys.Alt))==(ModifierKeys.Control|ModifierKeys.Alt);
                 var key=e.Key==Key.System?e.SystemKey:e.Key;
-                if(key==Key.F11 || (chord && key==Key.Enter)) ToggleFullscreen();
+                if(key==Key.Escape && !fullscreen && UI<Border>("StatusHistorySheet").IsVisible) SetStatusHistory(false);
+                else if(key==Key.F11 || (chord && key==Key.Enter)) ToggleFullscreen();
                 else if(chord && key==Key.O) ToggleStats();
                 else if(chord && key==Key.Q) {e.Handled=true; await UserStop(); return;}
                 else if(chord && key==Key.B && rendering!=null) meter.ToggleOriginal();
@@ -238,7 +240,7 @@ namespace Cadrivect
                 Show("Pairing with your PS5...");
                 var c=await DirectConsole.Pair(UI<TextBox>("PairAddress").Text,UI<TextBox>("PsnAccount").Text,UI<TextBox>("PairCode").Text);
                 consoleAddresses[c.Mac]=c.Address; ReloadConsoles(c.Mac); SetPage("Play"); SaveSettings();
-                Show("Paired with "+c.Name+". Select Connect to play.");
+                Show("Paired with "+c.Name+". Press the play button to connect.");
             });
             Bind("StartHost", () => {
                 var hostTarget=hostScreen.SelectedItem as DisplayTarget;
@@ -446,13 +448,6 @@ namespace Cadrivect
             UI<TextBox>("PsnAccount").Text=DirectConsole.KnownAccountId();
             UI<TextBox>("PairAddress").Text=UI<TextBox>("ConsoleAddress").Text; UI<TextBox>("PairAddress").Focus();
         }
-        void Show(string message, bool error = false)
-        {
-            UI<TextBlock>("Status").Text = message;
-            UI<TextBlock>("Status").ToolTip = message;
-            UI<Ellipse>("Indicator").Fill = error ? Brushes.LightSalmon : mint;
-        }
-
         async Task Relay(string action, params string[] args)
         {
             Show(action == "StartHost" || action == "OpenClient" || action == "PairClient" || action == "Play"

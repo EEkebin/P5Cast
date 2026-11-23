@@ -8,9 +8,11 @@ Extract the entire Windows x64 ZIP and open `P5Cast.exe`. To install it for your
 
 The installer places the app in `%LOCALAPPDATA%\Programs\P5Cast` and adds **P5Cast** and **P5Cast Client** under **Start → P5Cast**. Existing console registrations, preferences and network pairings carry over when upgrading from Cadrivect.
 
-1. Open **Play**, choose **Offline demo**, then **Play demo**. A 960×540 scene runs inside the dashboard. Use the arrow keys or A/D to steer and Space to accelerate. The demo runs without a console, network connection, decoder download or controller.
+1. Open **Play**, choose **Offline demo**, then click the triangular play button. A 960×540 scene runs inside the dashboard. Use the arrow keys or A/D to steer and Space to accelerate. The demo runs without a console, network connection, decoder download or controller.
 2. The two-line title bar button toggles the performance drawer. The **Settings** button beside **Fullscreen** toggles the bottom drawer. Drag the left edge of the performance drawer or the top edge of the settings drawer to resize it. You can also Tab to a handle and use the arrow keys. P5Cast remembers the sizes and open state of both drawers. Begin with **Original** and interpolation **Off**. Try **Sharpen**, **AMD FSR 1** or an available NVIDIA mode. Pick **2×**, **3×** or **4×** to test interpolation.
 3. Use **Fullscreen** or F11 for edge-to-edge video. Press Escape or double-click the picture to return. **Stop** turns the same video area black and clears the live measurements. With the dashboard focused, Ctrl+Alt+O toggles the sidebar, Ctrl+Alt+B toggles comparison, and Ctrl+Alt+Q stops playback.
+
+The play button becomes a spinner while P5Cast connects. Click the spinner to cancel. Once video is playing, the button becomes a stop square. Click the status message at the bottom of the window to see timestamped updates from this run. Press Escape to return to the player.
 
 ## Compare the picture
 
@@ -26,8 +28,8 @@ Choose **Original** or **Enhanced** to give either picture the whole window. Dur
 
 | Source | How to connect | Audio and controls |
 | --- | --- | --- |
-| **Direct to PS5** | Choose a paired console and enter its reachable LAN address. Choose 30 or 60 FPS under **Stream quality**, then **Connect**. The native helper requests a 1080p console stream. | The native helper decodes stereo Opus, plays it on the Windows audio device and sends input from the first SDL-compatible controller. |
-| **Sony Remote Play** | Open Sony’s installed PC app, connect to the console using its existing pairing, and leave its window restored. Select **Sony Remote Play → Connect** in P5Cast. | Sony’s app plays audio and handles controller input. P5Cast captures its client area and processes the video. [Sony’s PC setup](https://remoteplay.dl.playstation.net/remoteplay/lang/en/1100001.html) |
+| **Direct to PS5** | Choose a paired console and enter its reachable LAN address. Choose 30 or 60 FPS under **Stream quality**, then click the play button. The native helper requests a 1080p console stream. | The native helper decodes stereo Opus, plays it on the Windows audio device and sends input from the first SDL-compatible controller. |
+| **Sony Remote Play** | Open Sony’s installed PC app, connect to the console using its existing pairing, and leave its window restored. Select **Sony Remote Play** in P5Cast and click the play button. | Sony’s app plays audio and handles controller input. P5Cast captures its client area and processes the video. [Sony’s PC setup](https://remoteplay.dl.playstation.net/remoteplay/lang/en/1100001.html) |
 
 Under **Play**, **Console** contains pairing, address, wake and stop controls. **Stream quality** sets the next Direct connection's target frame rate and requested video bitrate. **Graphics & display** contains the graphics API, monitor, video resolution and color output.
 

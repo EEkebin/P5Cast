@@ -304,7 +304,7 @@ internal static partial class WindowChromeProbe
             RequireButtonPixel(close,work.Right-1,work.Top+16);
             Note("The topmost pixel reaches each title-bar action; the upper-right corner and rightmost pixel reach Close.");
             var status=Find<TextBlock>("Status");
-            var statusBar=ScreenRect((FrameworkElement)((FrameworkElement)status.Parent).Parent);
+            var statusBar=ScreenRect(Find<Border>("StatusFooter"));
             Require(Math.Abs(maximizedHeader.Left-work.Left)<=2 && Math.Abs(maximizedHeader.Top-work.Top)<=2 &&
                 Math.Abs(maximizedHeader.Right-work.Right)<=2 && Math.Abs(statusBar.Bottom-work.Bottom)<=2,
                 "Maximized title/status bars are clipped: header "+Geometry(maximizedHeader)+", status "+Geometry(statusBar)+", work area "+Geometry(work)+".");
@@ -314,8 +314,10 @@ internal static partial class WindowChromeProbe
             await Until(delegate{return !IsIconic(hwnd) && window.WindowState==WindowState.Normal;},"Native restore after minimize failed.");
             Note("Native maximize, restore and minimize passed.");
             Require(Find<ComboBox>("SourceChoice").SelectedItem.ToString()=="Offline demo","Refusing to start a network source.");
-            Click("OpenSource");
+            if(CheckTransportOption) await CheckCanceledStartup();
+            if(CheckTransportOption) BeginDemoWithSpinner(); else Click("OpenSource");
             await Until(delegate{return status.Text=="Offline demo";},"The offline demo did not present its first frame.");
+            if(CheckTransportOption) await CheckLiveTransport();
             await CheckComparisonViews();
             var peer=Peer(toggle);
             var provider=peer.GetPattern(PatternInterface.Toggle) as IToggleProvider;

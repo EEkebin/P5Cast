@@ -197,6 +197,11 @@ internal static partial class WindowChromeProbe
             var match=System.Text.RegularExpressions.Regex.Match(AutomationProperties.GetHelpText(dial),@"Generated (\d+)");
             return match.Success && int.Parse(match.Groups[1].Value)>10;
         },"The demo did not generate enough frames to show both measured FPS segments.");
+        if(CheckTransportOption) {
+            Click("StatusHistoryButton");
+            await Until(()=>Find<Border>("StatusHistorySheet").IsVisible,"History did not open for preview.");
+            await Task.Delay(280);
+        }
         window.UpdateLayout();
         string path=Environment.GetEnvironmentVariable("P5CAST_SCREENSHOT");
         var work=Screen().Work; var picture=Rect(video);
@@ -232,6 +237,7 @@ internal static partial class WindowChromeProbe
         var bitmap=new RenderTargetBitmap(work.Width,work.Height,96,96,PixelFormats.Pbgra32); bitmap.Render(drawing);
         var enc=new PngBitmapEncoder(); enc.Frames.Add(BitmapFrame.Create(bitmap));
         using(var stream=File.Create(path)) enc.Save(stream);
+        if(CheckTransportOption && Find<Border>("StatusHistorySheet").IsVisible) Click("CloseStatusHistory");
         if(live) {
             Click("OpenSource"); await Until(delegate{return status.Text=="Disconnected";},"Preview did not stop.");
         }

@@ -34,6 +34,21 @@ try {
         $observed.Cancel
     }
     function IsShown($name){(Widget $name).Visibility -eq 'Visible'}
+    # Start the offline demo against a deliberately empty install root. The actual
+    # failure handler should record the error and restore Play without a connection.
+    (Widget SourceChoice).SelectedIndex=2
+    $rootField=$asm.GetType('Cadrivect.Program').GetField('Root','Static,NonPublic')
+    $rootField.SetValue($null,$tmp)
+    try {$null=(Call StartPlayback).GetAwaiter().GetResult()} finally {$rootField.SetValue($null,$AppRoot)}
+    $entries=(Widget StatusHistoryList).Items
+    Require ($entries.Count -gt 0 -and $entries[0].IsError -and $entries[0].Message -eq (Widget Status).Text) 'Startup failures are visible in history'
+    Require ((Widget OpenSource).IsEnabled -and [Windows.Automation.AutomationProperties]::GetItemStatus((Widget OpenSource)) -eq 'Ready') 'A failed start restores the play action'
+    $show=$type.GetMethod('Show',[Reflection.BindingFlags]'Instance,NonPublic')
+    for($n=1;$n -le 130;$n++) {$null=$show.Invoke($dash,@("Update $n",$false))}
+    $null=$show.Invoke($dash,@('Update 130',$false))
+    Require ($entries.Count -eq 120 -and $entries[0].Message -eq 'Update 130' -and $entries[119].Message -eq 'Update 11') 'History preserves a bounded, newest-first burst and suppresses consecutive duplicates'
+    $null=$show.Invoke($dash,@('Update 130',$true))
+    Require ($entries[0].IsError -and !$entries[1].IsError -and $entries[0].Timestamp -is [datetime]) 'History preserves severity changes and timestamps'
     # The arc counts submitted frames. Input and output can diverge while the stream is running.
     $meter=$type.GetField('meter','Instance,NonPublic').GetValue($dash)
     $dial=$meter.GetType().GetField('dial','Instance,NonPublic').GetValue($meter)
@@ -132,7 +147,7 @@ try {
     Require (!$saved.stopChoices.($row.Mac)) 'Reset to ask every time'
     (Widget StopBehavior).SelectedIndex=1
     Require ((TryClose) -and !(IsShown StopPanel) -and $type.GetField('closing','Instance,NonPublic').GetValue($dash)) 'A saved leave-awake rule closes without a rest request or prompt'
-    'Passed grouped controls, bitrate defaults, Stop and close prompts, rest default and per-console preference persistence. No console session opened.'
+    'Passed startup failure recovery, bounded status history, grouped controls, bitrate defaults, Stop and close prompts, and per-console preferences. No console session opened.'
 } finally {
     $env:LOCALAPPDATA=$oldLocal
     if([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($tmp)) -eq [IO.Path]::GetTempPath().TrimEnd('\') -and (Split-Path $tmp -Leaf) -eq $id -and (Test-Path -LiteralPath $tmp)) {

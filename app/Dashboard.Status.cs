@@ -29,17 +29,19 @@ namespace Cadrivect
         void InitStatusHistory()
         {
             UI<ListBox>("StatusHistoryList").ItemsSource=statusHistory;
-            var sheet=UI<Border>("StatusHistorySheet");
-            UI<Button>("StatusHistoryButton").Click+=delegate {SetStatusHistory(sheet.Visibility!=Visibility.Visible);};
+            UI<Button>("StatusHistoryButton").Click+=delegate {SetStatusHistory(!HistoryOpen);};
             UI<Button>("CloseStatusHistory").Click+=delegate {SetStatusHistory(false);};
+            UI<Button>("CancelOperation").Click+=delegate {CancelCurrentOperation();};
             Show(UI<TextBlock>("Status").Text);
         }
 
         void SetStatusHistory(bool open)
         {
-            var sheet=UI<Border>("StatusHistorySheet");
+            if(open && (OperationOpen || SetupOpen || StopPromptOpen)) return;
+            var sheet=UI<Grid>("StatusHistoryLayer");
             var button=UI<Button>("StatusHistoryButton");
             sheet.Visibility=open?Visibility.Visible:Visibility.Collapsed;
+            SetModalBackgroundEnabled(true);
             ((RotateTransform)UI<Path>("HistoryChevron").RenderTransform).Angle=open?180:0;
             button.ToolTip=open?"Hide status history":"Show status history";
             AutomationProperties.SetName(button,(string)button.ToolTip);

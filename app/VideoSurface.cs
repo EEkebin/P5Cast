@@ -49,6 +49,28 @@ namespace Cadrivect
         IntPtr ResizeCursor {get {return horizontalWipe ? resizeNS : resizeWE;}}
         [DllImport("user32.dll")] static extern int FillRect(IntPtr dc,ref Rect rect,IntPtr brush);
         [DllImport("gdi32.dll")] static extern IntPtr GetStockObject(int index);
+        [DllImport("gdi32.dll")] static extern IntPtr CreateRectRgn(int left,int top,int right,int bottom);
+        [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr handle);
+        [DllImport("user32.dll")] static extern int SetWindowRgn(IntPtr hwnd,IntPtr region,bool redraw);
+        bool clippedForModal;
+
+        internal void ClipForModal(bool clip)
+        {
+            if(clippedForModal==clip) return;
+            clippedForModal=clip;
+            if(Handle!=IntPtr.Zero) ApplyModalClip(Handle,clip);
+        }
+        static void ApplyModalClip(IntPtr hwnd,bool clip)
+        {
+            // Keep the native child and its client size alive until the renderer acknowledges the change.
+            IntPtr region=clip ? CreateRectRgn(0,0,0,0) : IntPtr.Zero;
+            if(clip && region==IntPtr.Zero) throw new Win32Exception();
+            if(SetWindowRgn(hwnd,region,true)==0) {
+                if(region!=IntPtr.Zero) DeleteObject(region);
+                throw new Win32Exception();
+            }
+            // On success Windows owns the region.
+        }
         [DllImport("user32.dll")] internal static extern bool SetWindowPos(IntPtr hwnd,IntPtr after,int x,int y,int width,int height,uint flags);
 
         protected override HandleRef BuildWindowCore(HandleRef parent)
@@ -56,6 +78,7 @@ namespace Cadrivect
             // STATIC SS_BLACKRECT remains the swap-chain destination for the lifetime of the dashboard.
             IntPtr child=CreateWindowEx(0,"STATIC","P5Cast video",0x56000104,0,0,1,1,parent.Handle,IntPtr.Zero,IntPtr.Zero,IntPtr.Zero);
             if(child==IntPtr.Zero) throw new Win32Exception();
+            if(clippedForModal) ApplyModalClip(child,true);
             return new HandleRef(this,child);
         }
         protected override void DestroyWindowCore(HandleRef hwnd) { EndGesture(hwnd.Handle); DestroyWindow(hwnd.Handle); }

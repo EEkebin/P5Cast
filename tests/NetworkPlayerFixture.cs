@@ -86,8 +86,12 @@ namespace Cadrivect
                 File.WriteAllText(PathFor("return-qt"),"");
                 Until(delegate{return File.Exists(PathFor("returned")) && !IsWindow(video) && GetParent(Recorded("qt"))==host;},"Qt panel did not return after SDL.");
                 var child=Process.GetProcessById((int)Recorded("pid").ToInt64());
+                var stopped=player.StopAsync();
+                Require(stopped==player.StopAsync(),"Repeated Stop lost the pending shutdown task.");
+                Until(delegate{return stopped.IsCompleted;},"Network shutdown did not complete.");
+                stopped.GetAwaiter().GetResult();
+                Require(child.HasExited,"Network shutdown completed before its player exited.");
                 player.Dispose(); player=null;
-                Until(delegate{return child.HasExited;},"Owned fixture survived shutdown.");
                 child.Dispose();
                 Console.WriteLine("Passed hidden Qt to pinned SDL handoff, resizing, return to Qt, muted child environment and owned-process shutdown.");
                 return 0;

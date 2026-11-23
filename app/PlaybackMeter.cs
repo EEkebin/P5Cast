@@ -520,6 +520,18 @@ namespace Cadrivect
             comparisonGuide.Visibility=index>=2 ? Visibility.Visible : Visibility.Collapsed;
             divider.Visibility=index==3 ? Visibility.Visible : Visibility.Collapsed;
         }
+        internal void RestorePlaybackControls(int picture,int multiplier,string provider,string view)
+        {
+            syncing=true;
+            try {
+                selectedMode=picture; selectedFactor=multiplier; FrameGenerationProvider=provider;
+                modes[picture].IsChecked=true; SyncGenerationChoice(); RefreshQualityChoice();
+                int index=Array.IndexOf(ViewIds,view);
+                if(index>=0) SelectView(index);
+                pendingSettings=DateTime.MinValue;
+            } finally {syncing=false;}
+        }
+        internal Dictionary<string,object> Capabilities { get {return gpu;} }
         void UpdateComparisonGuide()
         {
             comparisonGuide.Text=selectedView==3 && WipeHorizontal ? "Top: Original    ·    Bottom: Enhanced" : "Left: Original    ·    Right: Enhanced";

@@ -7,7 +7,6 @@ namespace Cadrivect
 {
     internal partial class Dashboard
     {
-        CancellationTokenSource wakeCheck;
 
         void RefreshWakeButton()
         {
@@ -17,16 +16,12 @@ namespace Cadrivect
 
         async Task<string> EnsureConsoleReady(DirectConsole console,string address,bool wakeOnly)
         {
-            Show("Checking your paired PS5…");
-            using(var check=new CancellationTokenSource()) {
-                wakeCheck=check;
-                try {
-                    return await ConsoleWake.Prepare(address,console.Mac,console.Keys,wakeOnly,check.Token,
-                        message=>window.Dispatcher.BeginInvoke(new Action(delegate {
-                            if(wakeCheck==check && !closing && !check.IsCancellationRequested) Show(message);
-                        })));
-                } finally {wakeCheck=null;}
-            }
+            var check=preparingConnection;
+            TransportProgress("Checking your paired PS5…");
+            return await ConsoleWake.Prepare(address,console.Mac,console.Keys,wakeOnly,check.Token,
+                message=>window.Dispatcher.BeginInvoke(new Action(delegate {
+                    if(preparingConnection==check && !closing && !check.IsCancellationRequested) TransportProgress(message);
+                })));
         }
 
         async Task WakeWithoutPlaying()
@@ -34,6 +29,7 @@ namespace Cadrivect
             var console=UI<ComboBox>("ConsolePicker").SelectedItem as DirectConsole;
             if(console==null || preparing || Active || closing) return;
             preparing=true; stopRequested=false; UpdateTransport();
+            BeginConnection("Waking PS5","Checking your paired PS5…");
             try {
                 string address=DirectConsole.Host(UI<TextBox>("ConsoleAddress").Text);
                 consoleAddresses[console.Mac]=address; SaveSettings();

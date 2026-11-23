@@ -83,7 +83,8 @@ internal static partial class WindowChromeProbe
             Require(Find<CheckBox>("RememberStop").IsChecked==true && Find<Button>("CancelStop").IsEnabled && !Shown("HeaderBar"),
                 "Failed rest request lost its choices, fullscreen, or ability to cancel.");
             Find<CheckBox>("RestOnStop").IsChecked=false;Click("ConfirmStop");
-            await Until(()=>!Shown("StopPanel") && Find<TextBlock>("Status").Text=="Disconnected","Could not recover by disconnecting without rest.",10000);
+            await Until(()=>!Shown("StopPanel") && !OperationVisible && Find<TextBlock>("Status").Text=="Disconnected" &&
+                Peer(Find<Button>("OpenSource")).GetItemStatus()=="Ready","Could not recover by disconnecting without rest.",10000);
             Require(!Shown("HeaderBar") && Video()==video && (string)type.GetField("page",field).GetValue(dashboard)=="Host",
                 "Stopping changed fullscreen, the settings page or the video HWND.");
             var choices=(Dictionary<string,object>)ReadPrefs()["stopChoices"];

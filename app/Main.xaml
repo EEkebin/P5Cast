@@ -504,8 +504,37 @@
     <Border Name="StatusFooter" Grid.Row="2" Background="{DynamicResource Theme.Panel}" BorderBrush="{DynamicResource Theme.Border}" BorderThickness="0,1,0,0"
             ClipToBounds="True" Visibility="{Binding Visibility, ElementName=HeaderBar}">
       <StackPanel>
-        <Border Name="StatusHistorySheet" Visibility="Collapsed" Padding="22,8,16,8" BorderBrush="{DynamicResource Theme.Border}" BorderThickness="0,0,0,1">
-          <Grid Height="174"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <Button Name="StatusHistoryButton" Cursor="Hand" HorizontalContentAlignment="Stretch" Padding="24,7,20,7"
+                AutomationProperties.Name="Show status history" ToolTip="Show status history">
+          <Button.Template><ControlTemplate TargetType="Button">
+            <Border Name="StatusFace" Background="Transparent" BorderThickness="1" BorderBrush="Transparent"
+                    Padding="{TemplateBinding Padding}"><ContentPresenter/></Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="StatusFace" Property="Background" Value="{DynamicResource Theme.Hover}"/></Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="StatusFace" Property="BorderBrush" Value="{DynamicResource Theme.Accent}"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate></Button.Template>
+          <DockPanel LastChildFill="True">
+            <Ellipse Name="Indicator" DockPanel.Dock="Left" Width="7" Height="7" Fill="{DynamicResource Theme.Accent}" Margin="0,0,10,0"/>
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
+              <TextBlock Text="History" FontSize="12" Foreground="{DynamicResource Theme.Muted}" VerticalAlignment="Center"/>
+              <Path Name="HistoryChevron" Data="M0,4 L4,0 L8,4" Stroke="{DynamicResource Theme.Muted}" StrokeThickness="1.5"
+                    Margin="7,0,0,0" VerticalAlignment="Center" RenderTransformOrigin=".5,.5"><Path.RenderTransform><RotateTransform/></Path.RenderTransform></Path>
+            </StackPanel>
+            <Grid Height="23" ClipToBounds="True">
+              <TextBlock Name="PreviousStatus" Opacity="0" VerticalAlignment="Center" Foreground="{DynamicResource Theme.Text}" FontSize="13" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"><TextBlock.RenderTransform><TranslateTransform/></TextBlock.RenderTransform></TextBlock>
+              <TextBlock Name="Status" Text="Ready" VerticalAlignment="Center" Foreground="{DynamicResource Theme.Text}" FontSize="13" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"><TextBlock.RenderTransform><TranslateTransform/></TextBlock.RenderTransform></TextBlock>
+            </Grid>
+          </DockPanel>
+        </Button>
+      </StackPanel>
+    </Border>
+    <Grid Name="StatusHistoryLayer" Grid.Row="0" Grid.RowSpan="3" Panel.ZIndex="12" Visibility="Collapsed"
+          Background="{DynamicResource Theme.Scrim}" FocusManager.IsFocusScope="True" KeyboardNavigation.TabNavigation="Cycle"
+          KeyboardNavigation.ControlTabNavigation="Cycle" KeyboardNavigation.DirectionalNavigation="Contained" AutomationProperties.Name="Status history">
+        <Border Name="StatusHistorySheet" MaxWidth="540" MaxHeight="360" Margin="18" Padding="20" VerticalAlignment="Center" CornerRadius="14"
+                Background="{DynamicResource Theme.Surface}" BorderBrush="{DynamicResource Theme.Border}" BorderThickness="1">
+          <Grid MaxHeight="290"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
             <DockPanel Margin="2,0,0,4">
               <Button Name="CloseStatusHistory" DockPanel.Dock="Right" Width="34" MinWidth="34" Height="30" Style="{StaticResource TitleAction}"
                       AutomationProperties.Name="Close status history" ToolTip="Close status history (Esc)">
@@ -545,31 +574,32 @@
             </ListBox>
           </Grid>
         </Border>
-        <Button Name="StatusHistoryButton" Cursor="Hand" HorizontalContentAlignment="Stretch" Padding="24,7,20,7"
-                AutomationProperties.Name="Show status history" ToolTip="Show status history">
-          <Button.Template><ControlTemplate TargetType="Button">
-            <Border Name="StatusFace" Background="Transparent" BorderThickness="1" BorderBrush="Transparent"
-                    Padding="{TemplateBinding Padding}"><ContentPresenter/></Border>
-            <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="StatusFace" Property="Background" Value="{DynamicResource Theme.Hover}"/></Trigger>
-              <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="StatusFace" Property="BorderBrush" Value="{DynamicResource Theme.Accent}"/></Trigger>
-            </ControlTemplate.Triggers>
-          </ControlTemplate></Button.Template>
-          <DockPanel LastChildFill="True">
-            <Ellipse Name="Indicator" DockPanel.Dock="Left" Width="7" Height="7" Fill="{DynamicResource Theme.Accent}" Margin="0,0,10,0"/>
-            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
-              <TextBlock Text="History" FontSize="12" Foreground="{DynamicResource Theme.Muted}" VerticalAlignment="Center"/>
-              <Path Name="HistoryChevron" Data="M0,4 L4,0 L8,4" Stroke="{DynamicResource Theme.Muted}" StrokeThickness="1.5"
-                    Margin="7,0,0,0" VerticalAlignment="Center" RenderTransformOrigin=".5,.5"><Path.RenderTransform><RotateTransform/></Path.RenderTransform></Path>
-            </StackPanel>
-            <Grid Height="23" ClipToBounds="True">
-              <TextBlock Name="PreviousStatus" Opacity="0" VerticalAlignment="Center" Foreground="{DynamicResource Theme.Text}" FontSize="13" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"><TextBlock.RenderTransform><TranslateTransform/></TextBlock.RenderTransform></TextBlock>
-              <TextBlock Name="Status" Text="Ready" VerticalAlignment="Center" Foreground="{DynamicResource Theme.Text}" FontSize="13" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"><TextBlock.RenderTransform><TranslateTransform/></TextBlock.RenderTransform></TextBlock>
-            </Grid>
-          </DockPanel>
-        </Button>
-      </StackPanel>
-    </Border>
+    </Grid>
+    <Grid Name="OperationOverlay" Grid.Row="0" Grid.RowSpan="3" Panel.ZIndex="14" Visibility="Collapsed"
+          Background="{DynamicResource Theme.Scrim}" FocusManager.IsFocusScope="True"
+          KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle" KeyboardNavigation.DirectionalNavigation="Contained"
+          AutomationProperties.LabeledBy="{Binding ElementName=OperationTitle}">
+      <Border VerticalAlignment="Center" MaxWidth="410" Margin="18" Padding="22" CornerRadius="14"
+              Background="{DynamicResource Theme.Surface}" BorderBrush="{DynamicResource Theme.Border}" BorderThickness="1">
+        <Grid>
+          <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <Grid Name="OperationSpinner" Width="32" Height="32" VerticalAlignment="Top" Margin="0,2,15,0" IsHitTestVisible="False">
+            <Ellipse Stroke="{DynamicResource Theme.Border}" StrokeThickness="2.5"/>
+            <Path Data="M 16,1.25 A 14.75,14.75 0 0 1 30.75,16" Stroke="{DynamicResource Theme.Accent}" StrokeThickness="2.5"
+                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" RenderTransformOrigin="0.5,0.5">
+              <Path.RenderTransform><RotateTransform x:Name="OperationRotation"/></Path.RenderTransform>
+            </Path>
+          </Grid>
+          <StackPanel Grid.Column="1">
+            <TextBlock Name="OperationTitle" TextWrapping="Wrap" FontSize="20" FontWeight="SemiBold" Foreground="{DynamicResource Theme.Text}"
+                       Focusable="True" KeyboardNavigation.IsTabStop="False"/>
+            <TextBlock Name="OperationDetail" TextWrapping="Wrap" Margin="0,5,0,0" Foreground="{DynamicResource Theme.Muted}" AutomationProperties.LiveSetting="Polite"/>
+          </StackPanel>
+          <Button Name="CancelOperation" Grid.Row="1" Grid.ColumnSpan="2" Content="Cancel" HorizontalAlignment="Right" MinWidth="84" Margin="0,16,0,0"/>
+        </Grid>
+      </Border>
+    </Grid>
     <Grid Name="StopPanel" Grid.Row="1" Grid.RowSpan="2" Panel.ZIndex="11" Visibility="Collapsed"
           Background="{DynamicResource Theme.Scrim}" AutomationProperties.Name="Disconnect confirmation" FocusManager.IsFocusScope="True"
           KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle" KeyboardNavigation.DirectionalNavigation="Contained">

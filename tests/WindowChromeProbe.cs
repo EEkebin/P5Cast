@@ -205,6 +205,7 @@ internal static partial class WindowChromeProbe
             string expected="\"comparisonView\":\""+views[i]+"\"";
             await Until(delegate{return button.IsChecked==true && ((string)snapshot.Invoke(null,null)).Contains(expected);},
                         "Dashboard selection did not reach the running engine: "+views[i]);
+            await WaitForOperation("Switching comparison to "+views[i]);
             if(views[i]=="wipe") {
                 var slider=FindVisual(Find<Border>("MeterHost"),"Slider",e=>AutomationProperties.GetAutomationId(e)=="WipePosition");
                 var range=Peer(slider).GetPattern(PatternInterface.RangeValue) as IRangeValueProvider;
@@ -352,10 +353,10 @@ internal static partial class WindowChromeProbe
             await Until(delegate{return !IsIconic(hwnd) && window.WindowState==WindowState.Normal;},"Native restore after minimize failed.");
             Note("Native maximize, restore and minimize passed.");
             Require(Find<ComboBox>("SourceChoice").SelectedItem.ToString()=="Offline demo","Refusing to start a network source.");
-            if(CheckTransportOption) {await CheckVolumeControls(); await CheckCanceledStartup();}
+            if(CheckTransportOption) {await CheckVolumeControls(); await CheckIdleRendererCancel(); await CheckCanceledStartup();}
             if(CheckTransportOption) BeginDemoWithSpinner(); else Click("OpenSource");
             await Until(delegate{return status.Text=="Offline demo";},"The offline demo did not present its first frame.");
-            if(CheckTransportOption) await CheckLiveTransport();
+            if(CheckTransportOption) {await WaitForOperation("Presented offline demo");await CheckLiveTransport();}
             await CheckComparisonViews();
             var peer=Peer(toggle);
             var provider=peer.GetPattern(PatternInterface.Toggle) as IToggleProvider;
@@ -388,7 +389,7 @@ internal static partial class WindowChromeProbe
             await CheckFullscreenFrame(()=>SendMessage(video,0x203,IntPtr.Zero,IntPtr.Zero),
                 ()=>header.IsVisible && header.ActualHeight>5 && Math.Abs(Rect(video).Width-narrow)<=2,"Exit fullscreen");
             Require(Video()==video && provider.ToggleState==ToggleState.On,"Fullscreen replaced video or changed the sidebar preference.");
-            Require(status.Text=="Offline demo","Offline playback stopped during the chrome test.");
+            Require(Peer(Find<Button>("OpenSource")).GetItemStatus()=="Playing","Offline playback stopped during the chrome test.");
             Note("Offline playback filled monitor "+Geometry(full)+" in fullscreen and preserved video HWND, sidebar state and windowed size on return.");
             Click("MaximizeWindow");
             await Until(delegate{return IsZoomed(hwnd) && Fits(ScreenRect((FrameworkElement)window.Content),work,2);},
@@ -402,7 +403,8 @@ internal static partial class WindowChromeProbe
             Note("Fullscreen entered from maximized restored the exact work area and title bar.");
             if(CheckDrawerOption) await CheckDrawers();
             if(Environment.GetEnvironmentVariable("P5CAST_PROBE_SCALING")=="1") await CheckScaling();
-            Click("OpenSource");
+            if(CheckTransportOption) await CheckCompletedStop();
+            else Click("OpenSource");
             await Until(delegate{return status.Text=="Disconnected";},"Offline demo did not disconnect.");
             if(CheckDrawerOption) await CheckPairDrawer();
             string renderCheck=Environment.GetEnvironmentVariable("P5CAST_PROBE_RENDERERS");
@@ -423,6 +425,7 @@ internal static partial class WindowChromeProbe
                 string[] labels={"Direct3D 12","Vulkan","OpenGL","Direct3D 11"};
                 for(int i=0;i<keys.Length;++i) {
                     choice.SelectedItem=labels[i];
+                    await WaitForOperation("Probing "+labels[i],60000);
                     Require(choice.IsEnabled && choice.SelectedItem.ToString()==labels[i],"Renderer selection failed.");
                     bool expectHdr=renderCheck=="hdr" && keys[i]!="opengl";
                     if(expectHdr) color.SelectedItem="HDR10";
@@ -441,11 +444,11 @@ internal static partial class WindowChromeProbe
                         await Until(()=>!Equals(nis.ToolTip,"Checking GPU support."),labels[i]+" NIS probe did not finish.",45000);
                         if(keys[i]=="opengl") Require(!nis.IsEnabled,"OpenGL advertised NIS without an implementation.");
                         else if(nis.IsEnabled) {
-                            nis.IsChecked=true;
+                            await SelectPlaybackMode(nis);
                             await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"effectivePictureMode\":\"nis\"") &&
                                 ((string)snapshot.Invoke(null,null)).Contains("\"activeNisFilter\":\"NVScaler\""),
                                 labels[i]+" failed to run NIS from the Picture drawer.",12000);
-                            ((RadioButton)FindVisual(meter,"RadioButton",e=>AutomationProperties.GetAutomationId(e)=="Picture_original")).IsChecked=true;
+                            await SelectPlaybackMode(((RadioButton)FindVisual(meter,"RadioButton",e=>AutomationProperties.GetAutomationId(e)=="Picture_original")));
                             await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"effectivePictureMode\":\"original\""),"Could not switch back to Original.");
                             Note(labels[i]+" ran NVIDIA Image Scaling through the Picture drawer.");
                         }
@@ -456,19 +459,21 @@ internal static partial class WindowChromeProbe
                             Require(fruc!=null && !fruc.IsEnabled,"FRUC must be disabled during HDR playback.");
                             bool testFruc=Equals(fruc.ToolTip,"NVIDIA FRUC requires SDR. Choose SDR in Graphics & display.");
                             color.SelectedItem="SDR";
+                            await WaitForOperation("Applying the playback setting");
                             await Until(delegate{return ((string)snapshot.Invoke(null,null)).Contains("\"hdrEnabled\":false");},"Live SDR switch failed.");
                             if(testFruc) {
                                 await Until(()=>fruc.IsEnabled,"FRUC did not become available after selecting SDR.");
                                 var amd=(RadioButton)FindVisual(meter,"RadioButton",e=>AutomationProperties.GetAutomationId(e)=="AmdFrameGeneration");
                                 if(amd.IsEnabled) {
-                                    amd.IsChecked=true;
+                                    await SelectPlaybackMode(amd);
                                     await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"activeFrameGenerationProvider\":\"amd\""),"AMD failed before switching to FRUC.",12000);
                                 }
-                                fruc.IsChecked=true;
+                                await SelectPlaybackMode(fruc);
                                 await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"activeFrameGenerationProvider\":\"fruc\""),"Selected FRUC failed to produce an intermediate frame.",12000);
                                 Require(amd.IsChecked!=true,"Both vendor providers are selected.");
                             }
                             color.SelectedItem="HDR10";
+                            await WaitForOperation("Applying the playback setting");
                             await Until(delegate{return ((string)snapshot.Invoke(null,null)).Contains("\"hdrEnabled\":true");},"HDR10 did not resume.");
                             if(testFruc) {
                                 await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"multiplier\":1") && fruc.IsChecked!=true && !fruc.IsEnabled,
@@ -489,7 +494,7 @@ internal static partial class WindowChromeProbe
                                 Func<Dictionary<string,object>> sample=()=>new System.Web.Script.Serialization.JavaScriptSerializer()
                                     .Deserialize<Dictionary<string,object>>((string)snapshot.Invoke(null,null));
                                 if(fsr.IsEnabled) {
-                                    fsr.IsChecked=true;
+                                    await SelectPlaybackMode(fsr);
                                     await Until(()=>Convert.ToInt32(sample()["fsrEvaluations"])>0 &&
                                         !string.IsNullOrEmpty(Convert.ToString(sample()["fsrVersion"])),"AMD temporal upscaling did not process the demo.",12000);
                                     await Until(()=>Equals(fsr.Content,"FSR "+sample()["fsrVersion"]+" · Temporal"),"Temporal FSR chip did not identify the running provider.");
@@ -497,25 +502,27 @@ internal static partial class WindowChromeProbe
                                 }
                                 if(amdFrames.IsEnabled) {
                                     int before=Convert.ToInt32(sample()["generated"]);
-                                    amdFrames.IsChecked=true;
+                                    await SelectPlaybackMode(amdFrames);
                                     await Until(()=>Convert.ToString(sample()["frameGenerationProvider"])=="amd" &&
                                         !string.IsNullOrEmpty(Convert.ToString(sample()["activeFrameGenerationVersion"])) &&
                                         Convert.ToInt32(sample()["generated"])>before,"AMD frame generation did not submit an intermediate frame.",12000);
                                     Note(labels[i]+" dashboard AMD frame generation: "+sample()["activeFrameGenerationVersion"]);
-                                    ((RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"Off"))).IsChecked=true;
+                                    await SelectPlaybackMode(((RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"Off"))));
                                 }
-                                ((RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"Original"))).IsChecked=true;
+                                await SelectPlaybackMode(((RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"Original"))));
                                 if(dlss.IsEnabled) {
                                     var restored=Rect(video);
-                                    dlss.IsChecked=true;
+                                    await SelectPlaybackMode(dlss);
                                     await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"mode\":\"dlss\""),"DLSS did not activate.");
                                     var quality=(ComboBox)FindVisual(picture,"ComboBox",e=>AutomationProperties.GetAutomationId(e)=="DlssQuality");
                                     Require(quality.IsEnabled && quality.Items.Cast<string>().SequenceEqual(new[]{"Auto","Quality","Balanced","Performance","Ultra Performance"}),
                                             "DLSS mode choices are incomplete.");
                                     var model=(ComboBox)FindVisual(picture,"ComboBox",e=>AutomationProperties.GetAutomationId(e)=="DlssModelHint");
                                     model.SelectedIndex=2;
+                                    await WaitForOperation("Applying the playback setting");
                                     await Until(()=>Convert.ToString(sample()["dlssModelHint"])=="m","DLSS 4.5 model preference did not reach the player.");
                                     quality.SelectedItem="Balanced";
+                                    await WaitForOperation("Applying the playback setting");
                                     await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"dlssQuality\":\"balanced\""),"The dashboard failed to apply Balanced.");
                                     await CheckFullscreenFrame(()=>Click("Fullscreen"),()=>Fits(Rect(video),Screen().Full,2),"DLSS HDR enter fullscreen");
                                     await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"activeDlssQuality\":\"balanced\"") &&
@@ -527,12 +534,12 @@ internal static partial class WindowChromeProbe
                                         ()=>Fits(Rect(video),restored,2),"DLSS HDR exit fullscreen");
                                     var dlaa=(RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"DLAA"));
                                     if(dlaa.IsEnabled) {
-                                        dlaa.IsChecked=true;
+                                        await SelectPlaybackMode(dlaa);
                                         await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"effectivePictureMode\":\"dlaa\""),"DLAA did not activate.");
                                         await CheckPictureSize(new System.Web.Script.Serialization.JavaScriptSerializer()
                                             .Deserialize<Dictionary<string,object>>((string)snapshot.Invoke(null,null)));
                                     }
-                                    ((RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"Original"))).IsChecked=true;
+                                    await SelectPlaybackMode(((RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"Original"))));
                                     Require(!quality.IsVisible && !quality.IsEnabled,"DLSS selector should only be available for DLSS.");
                                     Note("Balanced selected through the dashboard, verified by live HDR playback telemetry.");
                                 }
@@ -616,7 +623,8 @@ internal static partial class WindowChromeProbe
             CloseHandle(pi.Thread);
             try {
                 // The HDR suite starts four backends and exercises NVIDIA fullscreen in addition to the base UI checks.
-                uint timeoutMs=Environment.GetEnvironmentVariable("P5CAST_PROBE_RENDERERS")=="hdr" ? 120000u : 30000u;
+                uint timeoutMs=Environment.GetEnvironmentVariable("P5CAST_PROBE_RENDERERS")=="hdr" ? 120000u :
+                    CheckTransportOption ? 90000u : 30000u;
                 if(WaitForSingleObject(pi.Process,timeoutMs)!=0) {
                     TerminateProcess(pi.Process,2); WaitForSingleObject(pi.Process,3000);
                     throw new TimeoutException("The private dashboard did not close in time.");

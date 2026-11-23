@@ -278,6 +278,40 @@ try {
     State playingMac $row.Mac; State firstFrame $true; State directCore ([Diagnostics.Process]::GetCurrentProcess())
     (Widget ShowSettings).IsChecked=$false
     Require (!(IsShown SettingsDrawer)) 'The settings drawer can be closed before stop'
+    [Threading.SynchronizationContext]::SetSynchronizationContext(
+        [Windows.Threading.DispatcherSynchronizationContext]::new($window.Dispatcher))
+    function WaitStopTransition {
+        $timeout=[Diagnostics.Stopwatch]::StartNew()
+        while((IsShown OperationOverlay) -and $timeout.ElapsedMilliseconds -lt 6000) {
+            $frame=[Windows.Threading.DispatcherFrame]::new()
+            [void]$window.Dispatcher.BeginInvoke([Windows.Threading.DispatcherPriority]::Background,[Action]{$frame.Continue=$false})
+            [Windows.Threading.Dispatcher]::PushFrame($frame)
+            Start-Sleep -Milliseconds 10
+        }
+        Require (!(IsShown OperationOverlay)) 'The stop operation finished'
+    }
+
+    # Exercise the host paths with a local relay stub. Never start a real sharing host here.
+    $fixture=Join-Path $tmp 'relay-fixture'
+    [void][IO.Directory]::CreateDirectory((Join-Path $fixture 'streaming'))
+    $log=Join-Path $fixture 'streaming\calls.txt'
+    @'
+param([string]$Action,[string]$Address,[string]$DisplayDevice)
+Add-Content -LiteralPath (Join-Path $PSScriptRoot 'calls.txt') -Value $Action
+if($Action -eq 'InstallHost'){Start-Sleep -Milliseconds 200}
+@{ok=$true;message=$Action} | ConvertTo-Json -Compress
+'@ | Set-Content -LiteralPath (Join-Path $fixture 'streaming\Relay.ps1') -Encoding UTF8
+    $rootField.SetValue($null,$fixture)
+    try {
+        Click StartHost
+        Require ((IsShown OperationOverlay) -and (Widget CancelOperation).IsEnabled) 'Share startup offers cancellation'
+        Click CancelOperation; WaitStopTransition
+        Click StopHost; Click CancelOperation; WaitStopTransition
+        Click StartHost; WaitStopTransition
+        Click StopHost; WaitStopTransition
+        $calls=@(Get-Content -LiteralPath $log)
+        Require (@($calls -eq 'StartHost').Count -eq 1 -and @($calls -eq 'StopHost').Count -eq 1) 'Only confirmed sharing requests reached the relay'
+    } finally {$rootField.SetValue($null,$AppRoot)}
 
     $null=(Call UserStop).GetAwaiter().GetResult()
     Require ((IsShown StopPanel) -and !(IsShown SettingsDrawer) -and !(Widget ShowSettings).IsChecked -and (Widget RestOnStop).IsChecked -and !(Widget RememberStop).IsChecked) 'Stop opens in its own overlay and preserves the closed drawer, with rest selected and remember unchecked'
@@ -290,11 +324,15 @@ try {
     $null=(Call UserStop).GetAwaiter().GetResult()
     Require ((Widget ConfirmStop).Content -eq 'Stop session') 'Canceling close leaves subsequent Stop actions in the dashboard'
     (Widget RememberStop).IsChecked=$true; Click ConfirmStop
+    WaitStopTransition
     Require ((IsShown StopPanel) -and (Widget StopMessage).Text -like 'Could not send the rest request*' -and (Widget Status).Text -eq (Widget StopMessage).Text -and (Widget RememberStop).IsChecked -and (Widget StopBehavior).SelectedIndex -eq 0) 'Unacknowledged rest keeps its choices and exposes the error inside the modal'
     (Widget RestOnStop).IsChecked=$false; (Widget RememberStop).IsChecked=$true; Click ConfirmStop
+    WaitStopTransition
     Require ((Widget StopBehavior).SelectedIndex -eq 1 -and !(IsShown StopPanel)) 'Remember leave-on choice'
     (Widget StopBehavior).SelectedIndex=2
-    Require ((TryClose) -and (IsShown StopPanel) -and (Widget Status).Text -like 'Could not send the rest request*' -and (Widget ConfirmStop).Content -eq 'Disconnect and close') 'Closing with saved rest sends the request and allows recovery on failure'
+    $pendingClose=TryClose
+    WaitStopTransition
+    Require ($pendingClose -and (IsShown StopPanel) -and (Widget Status).Text -like 'Could not send the rest request*' -and (Widget ConfirmStop).Content -eq 'Disconnect and close') 'Closing with saved rest sends the request and allows recovery on failure'
     Click CancelStop
     $saved=Get-Content (Join-Path $tmp 'LumaRelay\dashboard.json') -Raw | ConvertFrom-Json
     Require ($saved.stopChoices.($row.Mac) -eq 'rest' -and $saved.directMbps -eq 100) 'Saved console preference and quality'
@@ -302,7 +340,9 @@ try {
     $saved=Get-Content (Join-Path $tmp 'LumaRelay\dashboard.json') -Raw | ConvertFrom-Json
     Require (!$saved.stopChoices.($row.Mac)) 'Reset to ask every time'
     (Widget StopBehavior).SelectedIndex=1
-    Require ((TryClose) -and !(IsShown StopPanel) -and $type.GetField('closing','Instance,NonPublic').GetValue($dash)) 'A saved leave-awake rule closes without a rest request or prompt'
+    $pendingClose=TryClose
+    WaitStopTransition
+    Require ($pendingClose -and !(IsShown StopPanel) -and $type.GetField('closing','Instance,NonPublic').GetValue($dash)) 'A saved leave-awake rule closes without a rest request or prompt'
     'Passed startup failure recovery, bounded status history, grouped controls, bitrate defaults, Stop and close prompts, and per-console preferences. No console session opened.'
 } finally {
     $env:LOCALAPPDATA=$oldLocal

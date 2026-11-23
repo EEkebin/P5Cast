@@ -339,6 +339,7 @@ internal static class Player
                         int step=0, count=1, drawTick=0;
                         double firstInput=0,lastInput=0,lastRealAge=-1;
                         double lastSnapshot=0,lastFile=0; int sampleId=0,snapshotInput=0,snapshotPresented=0,snapshotGenerated=0;
+                        int presentedSettingsRevision=0;
                         WindowsApi.timeBeginPeriod(1);
                         try
                         {
@@ -346,6 +347,9 @@ internal static class Player
                             {
                                 // The portable presenter owns a child HWND on this playback thread.
                                 if(host==null || renderer.Backend!="d3d11") Application.DoEvents();
+                                // Read the marker before draining requests. A later marker can only be acknowledged
+                                // by a later iteration, even if a cancel and a switch arrive in the same frame.
+                                int settingsRevision=host==null ? 0 : Volatile.Read(ref host.SettingsRevision);
                                 if(host!=null) host.TakeChanges(hostedChange);
                                 if((window!=null && window.Ended) || (seconds>0 && clock.Elapsed.TotalSeconds>=seconds)) break;
                                 comparisonView=host==null ? window.ComparisonView:host.ComparisonView;
@@ -417,6 +421,8 @@ internal static class Player
                                         renderer.Captured,renderer.Presented,renderer.Generated,(renderer.Captured-snapshotInput)*perSecond,
                                         (renderer.Presented-snapshotPresented)*perSecond,(renderer.Generated-snapshotGenerated)*perSecond)
                                         +",\"repaints\":"+renderer.Repaints+",\"mode\":"+JsonString(mode)+",\"multiplier\":"+multiplier+",\"effectivePictureMode\":"+JsonString(renderer.EffectivePictureMode)
+                                        +",\"settingsRevision\":"+presentedSettingsRevision
+                                        +",\"settingsError\":"+JsonString(settingsNotice)
                                         +",\"loupeActive\":"+(loupe!=null ? "true":"false")+",\"loupeLevel\":"+(loupe==null ? 0 : loupe.Level)
                                         +",\"loupeX\":"+(loupe==null ? "0" : loupe.X.ToString("R",CultureInfo.InvariantCulture))
                                         +",\"loupeY\":"+(loupe==null ? "0" : loupe.Y.ToString("R",CultureInfo.InvariantCulture))
@@ -449,7 +455,7 @@ internal static class Player
                                 double timestamp;
                                 bool deduplicate=multiplier>1 || testing || vendor;
                                 bool fresh=demo ? offline.Read(renderer,out timestamp) : direct ? decoded.Read(renderer,deduplicate,out timestamp) : capture.Read(renderer,deduplicate,out timestamp);
-                                repaintPending|=redraw;
+                                repaintPending|=redraw || presentedSettingsRevision!=settingsRevision;
                                 if(fresh)
                                 {
                                     double elapsed=timestamp-previousTime;
@@ -476,6 +482,7 @@ internal static class Player
                                     // When the GPU misses a deadline skip obsolete intermediates.
                                     step=Math.Min(count,Math.Max(step,1+(int)((now-pairStart)/(period/count))));
                                     int color=renderer.Show(compare ? "original":mode,(float)step/count,testing);
+                                    presentedSettingsRevision=settingsRevision;
                                     if(testing) samples.Add(color & 0x00ffffff);
                                     if(step==count) lastRealAge=RecordAge(liveFrameAges,previousTime,testing || filename!=null);
                                     step++;
@@ -490,6 +497,7 @@ internal static class Player
                                    now-lastSubmit>=period*1.25 && now-lastRepaint>=1000.0/60)
                                 {
                                     renderer.Repaint(compare ? "original":mode);
+                                    presentedSettingsRevision=settingsRevision;
                                     lastRepaint=clock.Elapsed.TotalMilliseconds;
                                     repaintPending=false;
                                 }

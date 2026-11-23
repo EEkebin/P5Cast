@@ -18,6 +18,7 @@ namespace Cadrivect
         internal readonly Action<bool,float,float,int,float> SetLoupe;
         internal readonly Action<string,string> ConfigureOutput;
         internal readonly Func<string> Snapshot, Error;
+        internal readonly Func<int> MarkSettings;
         static T Method<T>(Type engine,string name) where T:class
         {
             return (T)(object)Delegate.CreateDelegate(typeof(T),engine.GetMethod(name,BindingFlags.Public|BindingFlags.Static));
@@ -35,6 +36,7 @@ namespace Cadrivect
             SetWipePosition=Method<Action<float>>(engine,"SetWipePosition");
             ConfigureOutput=Method<Action<string,string>>(engine,"ConfigureOutput");
             Snapshot=Method<Func<string>>(engine,"Snapshot"); Error=Method<Func<string>>(engine,"get_Error");
+            MarkSettings=Method<Func<int>>(engine,"MarkSettings");
             InvalidateDisplay=Method<Action>(engine,"InvalidateDisplay");
         }
         internal Task<int> Start(string[] args)

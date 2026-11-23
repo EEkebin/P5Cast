@@ -23,7 +23,7 @@ internal static partial class WindowChromeProbe
         Func<Dictionary<string,object>> sample=()=>json.Deserialize<Dictionary<string,object>>((string)snapshot.Invoke(null,null));
         var button=ViewButton("ViewWipe");
         Require(button!=null && button.IsEnabled,"Wipe view is missing.");
-        button.IsChecked=true;
+        await SelectPlaybackMode(button);
         await Until(()=>Equals(sample()["comparisonView"],"wipe"),"Wipe view did not start.");
         bool fullscreen=backend=="d3d12";
         if(fullscreen) {
@@ -54,7 +54,7 @@ internal static partial class WindowChromeProbe
             await Until(()=>Find<Border>("HeaderBar").IsVisible,"Double-click away from the divider did not exit fullscreen.");
         }
         orientation.IsChecked=initialOrientation;
-        ViewButton("ViewEnhanced").IsChecked=true;
+        await SelectPlaybackMode(ViewButton("ViewEnhanced"));
         await Until(()=>Equals(sample()["comparisonView"],"enhanced"),"Wipe view did not exit.");
         Note(backend+" passed native dragging, cancellation and inset handle recovery on both axes.");
     }

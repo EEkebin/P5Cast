@@ -228,20 +228,26 @@ namespace Cadrivect
         }
 
         public void Dispose() { Finish(true); }
-        void Finish(bool stop)
+        Task cleanup=Task.FromResult(0);
+        internal Task StopAsync() {return Finish(true);}
+        Task Finish(bool stop)
         {
-            if (disposed) return;
+            if (disposed) return cleanup;
             disposed = true;
             timer.Stop();
             if (hook != IntPtr.Zero) { UnhookWinEvent(hook); hook=IntPtr.Zero; }
             if (stop) {
                 IntPtr active = IsWindow(stream) ? stream : panel;
                 if (IsWindow(active)) { ShowWindowAsync(active,0); PostMessage(active,0x0010,IntPtr.Zero,IntPtr.Zero); }
-                Task.Run(delegate {
-                    try { process.WaitForExit(1800); }
-                    finally { job.Dispose(); process.Dispose(); }
+                cleanup=Task.Run(delegate {
+                    try {process.WaitForExit(1800);}
+                    finally {
+                        job.Dispose(); // Closing the lifetime job terminates a client which ignored WM_CLOSE.
+                        try {process.WaitForExit();} finally {process.Dispose();}
+                    }
                 });
             } else { job.Dispose(); process.Dispose(); }
+            return cleanup;
         }
 
         static SafeFileHandle CreateLifetimeJob(Process child)

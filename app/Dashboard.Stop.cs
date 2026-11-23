@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -13,6 +14,7 @@ namespace Cadrivect
         readonly Dictionary<string,string> stopChoices=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
         string playingMac,playingPipe;
         bool updatingStopChoice,requestingRest,closeAfterStop;
+        CancellationTokenSource pendingStop;
         UIElement stopReturnFocus;
         bool StopPromptOpen {get {return UI<Grid>("StopPanel").Visibility==Visibility.Visible;}}
 
@@ -107,10 +109,18 @@ namespace Cadrivect
         }
         async Task RequestDisconnect(bool exit)
         {
+            if(pendingStop!=null) {if(exit) closeAfterStop=true; return;}
             if(requestingRest) {if(exit) SetStopAction(true); return;}
             if(stopping) return;
             if(setupPairing) return;
-            if(directCore==null || !firstFrame || playingMac==null) {StopPlayback(); return;}
+            if(directCore==null || !firstFrame || playingMac==null) {
+                closeAfterStop=exit;
+                if(transportOperation==0 && Active && !await WaitToDisconnect(false)) return;
+                if(closeAfterStop) {SaveSettings(); closing=true;}
+                StopPlayback();
+                if(closing && !Active && !preparing) QueueWindowClose();
+                return;
+            }
             if(StopPromptOpen) {
                 if(exit) SetStopAction(true);
                 return;
@@ -122,30 +132,63 @@ namespace Cadrivect
         }
         async void OnDashboardClosing(object sender,System.ComponentModel.CancelEventArgs e)
         {
+            if(HistoryOpen) SetStatusHistory(false);
+            if(OperationOpen && !closing) {
+                e.Cancel=true;
+                // A close during committed teardown should finish closing the window
+                // as soon as the player and its owned process have actually exited.
+                if(stopping && stopRequested) {SaveSettings(); closing=true; return;}
+                CancelCurrentOperation();
+                return;
+            }
             if(SetupOpen) {
                 if(setupPairing) {e.Cancel=true; return;}
                 CloseSetup(false);
             }
-            if(!closing && (requestingRest || (!stopping && directCore!=null && firstFrame && playingMac!=null))) {
+            if(!closing && (requestingRest || (!stopping && (Active || (firstFrame && directCore!=null && playingMac!=null))))) {
                 e.Cancel=true;
                 await RequestDisconnect(true);
                 return;
             }
             if(!closing) {SaveSettings(); closing=true; StopPlayback();}
-            if(rendering!=null || preparing) e.Cancel=true;
+            if(Active || preparing) e.Cancel=true;
         }
         void QueueWindowClose()
         {
             window.Dispatcher.BeginInvoke(new Action(window.Close));
         }
+        async Task<bool> WaitToDisconnect(bool rest)
+        {
+            using(var wait=new CancellationTokenSource()) {
+                pendingStop=wait;
+                string detail=rest?"About to put the PS5 into rest mode. Cancel to keep playing.":
+                    "About to disconnect. Cancel to keep playing.";
+                long operation=BeginOperation(rest?"Stopping PS5 playback":"Stopping playback",detail,wait.Cancel);
+                transportOperation=operation;
+                UpdateTransport();
+                try {
+                    await Task.Delay(1000,wait.Token);
+                    CommitOperation(operation,rest?"Sending the PS5 rest request…":"Disconnecting…");
+                    return true;
+                } catch(OperationCanceledException) {
+                    if(transportOperation==operation) {
+                        if(Active && !stopping) Show("Disconnect cancelled.");
+                        closeAfterStop=false;
+                        EndTransportOperation();
+                    }
+                    return false;
+                } finally {if(pendingStop==wait) pendingStop=null; UpdateTransport();}
+            }
+        }
         async Task StopDirect(bool rest,bool remember)
         {
             var core=directCore; string mac=playingMac;
-            if(requestingRest || stopping || core==null || mac==null) return;
+            if(requestingRest || pendingStop!=null || stopping || core==null || mac==null) return;
+            DismissStopPrompt();
+            if(!await WaitToDisconnect(rest) || core!=directCore) return;
             try {
                 if(rest) {
                     requestingRest=true; EnableStopActions(false); UpdateTransport();
-                    if(StopPromptOpen) {SetStopMessage("Sending the rest request…",false);UI<TextBlock>("StopTitle").Focus();}
                     Show("Requesting rest mode…");
                     await DirectConsole.RequestRestAsync(playingPipe,core);
                 }
@@ -155,8 +198,11 @@ namespace Cadrivect
                     if(rendering==null && !preparing) QueueWindowClose();
                 } else if(!closing && directCore==core) {DismissStopPrompt(); StopPlayback();}
             } catch(Exception ex) {
+                EndTransportOperation();
                 if(!closing && core==directCore) {
                     OpenStopPrompt(closeAfterStop);
+                    UI<CheckBox>("RestOnStop").IsChecked=rest;
+                    UI<CheckBox>("RememberStop").IsChecked=remember;
                     string message="Could not send the rest request. "+ex.GetBaseException().Message+" Try again or clear the rest mode option to disconnect.";
                     SetStopMessage(message,true);Show(message,true);
                     FocusStopPrompt();
@@ -166,6 +212,7 @@ namespace Cadrivect
                 }
             } finally {
                 requestingRest=false; EnableStopActions(true); UpdateTransport();
+                if(!Active && !preparing) EndTransportOperation();
             }
         }
     }

@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Automation;
@@ -18,6 +19,30 @@ namespace Cadrivect
         NetworkPlayer network;
         bool firstFrame;
         bool stopRequested;
+        long transportOperation;
+        CancellationTokenSource preparingConnection;
+
+        void BeginConnection(string title,string detail)
+        {
+            preparingConnection=new CancellationTokenSource();
+            transportOperation=BeginOperation(title,detail,StopPlayback);
+            Show(detail);
+        }
+        void TransportProgress(string detail)
+        {
+            UpdateOperation(transportOperation,detail);
+            Show(detail);
+        }
+        void EndTransportOperation()
+        {
+            long id=transportOperation;
+            transportOperation=0;
+            if(id!=0) EndOperation(id);
+        }
+        Task<Dictionary<string,object>> PrepareConnection(string script,params string[] args)
+        {
+            return PrepareComponent(preparingConnection.Token,script,args);
+        }
         bool Active { get {return rendering!=null || network!=null;} }
         void MoveDashboard()
         {
@@ -58,7 +83,7 @@ namespace Cadrivect
             var button=UI<Button>("OpenSource");
             var glyph=button.Content as TransportGlyph;
             if(glyph==null) button.Content=glyph=new TransportGlyph();
-            bool ending=stopping || requestingRest;
+            bool ending=stopping || requestingRest || pendingStop!=null;
             bool connecting=preparing || (rendering!=null && !firstFrame) || (network!=null && !network.HasVideo);
             string action=source=="Demo" ? "Play demo" : source=="Direct" ? "Connect to PS5" : "Connect to Sony Remote Play";
             if(ending) action="Stopping playback";
@@ -90,7 +115,10 @@ namespace Cadrivect
         }
         void UpdateOutput()
         {
-            if(rendering!=null) engine.ConfigureOutput(resolutionIds[UI<ComboBox>("RenderResolution").SelectedIndex],hdrIds[UI<ComboBox>("HdrOutput").SelectedIndex]);
+            if(rendering!=null && !restoringSwitch) {
+                engine.ConfigureOutput(resolutionIds[UI<ComboBox>("RenderResolution").SelectedIndex],hdrIds[UI<ComboBox>("HdrOutput").SelectedIndex]);
+                TrackSwitch(SwitchControl.Output,"Applying display settings");
+            }
         }
         void RefreshFrucOutputIntent()
         {
@@ -135,26 +163,43 @@ namespace Cadrivect
                 sourceAspect=width>0 && height>0 ? width/height : 0;
                 UpdateWipeInput();
                 meter.Update(snapshot);
+                TrackPresentedSwitch(snapshot);
                 if(!firstFrame && Field(snapshot,"presented")!="0" && Field(snapshot,"presented")!="") {
                     string label=source=="Demo"?"Offline demo":source=="Direct"?"PS5 connected":"Sony Remote Play";
-                    firstFrame=true; surface.HasPresentedVideo=true; UpdateTransport(); Show(label);
+                    firstFrame=true; surface.HasPresentedVideo=true; EndTransportOperation(); UpdateTransport(); Show(label);
                 }
             }
         }
         void StopPlayback()
         {
+            if(stopRequested && stopping) return;
+            if(transportOperation!=0) CommitOperation(transportOperation,firstFrame && !preparing ? "Disconnecting…" : "Cancelling connection…");
             if(!stopRequested && (preparing || Active) && !closing && !stopping)
                 Show(preparing || (rendering!=null && !firstFrame) ? "Cancelling connection…" : "Disconnecting…");
             stopRequested=true;
             ReleaseStreamAudio();
-            if(wakeCheck!=null) wakeCheck.Cancel();
+            if(preparingConnection!=null) preparingConnection.Cancel();
             stopping=preparing || Active;
-            if(network!=null) {var owned=network; network=null; owned.Dispose(); surface.Clear(); stopping=false; Show("Disconnected");}
+            if(network!=null) {EndNetwork(network); return;}
             if(rendering!=null) engine.Stop();
             UpdateTransport();
         }
+        async void EndNetwork(NetworkPlayer owned)
+        {
+            UpdateTransport();
+            try {await owned.StopAsync(); Show("Disconnected");}
+            catch(Exception error) {Show(error.GetBaseException().Message,true);}
+            finally {if(network==owned) {network=null; Finish();}}
+        }
         void Finish()
         {
+            EndSwitchTracking();
+            if(pendingStop!=null) {
+                if(closeAfterStop) {SaveSettings(); closing=true;}
+                pendingStop.Cancel();
+            }
+            if(!requestingRest) EndTransportOperation();
+            if(preparingConnection!=null) {preparingConnection.Dispose(); preparingConnection=null;}
             ReleaseStreamAudio();
             preparing=stopping=false;
             sourceAspect=0; UpdateWipeInput();
@@ -168,7 +213,12 @@ namespace Cadrivect
         async Task StartPlayback()
         {
             if(preparing || Active || requestingRest) return;
+            if(source=="Direct" && !(UI<ComboBox>("ConsolePicker").SelectedItem is DirectConsole)) {
+                OpenPair(); Show("Add your PS5 to play."); return;
+            }
             preparing=true; firstFrame=false; stopRequested=false; failure=""; UpdateTransport();
+            BeginConnection(source=="Direct"?"Connecting to PS5":source=="Demo"?"Starting offline demo":"Connecting to Sony Remote Play",
+                source=="Direct"?"Checking your paired PS5…":source=="Demo"?"Starting offline demo…":"Looking for the Remote Play window…");
             try {
                 if(engine==null) engine=new EngineSession();
                 var args=new List<string> {"--surface",surface.Handle.ToInt64().ToString(CultureInfo.InvariantCulture),
@@ -177,14 +227,13 @@ namespace Cadrivect
                     "--hdr",hdrIds[UI<ComboBox>("HdrOutput").SelectedIndex]};
                 if(source=="Direct") {
                     var console=UI<ComboBox>("ConsolePicker").SelectedItem as DirectConsole;
-                    if(console==null) {OpenPair(); Show("Add your PS5 to play."); return;}
                     string address=DirectConsole.Host(UI<TextBox>("ConsoleAddress").Text);
                     consoleAddresses[console.Mac]=address; SaveSettings();
                     address=await EnsureConsoleReady(console,address,false);
-                    if(closing || stopping) {Show("Disconnected"); return;}
-                    Show("Preparing your PS5 connection…");
-                    string runtime=Field(await Script("sources/Prepare-Decoder.ps1"),"runtime");
-                    if(closing || stopping) {Show("Disconnected"); return;}
+                    if(closing || stopping) throw new OperationCanceledException();
+                    TransportProgress("Preparing your PS5 connection…");
+                    string runtime=Field(await PrepareConnection("sources/Prepare-Decoder.ps1"),"runtime");
+                    if(closing || stopping) throw new OperationCanceledException();
                     if(string.IsNullOrEmpty(runtime)) throw new IOException("The video decoder runtime is unavailable.");
                     int fps=UI<ComboBox>("DirectFps").SelectedIndex==1?30:60;
                     var display=DisplayTarget.Select("source",surface.Handle); int hdr=UI<ComboBox>("HdrOutput").SelectedIndex;
@@ -194,7 +243,7 @@ namespace Cadrivect
                     sessionVideoKbps=DirectKbps();
                     directCore=console.Connect(pipe,address,codec,fps,sessionVideoKbps,DirectStreamHeight(),EffectiveStreamVolume);
                     playingMac=console.Mac; playingPipe=pipe; titleAddress=address;
-                    Show("Connecting to "+console.Name+"…");
+                    TransportProgress("Connecting to "+console.Name+"…");
                 } else if(source=="Demo") {
                     args.AddRange(new[]{"--demo","--target-fps","60"}); Show("Starting offline demo…");
                 } else {
@@ -203,7 +252,7 @@ namespace Cadrivect
                         AttachStreamAudio(sony.Id);
                         args.AddRange(new[]{"--hwnd",sony.MainWindowHandle.ToInt64().ToString(CultureInfo.InvariantCulture)});
                     }
-                    Show("Capturing your Sony Remote Play session…");
+                    TransportProgress("Waiting for video from Sony Remote Play…");
                 }
                 args.AddRange(new[]{"--frame-generation",meter.FrameGenerationProvider,"--dlss-quality",meter.DlssQuality,"--dlss-model",meter.DlssModelHint});
                 if(meter.WipeHorizontal) args.Add("--wipe-horizontal");
@@ -213,12 +262,11 @@ namespace Cadrivect
                 if(!stopping && directCore!=null && directCore.HasExited && directCore.ExitCode!=0) failure=CoreError(directCore.ExitCode);
                 if(!stopRequested && code!=0 && failure.Length==0) failure=engine.Error();
                 if(!stopRequested && !firstFrame && failure.Length==0) failure="The stream ended before its first picture. Check that the console is awake, then reconnect.";
-                Show(failure.Length>0?failure:"Disconnected",failure.Length>0);
-            } catch(OperationCanceledException) {Show("Disconnected");}
-            catch(Exception e) {Show(e.GetBaseException().Message,true);}
-            finally {EndPlayback();}
+            } catch(OperationCanceledException) { }
+            catch(Exception e) {failure=e.GetBaseException().Message;}
+            await EndPlayback();
         }
-        async void EndPlayback()
+        async Task EndPlayback()
         {
             stopping=true; UpdateTransport();
             try {
@@ -226,7 +274,11 @@ namespace Cadrivect
                     var owned=directCore; directCore=null;
                     await Task.Run(delegate {using(owned) {if(!owned.WaitForExit(1500)) StopOwned(owned);}});
                 }
-            } finally {rendering=null; Finish();}
+            } catch(Exception e) {failure=e.GetBaseException().Message;}
+            finally {
+                rendering=null; Finish();
+                Show(failure.Length>0?failure:"Disconnected",failure.Length>0);
+            }
         }
         async Task StartNetwork(bool pair)
         {
@@ -245,18 +297,27 @@ namespace Cadrivect
             int layout=UI<ComboBox>("NetworkAudio").SelectedIndex;
             if(!pair && layout>0) args.AddRange(new[]{"-AudioLayout",audioLayouts[layout]});
             if(!pair && UI<CheckBox>("ClientHdr").IsChecked==true) args.Add("-Hdr");
-            preparing=true; stopRequested=false; UpdateTransport(); Show("Preparing the network client…");
+            preparing=true; stopRequested=false; firstFrame=false; UpdateTransport();
+            BeginConnection(pair?"Pairing with a host":"Connecting to host","Preparing the network client…");
             try {
-                var plan=await Script("streaming/Relay.ps1",args.ToArray());
+                var plan=await PrepareConnection("streaming/Relay.ps1",args.ToArray());
                 if(stopping || closing) {Show("Disconnected"); return;}
                 NetworkPlayer owned=null;
-                owned=NetworkPlayer.Start(surface.Handle,plan,message=>{Show(message); UpdateTransport();},code=>{
+                owned=NetworkPlayer.Start(surface.Handle,plan,message=>{
+                    if(owned!=null && owned.HasVideo) {firstFrame=true; EndTransportOperation();}
+                    TransportProgress(message); UpdateTransport();
+                },code=>{
                     if(network!=owned) return;
                     network=null; Finish();
                     Show(owned.Error ?? (code==0?"Network session ended.":"Network session ended (code "+code+")."),code!=0);
                 });
                 network=owned;
+                if(pair) EndTransportOperation(); // The connection panel now displays the pairing PIN.
                 if(!pair && !Convert.ToBoolean(plan["muted"])) AttachStreamAudio(owned.ProcessId);
+            } catch(OperationCanceledException) {Show("Disconnected");}
+            catch {
+                if(network!=null) StopPlayback();
+                throw;
             } finally {preparing=false; if(network==null) Finish(); else UpdateTransport();}
         }
         static string CoreError(int code)

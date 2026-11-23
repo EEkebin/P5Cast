@@ -47,7 +47,7 @@ namespace Cadrivect
 
         void OpenSetup()
         {
-            if(SetupOpen || StopPromptOpen || closing) return;
+            if(SetupOpen || StopPromptOpen || OperationOpen || HistoryOpen || closing) return;
             if(busy || requestingRest) {Show("Finish the current action, then reopen Setup."); return;}
             if(fullscreen) ToggleFullscreen();
             var display=UI<ComboBox>("SetupDisplay");
@@ -75,10 +75,13 @@ namespace Cadrivect
 
         void SetModalBackgroundEnabled(bool enabled)
         {
+            bool dialog=!enabled || SetupOpen || StopPromptOpen;
+            bool status=OperationOpen || HistoryOpen;
+            enabled=!dialog && !status;
             if(!enabled) surface.EndPointerGesture();
-            // WPF cannot layer a visual over the embedded native playback child.
-            // Hide its HWND while the session and its layout remain active.
-            UI<Border>("VideoHost").Visibility=enabled?Visibility.Visible:Visibility.Hidden;
+            surface.ClipForModal(status);
+            UI<Border>("VideoHost").Visibility=dialog?Visibility.Hidden:Visibility.Visible;
+            UI<Border>("HeaderBar").IsEnabled=!status;
             foreach(string name in new[]{"Workspace","StatusFooter","PlayNav","HostNav","ClientNav","ShowStats"})
                 UI<FrameworkElement>(name).IsEnabled=enabled;
         }

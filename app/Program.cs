@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.21.0.0")]
+[assembly: AssemblyVersion("0.22.0.0")]
 
 namespace Cadrivect
 {
@@ -127,10 +127,16 @@ namespace Cadrivect
                 bool pictureChanged=mode!=selectedMode;
                 pictureSelectionRevision++; mode=selectedMode; factor=multiplier;
                 if(pictureChanged && !Active && !preparing) RefreshFrucOutputIntent();
-                if(rendering!=null) engine.Configure(mode,factor,meter.FrameGenerationProvider);
+                if(rendering!=null && !restoringSwitch) {
+                    engine.Configure(mode,factor,meter.FrameGenerationProvider);
+                    TrackSwitch(SwitchControl.Picture,pictureChanged ? "Applying "+PictureLabels.Modes[mode] : "Changing frame generation");
+                }
                 if(window.IsLoaded) SaveSettings();
             },delegate(string view){
-                if(rendering!=null) engine.SetComparison(view);
+                if(rendering!=null && !restoringSwitch) {
+                    engine.SetComparison(view);
+                    TrackSwitch(SwitchControl.View,"Changing comparison view");
+                }
                 UpdateWipeInput();
             });
             surface.WipePositionChanged+=delegate(double position){meter.WipePosition=position;};
@@ -161,12 +167,12 @@ namespace Cadrivect
             InitVolume(saved);
             meter.DlssModelHint=Field(saved,"dlssModelHint");
             meter.DlssModelChanged+=delegate(string model) {
-                if(rendering!=null) engine.SetDlssModel(model);
+                if(rendering!=null && !restoringSwitch) {engine.SetDlssModel(model); TrackSwitch(SwitchControl.Model,"Applying DLSS model");}
                 if(window.IsLoaded) SaveSettings();
             };
             meter.DlssQuality=Field(saved,"dlssQuality");
             meter.DlssQualityChanged+=delegate(string quality) {
-                if(rendering!=null) engine.SetDlssQuality(quality);
+                if(rendering!=null && !restoringSwitch) {engine.SetDlssQuality(quality); TrackSwitch(SwitchControl.Quality,"Applying DLSS quality");}
                 if(window.IsLoaded) SaveSettings();
             };
             meter.WipeHorizontal=Field(saved,"wipeHorizontal").Equals("True",StringComparison.OrdinalIgnoreCase);
@@ -195,19 +201,14 @@ namespace Cadrivect
             var rendererChoice=UI<ComboBox>("VideoRenderer");
             rendererChoice.ItemsSource=rendererIds.Select(RendererName).ToArray();
             rendererChoice.SelectedIndex=Math.Max(0,Array.IndexOf(rendererIds,Field(saved,"renderer")));
-            rendererChoice.SelectionChanged+=async delegate {
-                RefreshRendererOutput();
-                if(window.IsLoaded && !Active && !preparing) {
-                    int preferredMode=mode;
-                    if(mode>=3) {mode=0; meter.Reset(mode,factor);}
-                    meter.SetCapabilities(null);
-                    await ReadGpu(preferredMode);
-                }
+            rendererChoice.SelectionChanged+=async delegate(object sender,SelectionChangedEventArgs e) {
+                if(!restoringSwitch) await ChangeRenderer(rendererChoice,e);
             };
             RefreshRendererOutput();
             UI<ComboBox>("RenderResolution").ItemsSource=new[]{"Fit playback area","720p","1080p","1440p","4K"};
             UI<ComboBox>("RenderResolution").SelectedIndex=ParseIndex(saved,"resolution",0,resolutionIds.Length);
             UI<ComboBox>("HdrOutput").SelectionChanged+=delegate {
+                if(restoringSwitch) return;
                 if(!UsesSdrPresenter) preferredHdr=UI<ComboBox>("HdrOutput").SelectedIndex;
                 RefreshFrucOutputIntent();
                 UpdateOutput();
@@ -282,6 +283,13 @@ namespace Cadrivect
             window.PreviewKeyDown+=async delegate(object sender,KeyEventArgs e) {
                 bool chord=(Keyboard.Modifiers & (ModifierKeys.Control|ModifierKeys.Alt))==(ModifierKeys.Control|ModifierKeys.Alt);
                 var key=e.Key==Key.System?e.SystemKey:e.Key;
+                if(OperationOpen || HistoryOpen) {
+                    if(key==Key.Escape) {
+                        if(OperationOpen) CancelCurrentOperation(); else SetStatusHistory(false);
+                        e.Handled=true;
+                    } else if(key==Key.F11 || chord) e.Handled=true;
+                    return;
+                }
                 if(StopPromptOpen) {
                     if(key==Key.Escape) {CancelStopPrompt(); e.Handled=true;}
                     else if(key==Key.F11 || chord) e.Handled=true;
@@ -294,8 +302,7 @@ namespace Cadrivect
                     } else if(key==Key.F11 || chord) e.Handled=true;
                     return;
                 }
-                if(key==Key.Escape && !fullscreen && UI<Border>("StatusHistorySheet").IsVisible) SetStatusHistory(false);
-                else if(key==Key.F11 || (chord && key==Key.Enter)) ToggleFullscreen();
+                if(key==Key.F11 || (chord && key==Key.Enter)) ToggleFullscreen();
                 else if(chord && key==Key.O) ToggleStats();
                 else if(chord && key==Key.Q) {e.Handled=true; await UserStop(); return;}
                 else if(chord && key==Key.B && rendering!=null) meter.ToggleOriginal();
@@ -313,9 +320,9 @@ namespace Cadrivect
             });
             Bind("StartHost", () => {
                 var hostTarget=hostScreen.SelectedItem as DisplayTarget;
-                return hostTarget==null ? Relay("StartHost","-Address",SelectedIP()) : Relay("StartHost","-Address",SelectedIP(),"-DisplayDevice",hostTarget.DeviceName);
+                return hostTarget==null ? ChangeSharing(true,"-Address",SelectedIP()) : ChangeSharing(true,"-Address",SelectedIP(),"-DisplayDevice",hostTarget.DeviceName);
             });
-            Bind("StopHost", () => Relay("StopHost"));
+            Bind("StopHost", () => ChangeSharing(false));
             Bind("HostStatus", () => Relay("Status"));
             Bind("LoadPeers", LoadPeers);
             Bind("RemovePeer", async () => {
@@ -378,7 +385,7 @@ namespace Cadrivect
                 if(!closing) Show("Neural rendering setup failed. "+error.Message,true);
             } finally {meter.SetNeuralSetupBusy(false);}
         }
-        async Task ReadGpu(int requested)
+        async Task<bool> ReadGpu(int requested,System.Threading.CancellationToken cancellation=default(System.Threading.CancellationToken))
         {
             int generation=++gpuProbeGeneration, revision=pictureSelectionRevision;
             string restoreProvider=PlaybackMeter.SavedProvider(meter.FrameGenerationProvider,factor);
@@ -390,12 +397,13 @@ namespace Cadrivect
             try {
                 var info=new ProcessStartInfo(Path.Combine(Program.Root,"engine","bin","CadrivectPlayer.exe"),"--capabilities --renderer "+SelectedRenderer+" --report "+Quote(file))
                     {UseShellExecute=false,CreateNoWindow=true};
-                using(var proc=Process.Start(info)) {
-                    if(!await Task.Run(()=>proc.WaitForExit(40000))) {StopOwned(proc); return;}
-                    if(proc.ExitCode!=0 || !File.Exists(file)) return;
+                using(var proc=Process.Start(info))
+                using(cancellation.Register(()=>StopOwned(proc))) {
+                    if(!await Task.Run(()=>proc.WaitForExit(40000))) {StopOwned(proc); return false;}
+                    if(cancellation.IsCancellationRequested || proc.ExitCode!=0 || !File.Exists(file)) return false;
                 }
                 var gpu=json.Deserialize<Dictionary<string,object>>(File.ReadAllText(file));
-                if(closing || generation!=gpuProbeGeneration) return;
+                if(closing || generation!=gpuProbeGeneration) return false;
                 meter.SetCapabilities(gpu);
                 completed=true;
                 if(!Active && !preparing && revision==pictureSelectionRevision) {
@@ -411,6 +419,7 @@ namespace Cadrivect
                     meter.SetCapabilities(new Dictionary<string,object> {{"probeFailure","GPU support check could not finish for this graphics API."}});
                 try {File.Delete(file);} catch(IOException) {}
             }
+            return completed;
         }
 
         string SelectedIP() { return Convert.ToString(UI<ComboBox>("BindIP").SelectedItem); }

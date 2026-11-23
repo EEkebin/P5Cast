@@ -64,11 +64,11 @@ namespace Cadrivect
                 return Unconfirmed(original,wakeOnly);
             }
             var endpoint=peers[index];
-            status("Waking your PS5 from rest mode…");
             byte[] packet=Packet(keys);
             try {
                 cancel.ThrowIfCancellationRequested();
                 Send(endpoint,packet);
+                status("Wake request sent. Waiting for your PS5…");
                 var elapsed=Stopwatch.StartNew();
                 bool retried=false;
                 while(elapsed.ElapsedMilliseconds<waitMs) {

@@ -18,6 +18,11 @@ namespace Cadrivect.Engine
         public static bool Running { get { lock(Gate) return current!=null; } }
         public static string Error { get { lock(Gate) return error; } }
         public static string Snapshot() { lock(Gate) return snapshot; }
+        // The dashboard marks a group of setting changes after enqueueing them.
+        public static int MarkSettings()
+        {
+            lock(Gate) return current==null ? 0 : Interlocked.Increment(ref current.SettingsRevision);
+        }
         internal static void Publish(string value) { lock(Gate) snapshot=value; }
         internal static void Failed(string message) { lock(Gate) error=message; }
         public static int Run(string[] args)
@@ -153,6 +158,7 @@ namespace Cadrivect.Engine
         string resolution,hdr,generation;
         public readonly IntPtr Handle;
         public volatile bool Stopped;
+        public int SettingsRevision;
         public string PendingDlssQuality,PendingDlssModel;
         public volatile string ComparisonView="enhanced";
         public volatile float WipePosition=0.5f;

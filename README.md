@@ -43,7 +43,7 @@ Choose a **Playback display**, a **Resolution** cap or **Native**, and **Color o
 
 ## Reading Stats
 
-The semicircular dial uses one 0–240+ FPS scale. Blue shows input, amber shows generated frames, and mint shows presented frames. The white triangular marker shows the target. The numeric legend preserves measured values above 240 FPS. **Target** is the requested presentation rate, **Input** counts accepted source frames, **Presented** counts submissions to the Windows swap chain, and **Generated** counts interpolated frames included in Presented. Display scan-out can differ. A dash indicates that the relevant source has no measurement.
+**Output FPS** is the number of frames P5Cast sent to the screen each second. The large mint number and outer arc show that rate. **From PS5** (blue) shows incoming console frames. **Added** (amber) shows interpolated frames included in the output. For example, 60 incoming frames and 60 added frames can produce 120 output frames per second. The white tick marks the target on the shared 0–240+ scale. Display scan-out can differ. A dash indicates a missing measurement.
 
 For Direct, **Video bitrate** measures incoming compressed video. **Video decode** measures the local decoding step. **Receive → submit** starts at local packet receipt and ends at presentation submission. **Audio queue** measures buffered audio in the native player and excludes Windows mixer and device buffers. **Handshake RTT** is a round-trip estimate from session setup. Controller-to-screen latency requires an external measurement. Sony capture reports **Capture → submit** and leaves console network telemetry unavailable.
 

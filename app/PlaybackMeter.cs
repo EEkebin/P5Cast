@@ -17,14 +17,13 @@ namespace Cadrivect
         static readonly string[] ModeLabels={"Original","Sharpen","AMD FSR 1","RTX Video SR","DLSS","DLAA"};
         static readonly string[] Descriptions={"Display the source picture.","Sharpen edges and upscale fine detail.","AMD FidelityFX Super Resolution 1.",
             "NVIDIA RTX Video Super Resolution for SDR video.","Experimental DLSS with motion estimated from the stream.","Experimental DLAA at the source resolution."};
-        static readonly string[] RateLabels={"Target","Input","Presented","Generated"};
         static readonly Brush Ink=ColorBrush("#E9F3F1"), Muted=ColorBrush("#A5B9BB"), Line=ColorBrush("#304147"), Dark=ColorBrush("#141F24");
         static readonly Brush[] Series={ColorBrush("#ADBBC0"),ColorBrush("#8DBAF6"),ColorBrush("#8FE6D0"),ColorBrush("#EABC8E")};
         static readonly ControlTemplate ChipTemplate=MakeChipTemplate();
         readonly Action<int,int> change;
         readonly Action<bool> compare;
         readonly RadioButton[] modes=new RadioButton[6], factors=new RadioButton[4];
-        readonly TextBlock[] rateValues=new TextBlock[4];
+        readonly TextBlock sourceLabel,sourceValue,addedValue,targetValue;
         readonly Dictionary<string,TextBlock> values=new Dictionary<string,TextBlock>();
         readonly TextBlock submitLabel,notice;
         readonly ToggleButton compareButton;
@@ -42,25 +41,16 @@ namespace Cadrivect
             Foreground=Ink; FontFamily=new FontFamily("Segoe UI"); FontSize=12;
             var body=new StackPanel {Margin=new Thickness(16,14,16,14)};
             var title=Heading("Frame rate"); title.Margin=new Thickness(0);
-            var heading=new DockPanel(); var units=Label("FPS",Muted,10,FontWeights.SemiBold);
-            units.VerticalAlignment=VerticalAlignment.Center; DockPanel.SetDock(units,Dock.Right);
-            heading.Children.Add(units); heading.Children.Add(title); body.Children.Add(heading);
+            var heading=new DockPanel();
+            targetValue=Label("Target —",Muted,11,FontWeights.SemiBold);
+            targetValue.ToolTip="The white tick marks the requested output frame rate.";
+            DockPanel.SetDock(targetValue,Dock.Right);
+            heading.Children.Add(targetValue); heading.Children.Add(title); body.Children.Add(heading);
             dial.Height=133; dial.Margin=new Thickness(0,2,0,6); body.Children.Add(dial);
-            var legend=new UniformGrid {Rows=2,Columns=2}; body.Children.Add(legend);
-            for(int i=0;i<4;i++)
-            {
-                var cell=new Grid {Margin=new Thickness(0,1,7,2)};
-                cell.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(12)});
-                cell.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(1,GridUnitType.Star)});
-                cell.ColumnDefinitions.Add(new ColumnDefinition {Width=GridLength.Auto});
-                if(i==0) cell.Children.Add(new Polygon {Points=new PointCollection {new Point(0,0),new Point(8,0),new Point(4,6)},
-                    Fill=Ink,VerticalAlignment=VerticalAlignment.Center});
-                else cell.Children.Add(new Line {X1=0,X2=8,Y1=0,Y2=0,Stroke=Series[i],StrokeThickness=3,StrokeStartLineCap=PenLineCap.Round,
-                    StrokeEndLineCap=PenLineCap.Round,HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Center});
-                var label=Label(RateLabels[i],Muted,11,FontWeights.Normal); Grid.SetColumn(label,1); cell.Children.Add(label);
-                var val=Label("—",Ink,12,FontWeights.SemiBold); Grid.SetColumn(val,2); cell.Children.Add(val); rateValues[i]=val;
-                legend.Children.Add(cell);
-            }
+            var legend=new UniformGrid {Rows=1,Columns=2}; body.Children.Add(legend);
+            sourceLabel=Label("Source",Muted,11,FontWeights.Normal);
+            sourceValue=RateReadout(legend,sourceLabel,Series[1],"Frames received each second from the selected source.");
+            addedValue=RateReadout(legend,Label("Added",Muted,11,FontWeights.Normal),Series[3],"Extra frames P5Cast created and sent to the screen each second.");
             Separator(body);
             body.Children.Add(Heading("Stream"));
             AddMetric(body,"size","Input → output","Incoming frame size and presentation surface size in pixels.");
@@ -109,6 +99,21 @@ namespace Cadrivect
             notice.Visibility=Visibility.Collapsed; body.Children.Add(notice);
             Content=new ScrollViewer {Content=body,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};
             Reset(0,1);
+        }
+        public void SetSource(string source)
+        {
+            sourceLabel.Text=source=="Direct"?"From PS5":source=="Sony"?"From Sony app":"From demo";
+        }
+        static TextBlock RateReadout(Panel legend,TextBlock caption,Brush color,string detail)
+        {
+            var cell=new DockPanel {Margin=new Thickness(0,1,9,2),ToolTip=detail};
+            var chip=new Line {X1=0,X2=8,Y1=0,Y2=0,Stroke=color,StrokeThickness=3,
+                StrokeStartLineCap=PenLineCap.Round,StrokeEndLineCap=PenLineCap.Round,
+                Margin=new Thickness(0,0,5,0),VerticalAlignment=VerticalAlignment.Center};
+            var value=Label("—",Ink,12,FontWeights.SemiBold);
+            DockPanel.SetDock(chip,Dock.Left); DockPanel.SetDock(value,Dock.Right);
+            cell.Children.Add(chip); cell.Children.Add(value); cell.Children.Add(caption); legend.Children.Add(cell);
+            return value;
         }
         static SolidColorBrush ColorBrush(string color)
         {
@@ -178,7 +183,7 @@ namespace Cadrivect
             try {modes[selectedMode].IsChecked=true; factors[selectedFactor-1].IsChecked=true; compareButton.IsChecked=false;}
             finally {syncing=false;}
             hdr=false; lastSample=-1; pendingSettings=pendingCompare=DateTime.MinValue; dial.SetRates(double.NaN,double.NaN,double.NaN,double.NaN);
-            foreach(var label in rateValues) label.Text="—";
+            sourceValue.Text=addedValue.Text="—"; targetValue.Text="Target —";
             foreach(var label in values.Values) label.Text="—";
             notice.Visibility=Visibility.Collapsed; RefreshAvailability();
         }
@@ -236,7 +241,8 @@ namespace Cadrivect
             double[] rates={Number(snapshot,"targetPresentedFps"),Number(snapshot,"sourceFps"),Number(snapshot,"submittedFps"),Number(snapshot,"generatedFps")};
             // The engine can publish telemetry while waiting for its first picture.
             if(Number(snapshot,"captured")==0) for(int i=0;i<rates.Length;i++) rates[i]=double.NaN;
-            for(int i=0;i<rates.Length;i++) rateValues[i].Text=Metric(rates[i],"","0.#");
+            targetValue.Text="Target "+Metric(rates[0],"","0.#");
+            sourceValue.Text=Metric(rates[1],"","0.#"); addedValue.Text=Metric(rates[3],"","0.#");
             dial.SetRates(rates[0],rates[1],rates[2],rates[3]);
             string input=Dimensions(snapshot,"input"),output=Dimensions(snapshot,"output");
             values["size"].Text=input=="—" && output=="—" ? "—" : input+" → "+output;
@@ -299,7 +305,7 @@ namespace Cadrivect
             public void SetRates(double aim,double input,double submitted,double synthetic)
             {
                 target=aim; source=input; presented=submitted; generated=synthetic;
-                string detail="Input "+Describe(source)+". Generated "+Describe(generated)+". Presented "+Describe(presented)+". Target "+Describe(target)+".";
+                string detail="Output "+Describe(presented)+". Source "+Describe(source)+". Added "+Describe(generated)+". Target "+Describe(target)+".";
                 AutomationProperties.SetHelpText(this,detail); ToolTip=detail; InvalidateVisual();
             }
             // All tracks use the same half-circle and zero-to-240 scale, including at 30 fps.
@@ -363,8 +369,8 @@ namespace Cadrivect
                     }
                     dc.DrawGeometry(Ink,new Pen(Dark,1),marker);
                 }
-                CenterText(dc,Metric(presented,"","0"),new Point(hub.X,hub.Y-24),29,NumberFace,Ink);
-                CenterText(dc,"Presented FPS",new Point(hub.X,hub.Y-2),10.5,LabelFace,Muted);
+                CenterText(dc,Metric(presented,"","0"),new Point(hub.X,hub.Y-24),29,NumberFace,Series[2]);
+                CenterText(dc,"Output FPS",new Point(hub.X,hub.Y-2),10.5,LabelFace,Muted);
             }
         }
     }

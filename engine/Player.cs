@@ -293,6 +293,8 @@ internal static class Player
                         bool changeRequested=false,compare=false;
                         float initialPosition=host!=null ? host.WipePosition : EmbeddedPlayback.ParseWipePosition(Option(args,"--wipe-position","0.5"));
                         float wipePosition=initialPosition;
+                        bool initialHorizontal=Array.IndexOf(args,"--wipe-horizontal")>=0;
+                        bool wipeHorizontal=host!=null ? host.WipeHorizontal : initialHorizontal;
                         string previousView="enhanced",comparisonView="enhanced";
                         Action<string,int> change=delegate(string picture,int factor) {
                             if(picture!=null) requestedMode=picture;
@@ -323,9 +325,11 @@ internal static class Player
                                 compare=comparisonView=="original";
                                 double now=clock.Elapsed.TotalMilliseconds;
                                 float requestedPosition=host!=null ? host.WipePosition : initialPosition;
-                                bool redraw=comparisonView=="wipe" && requestedPosition!=wipePosition;
+                                bool horizontal=host!=null ? host.WipeHorizontal : initialHorizontal;
+                                bool redraw=comparisonView=="wipe" && (requestedPosition!=wipePosition || horizontal!=wipeHorizontal);
+                                wipeHorizontal=horizontal;
                                 wipePosition=requestedPosition;
-                                if(redraw || previousView!=comparisonView) renderer.SetWipe(comparisonView=="wipe",wipePosition);
+                                if(redraw || previousView!=comparisonView) renderer.SetWipe(comparisonView=="wipe",wipePosition,wipeHorizontal);
                                 string newSize,newHdr;
                                 if(host!=null && host.TakeOutput(out newSize,out newHdr)) {
                                     try {
@@ -365,7 +369,7 @@ internal static class Player
                                         (renderer.Presented-snapshotPresented)*perSecond,(renderer.Generated-snapshotGenerated)*perSecond)
                                         +",\"mode\":"+JsonString(mode)+",\"multiplier\":"+multiplier+",\"effectivePictureMode\":"+JsonString(renderer.EffectivePictureMode)
                                         +",\"effectNotice\":"+JsonString(settingsNotice ?? (string.IsNullOrEmpty(renderer.EffectNotice) ? renderer.OutputNotice : renderer.EffectNotice))+",\"compare\":"+(compare ? "true":"false")
-                                        +",\"wipePosition\":"+wipePosition.ToString("R",CultureInfo.InvariantCulture)+",\"comparisonView\":"+JsonString(comparisonView)+",\"sampleId\":"+(++sampleId)+",\"elapsedMs\":"+Number(now)+",\"display\":"+JsonString(renderer.DisplayName)
+                                        +",\"wipeHorizontal\":"+(wipeHorizontal ? "true" : "false")+",\"wipePosition\":"+wipePosition.ToString("R",CultureInfo.InvariantCulture)+",\"comparisonView\":"+JsonString(comparisonView)+",\"sampleId\":"+(++sampleId)+",\"elapsedMs\":"+Number(now)+",\"display\":"+JsonString(renderer.DisplayName)
                                         +",\"hdrEnabled\":"+(renderer.HdrEnabled ? "true":"false")+",\"outputWidth\":"+renderer.OutputSize.Width+",\"outputHeight\":"+renderer.OutputSize.Height
                                         +",\"resolution\":"+JsonString(resolution)+",\"hdrMode\":"+JsonString(hdr)
                                         +",\"renderWidth\":"+renderer.RenderSize.Width+",\"renderHeight\":"+renderer.RenderSize.Height
@@ -453,7 +457,7 @@ internal static class Player
                             +",\"embedded\":"+(host!=null ? "true":"false")+",\"fullscreen\":"+(window!=null && window.Fullscreen ? "true":"false")+",\"hdrEnabled\":"+(renderer.HdrEnabled ? "true":"false")
                             +",\"outputWidth\":"+renderer.OutputSize.Width+",\"outputHeight\":"+renderer.OutputSize.Height
                             +",\"renderWidth\":"+renderer.RenderSize.Width+",\"renderHeight\":"+renderer.RenderSize.Height
-                            +",\"wipePosition\":"+wipePosition.ToString("R",CultureInfo.InvariantCulture)+",\"comparisonView\":"+JsonString(comparisonView)+",\"outputStatus\":"+JsonString(renderer.OutputStatus)+",\"effectivePictureMode\":"+JsonString(renderer.EffectivePictureMode)
+                            +",\"wipeHorizontal\":"+(wipeHorizontal ? "true" : "false")+",\"wipePosition\":"+wipePosition.ToString("R",CultureInfo.InvariantCulture)+",\"comparisonView\":"+JsonString(comparisonView)+",\"outputStatus\":"+JsonString(renderer.OutputStatus)+",\"effectivePictureMode\":"+JsonString(renderer.EffectivePictureMode)
                             +",\"effectNotice\":"+JsonString(renderer.EffectNotice)
                             +",\"medianPcSubmitMs\":"+Number(liveFrameAges.Count==0 ? -1:liveFrameAges[median])
                             +Telemetry(renderer,decoded,targetFps,compare ? 1:multiplier,lastRealAge,demo)+"}";

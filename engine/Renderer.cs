@@ -37,7 +37,7 @@ internal sealed partial class Renderer : IDisposable
 {
     [StructLayout(LayoutKind.Sequential)] struct FrameInfo
     {
-        public float SourceX,SourceY,OutputX,OutputY,Phase,OriginX,OriginY,Pad,TargetX,TargetY,Pad1,Pad2;
+        public float SourceX,SourceY,OutputX,OutputY,Phase,OriginX,OriginY,WipeHorizontal,TargetX,TargetY,Pad1,Pad2;
     }
     public Device Device { get; private set; }
     readonly DeviceContext context;
@@ -50,6 +50,7 @@ internal sealed partial class Renderer : IDisposable
     readonly UnorderedAccessView changeView;
     readonly SamplerState sampler;
     readonly RasterizerState scissor;
+    readonly BlendState handleBlend;
     readonly VertexShader vertex;
     readonly Dictionary<string,PixelShader> shaders=new Dictionary<string,PixelShader>();
     readonly ShaderResourceView[] unbind=new ShaderResourceView[3];
@@ -58,7 +59,7 @@ internal sealed partial class Renderer : IDisposable
     GpuImage curr,prev,incoming,motion,mixed,scaled;
     Size srcSize,outSize,screenSize;
     Rectangle viewport,originalViewport;
-    bool sideBySide,wipe;
+    bool sideBySide,wipe,wipeHorizontal;
     float wipePosition=.5f;
     public Rectangle PictureViewport { get; private set; }
     readonly IntPtr hwnd;
@@ -128,8 +129,17 @@ internal sealed partial class Renderer : IDisposable
             var clipped=RasterizerStateDescription.Default();
             clipped.IsScissorEnabled=true;
             scissor=new RasterizerState(Device,clipped);
+            var blend=BlendStateDescription.Default();
+            var targetBlend=blend.RenderTarget[0];
+            targetBlend.IsBlendEnabled=true;
+            targetBlend.SourceBlend=BlendOption.SourceAlpha;
+            targetBlend.DestinationBlend=BlendOption.InverseSourceAlpha;
+            targetBlend.SourceAlphaBlend=BlendOption.One;
+            targetBlend.DestinationAlphaBlend=BlendOption.InverseSourceAlpha;
+            blend.RenderTarget[0]=targetBlend;
+            handleBlend=new BlendState(Device,blend);
             vertex=new VertexShader(Device,Shader("Fullscreen"));
-            foreach(string name in new [] {"Original","Sharp","Easu","Rcas","Motion","Interpolate","OpticalField","NgxVectors","PreserveNgxStrokes","WipeDivider"})
+            foreach(string name in new [] {"Original","Sharp","Easu","Rcas","Motion","Interpolate","OpticalField","NgxVectors","PreserveNgxStrokes","WipeDivider","WipeHandle"})
                 shaders.Add(name,new PixelShader(Device,Shader(name)));
             InitHdrShaders();
             context.InputAssembler.PrimitiveTopology=PrimitiveTopology.TriangleList;
@@ -260,8 +270,9 @@ internal sealed partial class Renderer : IDisposable
         sideBySide=enabled;
         SetViewport();
     }
-    public void SetWipe(bool enabled,float position)
+    public void SetWipe(bool enabled,float position,bool horizontal=false)
     {
+        wipeHorizontal=horizontal;
         if(float.IsNaN(position) || float.IsInfinity(position)) throw new ArgumentOutOfRangeException("position");
         wipePosition=Math.Max(0,Math.Min(1,position));
         if(wipe==enabled) return;
@@ -345,7 +356,7 @@ internal sealed partial class Renderer : IDisposable
               ShaderResourceView previous=null, ShaderResourceView flow=null,Rectangle? clip=null,RenderTargetView auxiliary=null)
     {
         var info=new FrameInfo { SourceX=srcSize.Width,SourceY=srcSize.Height,OutputX=outSize.Width,OutputY=outSize.Height,
-                                 Phase=phase,OriginX=area.X,OriginY=area.Y,TargetX=area.Width,TargetY=area.Height };
+                                 Phase=phase,WipeHorizontal=wipeHorizontal ? 1 : 0,OriginX=area.X,OriginY=area.Y,TargetX=area.Width,TargetY=area.Height };
         context.UpdateSubresource(ref info,constants);
         if(auxiliary==null) context.OutputMerger.SetRenderTargets(target);
         else context.OutputMerger.SetTargets(target,auxiliary);
@@ -480,14 +491,14 @@ internal sealed partial class Renderer : IDisposable
     {
         if(wipe)
         {
-            int width=(int)Math.Round((double)wipePosition*viewport.Width);
-            // Both layers retain their full viewport and processing raster. Clip only the
-            // final original draw, so the divider never shifts or rescales texture samples.
-            if(width>0) DrawOriginal(viewport,holdOriginal,new Rectangle(viewport.Left,viewport.Top,width,viewport.Height));
-            if(width>0 && width<viewport.Width) {
-                var line=new Rectangle(viewport.Left+width-1,viewport.Top,2,viewport.Height);
-                Draw("WipeDivider",display,line,null,HdrEnabled ? .58f : .92f);
-            }
+            var layout=new WipeLayout(viewport,wipeHorizontal,wipePosition);
+            // Keep both image layers at full scale and clip only the original layer.
+            if(layout.Original.Width>0 && layout.Original.Height>0) DrawOriginal(viewport,holdOriginal,layout.Original);
+            float hdrUi=HdrEnabled ? 1 : 0;
+            Draw("WipeDivider",display,layout.Rail,null,hdrUi);
+            context.OutputMerger.SetBlendState(handleBlend);
+            Draw("WipeHandle",display,layout.Handle,null,hdrUi);
+            context.OutputMerger.SetBlendState(null);
         }
         if(VerifyNextOutput)
         {
@@ -564,7 +575,7 @@ internal sealed partial class Renderer : IDisposable
         if(backBuffer!=null) backBuffer.Dispose();
         if(raster!=null) raster.Dispose();
         foreach(var shader in shaders.Values) shader.Dispose();
-        foreach(IDisposable item in new IDisposable[]{changeView,changeFlag,changeReadback,changed,vertex,sampler,scissor,
+        foreach(IDisposable item in new IDisposable[]{changeView,changeFlag,changeReadback,changed,vertex,sampler,scissor,handleBlend,
                 constants,swap,presentation,context,Device})
             if(item!=null) item.Dispose();
     }

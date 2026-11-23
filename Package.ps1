@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$Version = '0.11.0',[string]$BuildDir=$PSScriptRoot)
+param([string]$Version = '0.12.0',[string]$BuildDir=$PSScriptRoot)
 $ErrorActionPreference = 'Stop'
 if ($Version -notmatch '^\d+\.\d+\.\d+(-[a-z0-9.-]+)?$') { throw 'Invalid version.' }
 $dist = Join-Path $PSScriptRoot 'dist'

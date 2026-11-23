@@ -192,6 +192,10 @@ internal static partial class WindowChromeProbe
         sharp.IsChecked=true;
         string view=Environment.GetEnvironmentVariable("P5CAST_PROBE_WIPE_INPUT")=="1" ? "ViewWipe" : "ViewSideBySide";
         ViewButton(view).IsChecked=true;
+        if(view=="ViewWipe") {
+            var orientation=(ToggleButton)FindVisual(meter,"ToggleButton",e=>AutomationProperties.GetAutomationId(e)=="WipeHorizontal");
+            orientation.IsChecked=true;
+        }
         var dial=FindVisual(meter,"FrameRateDial");
         await Until(delegate {
             var match=System.Text.RegularExpressions.Regex.Match(AutomationProperties.GetHelpText(dial),@"Generated (\d+)");

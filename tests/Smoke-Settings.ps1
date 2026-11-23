@@ -97,10 +97,15 @@ try {
     }
     (Widget VideoRenderer).SelectedItem='OpenGL'
     Require ((Widget HdrOutput).SelectedItem -eq 'SDR' -and !(Widget HdrOutput).IsEnabled) 'OpenGL requests SDR'
+    $orientation=$meter.GetType().GetProperty('WipeHorizontal',[Reflection.BindingFlags]'Instance,NonPublic')
+    Require (!$orientation.GetValue($meter)) 'Existing preferences open with a vertical divider'
+    $orientation.SetValue($meter,$true)
     Call SaveSettings
     $secondFile=[IO.File]::OpenRead((Join-Path $AppRoot 'app\Main.xaml'))
     try {$second=[Windows.Markup.XamlReader]::Load($secondFile)} finally {$secondFile.Dispose()}
-    $null=[Activator]::CreateInstance($type,[Reflection.BindingFlags]'Instance,NonPublic',$null,@($second,$false),$null)
+    $reopened=[Activator]::CreateInstance($type,[Reflection.BindingFlags]'Instance,NonPublic',$null,@($second,$false),$null)
+    $restoredMeter=$type.GetField('meter','Instance,NonPublic').GetValue($reopened)
+    Require ($orientation.GetValue($restoredMeter)) 'Horizontal divider survives reopening'
     Require (!$second.FindName('SharePresence').IsChecked -and !$second.FindName('ShareProject').IsChecked) 'Discord opt-outs survive reopening'
     Require ($second.FindName('VideoRenderer').SelectedItem -eq 'OpenGL' -and !$second.FindName('HdrOutput').IsEnabled) 'Renderer choice survives reopening'
     $second.FindName('VideoRenderer').SelectedItem='Vulkan'

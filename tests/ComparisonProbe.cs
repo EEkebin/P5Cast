@@ -71,27 +71,54 @@ internal static partial class EmbeddedProbe
         return changed;
     }
 
-    static void CheckWipePixels(Bitmap actual,Bitmap original,Bitmap enhanced,Rectangle frame,float position) {
+    static bool Mint(Color c) {
+        return c.R>=65 && c.G>=140 && c.B>=115 && c.G-c.R>30 && c.G>=c.B;
+    }
+
+    static int CheckWipePixels(Bitmap actual,Bitmap original,Bitmap enhanced,Rectangle frame,bool horizontal,float position) {
         Check(original.Size==enhanced.Size && actual.Size==original.Size,"Wipe changed the output size.");
-        bool interior=position>0 && position<1;
-        int cut=frame.Left+(int)Math.Round(position*frame.Width);
+        int start=horizontal ? frame.Top : frame.Left;
+        int length=horizontal ? frame.Height : frame.Width;
+        int alongStart=horizontal ? frame.Left : frame.Top;
+        int alongLength=horizontal ? frame.Width : frame.Height;
+        Func<int,int,Color> pixel=(axis,along)=>horizontal ? actual.GetPixel(along,axis) : actual.GetPixel(axis,along);
+        string label=(horizontal ? "horizontal" : "vertical")+" wipe at "+position;
+        // The lossless fixture is grayscale. Locate the actual mint spine in a cross section away from the grip.
+        int first=-1,last=-1;
+        for(int i=start;i<start+length;i++) {
+            if(!Mint(pixel(i,alongStart+alongLength/4))) continue;
+            if(first<0) first=i;
+            last=i;
+        }
+        Check(first>=0 && last-first+1>=2 && last-first+1<=12,"Missing or incorrectly sized mint rail for "+label);
+        int cut=(first+last+1)/2, middle=alongStart+alongLength/2;
+        double scale=Math.Max(1,Math.Min(2.5,Math.Min(frame.Width,frame.Height)/900.0));
+        int gripRadius=(int)Math.Ceiling(23*scale), gripHeight=(int)Math.Ceiling(14*scale);
+        Check(cut-gripRadius>=start && cut+gripRadius<start+length,"The grip extends outside the picture for "+label);
+        // Look for both chevrons and the short central stripe inside the dark grip.
+        for(int sign=-1;sign<=1;sign++) {
+            bool found=false;
+            int from=sign==0 ? -1 : (int)Math.Ceiling(4*scale);
+            int to=sign==0 ? 1 : (int)Math.Floor(16*scale);
+            for(int d=from;d<=to;d++) for(int dy=-1;dy<=1;dy++)
+                if(Mint(pixel(cut+(sign==0?d:sign*d),middle+dy))) found=true;
+            Check(found,"Missing "+(sign<0?"first chevron":sign>0?"second chevron":"center bar")+" for "+label);
+        }
+        int gap=(int)Math.Round(5*scale);
+        Check(pixel(cut-gap,middle).G<110 && pixel(cut+gap,middle).G<110,
+              "The grip face does not separate the two arrows from the center stripe for "+label);
         int wrong=0,samples=0;
-        // Use screen coordinates so the test also checks that the letterbox and pillarbox stay put.
         for(int y=0;y<actual.Height;y+=3) for(int x=0;x<actual.Width;x+=3) {
-            if(interior && y>=frame.Top && y<frame.Bottom && Math.Abs(x-cut)<=1) continue;
-            var reference=x<cut ? original : enhanced;
+            int axis=horizontal ? y : x, along=horizontal ? x : y;
+            if(frame.Contains(x,y) &&
+               ((axis>=first-2 && axis<=last+2) ||
+                (Math.Abs(axis-cut)<=gripRadius && Math.Abs(along-middle)<=gripHeight))) continue;
+            var reference=axis<cut ? original : enhanced;
             if(Math.Abs(reference.GetPixel(x,y).R-actual.GetPixel(x,y).R)>2) wrong++;
             samples++;
         }
-        Check(wrong==0,wrong+" of "+samples+" physical pixel samples differed from their full-view references at divider "+position+".");
-        if(interior) {
-            bool visible=false;
-            for(int x=cut-1;x<=cut;x++) {
-                int y=frame.Top+6;
-                if(Math.Abs(actual.GetPixel(x,y).R-original.GetPixel(x,y).R)>8) visible=true;
-            }
-            Check(visible,"Missing visible divider at the requested picture position "+position);
-        }
+        Check(wrong==0,wrong+" of "+samples+" physical pixels sampled differed from their full-view references for "+label);
+        return cut-start;
     }
 
     static Dictionary<string,object> SetWipePosition(Type api,float position) {
@@ -109,17 +136,27 @@ internal static partial class EmbeddedProbe
             using(var enhanced=CaptureComparison(window)) {
                 Check(ChangedPixels(original,enhanced,frame)>20,"Original and enhanced reference frames did not distinguish sharpening.");
                 setView("wipe");
-                foreach(float position in positions) {
-                    var data=SetWipePosition(api,position);
-                    var reported=new Rectangle(Convert.ToInt32(data["pictureX"]),Convert.ToInt32(data["pictureY"]),
-                        Convert.ToInt32(data["pictureWidth"]),Convert.ToInt32(data["pictureHeight"]));
-                    Check(reported==frame,"The divider hit bounds differ from the physical picture.");
-                    Check(Convert.ToInt32(data["renderWidth"])==Convert.ToInt32(single["renderWidth"]) &&
-                          Convert.ToInt32(data["renderHeight"])==Convert.ToInt32(single["renderHeight"]),
-                          "Wipe changed the enhancement resolution.");
-                    using(var wipe=CaptureComparison(window)) CheckWipePixels(wipe,original,enhanced,frame,position);
+                foreach(bool horizontal in new[]{false,true}) {
+                    api.GetMethod("SetWipeHorizontal").Invoke(null,new object[]{horizontal});
+                    WaitSnapshot(api,s=>Equals(s["wipeHorizontal"],horizontal),"wipe orientation");
+                    var cuts=new Dictionary<float,int>();
+                    foreach(float position in positions) {
+                        var data=SetWipePosition(api,position);
+                        var reported=new Rectangle(Convert.ToInt32(data["pictureX"]),Convert.ToInt32(data["pictureY"]),
+                            Convert.ToInt32(data["pictureWidth"]),Convert.ToInt32(data["pictureHeight"]));
+                        Check(reported==frame,"The divider hit bounds differ from the physical picture.");
+                        Check(Convert.ToInt32(data["renderWidth"])==Convert.ToInt32(single["renderWidth"]) &&
+                              Convert.ToInt32(data["renderHeight"])==Convert.ToInt32(single["renderHeight"]),
+                              "Wipe changed the enhancement resolution.");
+                        using(var wipe=CaptureComparison(window)) cuts[position]=CheckWipePixels(wipe,original,enhanced,frame,horizontal,position);
+                    }
+                    int length=horizontal ? frame.Height : frame.Width;
+                    Check(cuts[0]<length/8 && cuts[1]>length-length/8 && Math.Abs(cuts[0]-(length-cuts[1]))<=2,
+                          "Endpoint positions do not give symmetric access to the full picture.");
+                    foreach(var row in cuts)
+                        Check(Math.Abs(row.Value-(cuts[0]+row.Key*(cuts[1]-cuts[0])))<=2,"Rendered divider missed its selected travel position.");
                 }
-                Console.WriteLine("Wipe matched the original/enhanced full-size references in "+frame.Width+"x"+frame.Height+
+                Console.WriteLine("Both wipe orientations retained the mint rail and grip at both ends and matched the original/enhanced full-size references in "+frame.Width+"x"+frame.Height+
                     " picture pixels within a "+enhanced.Width+"x"+enhanced.Height+" surface.");
             }
         }
@@ -193,9 +230,14 @@ internal static partial class EmbeddedProbe
                 api.GetMethod("ConfigureOutput").Invoke(null,new object[]{"720",null});
                 var capped=WaitSnapshot(api,s=>(string)s["resolution"]=="720","capped processing raster");
                 Check(Convert.ToInt32(capped["renderWidth"])<Convert.ToInt32(capped["outputWidth"]),"Fixture did not exercise processing below output resolution.");
-                CheckFullSizeWipe(window,api,setView,waitView,new[]{.35f,.65f});
+                CheckFullSizeWipe(window,api,setView,waitView,new[]{0f,.35f,.65f,1f});
             } else {
-                setView("wipe"); SetWipePosition(api,.25f); SetWipePosition(api,.75f);
+                setView("wipe");
+                foreach(bool horizontal in new[]{false,true}) {
+                    api.GetMethod("SetWipeHorizontal").Invoke(null,new object[]{horizontal});
+                    WaitSnapshot(api,s=>Equals(s["wipeHorizontal"],horizontal),"wipe orientation");
+                    SetWipePosition(api,0); SetWipePosition(api,1);
+                }
             }
             setView("side-by-side"); var moving=waitView("side-by-side","sharp");
             int generated=Convert.ToInt32(moving["generated"]); pause.Reset();

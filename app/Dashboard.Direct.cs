@@ -96,7 +96,7 @@ namespace Cadrivect
         double sourceAspect;
         void UpdateWipeInput()
         {
-            surface.ConfigureWipe(rendering!=null && meter.ComparisonView=="wipe",meter.WipePosition,sourceAspect);
+            surface.ConfigureWipe(rendering!=null && meter.ComparisonView=="wipe",meter.WipePosition,sourceAspect,meter.WipeHorizontal);
         }
         void Tick()
         {
@@ -114,7 +114,10 @@ namespace Cadrivect
                 // A selection made while the engine worker starts may precede its session.
                 if(!firstFrame && Field(snapshot,"comparisonView")!=meter.ComparisonView)
                     engine.SetComparison(meter.ComparisonView);
-                if(!firstFrame && meter.ComparisonView=="wipe") engine.SetWipePosition((float)meter.WipePosition);
+                if(!firstFrame && meter.ComparisonView=="wipe") {
+                    engine.SetWipeHorizontal(meter.WipeHorizontal);
+                    engine.SetWipePosition((float)meter.WipePosition);
+                }
                 double width=PlaybackMeter.Number(snapshot,"inputWidth"),height=PlaybackMeter.Number(snapshot,"inputHeight");
                 sourceAspect=width>0 && height>0 ? width/height : 0;
                 UpdateWipeInput();
@@ -184,6 +187,7 @@ namespace Cadrivect
                     }
                     Show("Capturing your Sony Remote Play session…");
                 }
+                if(meter.WipeHorizontal) args.Add("--wipe-horizontal");
                 args.AddRange(new[]{"--comparison",meter.ComparisonView,"--wipe-position",meter.WipePosition.ToString("R",CultureInfo.InvariantCulture)});
                 rendering=engine.Start(args.ToArray()); preparing=false; UpdateTransport();
                 int code=await rendering;

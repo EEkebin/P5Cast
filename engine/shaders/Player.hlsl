@@ -3,7 +3,7 @@ cbuffer Frame : register(b0) {
     float2 outputSize;
     float phase;
     float2 viewportOrigin;
-    float padding;
+    float wipeHorizontal;
     float2 targetSize;
     float2 reserved;
 };
@@ -34,12 +34,6 @@ float3 SamplePicture(Vertex v) {
 }
 float4 Original(Vertex v) : SV_Target {
     return float4(SamplePicture(v),1);
-}
-// Two neighboring neutral columns keep the divider visible over both black and white.
-// phase carries the white level in the active output transfer function (SDR or PQ).
-float4 WipeDivider(Vertex v) : SV_Target {
-    float level = v.pos.x - viewportOrigin.x < 1.0 ? 0.06 : phase;
-    return float4(level, level, level, 1);
 }
 RWStructuredBuffer<uint> difference : register(u0);
 groupshared uint tileChanged;

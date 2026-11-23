@@ -36,6 +36,7 @@ namespace Cadrivect.Engine
                     session=new HostedSurface(new IntPtr(long.Parse(args[index+1],CultureInfo.InvariantCulture)));
                     int view=Array.IndexOf(args,"--comparison");
                     if(view>=0) session.ComparisonView=ValidateComparison(view+1<args.Length ? args[view+1] : null);
+                    session.WipeHorizontal=Array.IndexOf(args,"--wipe-horizontal")>=0;
                     int split=Array.IndexOf(args,"--wipe-position");
                     if(split>=0) session.WipePosition=ParseWipePosition(split+1<args.Length ? args[split+1] : null);
                     current=session;
@@ -82,6 +83,10 @@ namespace Cadrivect.Engine
             if(!(position>=0 && position<=1)) throw new ArgumentOutOfRangeException("position");
             return position;
         }
+        public static void SetWipeHorizontal(bool horizontal)
+        {
+            lock(Gate) if(current!=null) current.WipeHorizontal=horizontal;
+        }
         public static void SetWipePosition(float position)
         {
             ValidatePosition(position);
@@ -107,6 +112,7 @@ namespace Cadrivect.Engine
         public volatile bool Stopped;
         public volatile string ComparisonView="enhanced";
         public volatile float WipePosition=0.5f;
+        public volatile bool WipeHorizontal;
         public HostedSurface(IntPtr hwnd) {
             uint pid;
             using(var process=Process.GetCurrentProcess())

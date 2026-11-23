@@ -40,3 +40,39 @@ float4 HdrMotionGuide(Vertex v) : SV_Target {
     float pq = EncodePq80(y.xxx).x;
     return float4(pq,pq,pq,1);
 }
+
+// Theme colors are sRGB in SDR. Map UI white to 203 nits for PQ presentation.
+float3 WipeColor(float3 rgb) {
+    float3 srgb=rgb/255.0;
+    float3 linearRgb=lerp(srgb/12.92,pow((srgb+0.055)/1.055,2.4),step(0.04045,srgb));
+    return phase<0.5 ? srgb : EncodePq80(LinearScRgbTo2020(linearRgb)*(203.0/80.0));
+}
+float4 WipeDivider(Vertex v) : SV_Target {
+    float2 local=v.pos.xy-viewportOrigin;
+    float thickness=wipeHorizontal>0 ? targetSize.y : targetSize.x;
+    float axis=wipeHorizontal>0 ? local.y : local.x;
+    float edge=min(axis,thickness-axis);
+    float3 outline=WipeColor(float3(35,61,59)), mint=WipeColor(float3(143,230,208));
+    return float4(lerp(outline,mint,saturate(edge-thickness*0.18+0.5)),1);
+}
+float WipeSegment(float2 p,float2 start,float2 end) {
+    float2 span=end-start;
+    float along=saturate(dot(p-start,span)/max(dot(span,span),0.0001));
+    return length(p-start-along*span);
+}
+float4 WipeHandle(Vertex v) : SV_Target {
+    // Work along the drag axis so rotating the handle also rotates its arrows.
+    float2 size=wipeHorizontal>0 ? targetSize.yx : targetSize;
+    float2 p=abs((v.uv-0.5)*(targetSize));
+    p=wipeHorizontal>0 ? p.yx : p;
+    float radius=min(size.x,size.y)*0.5;
+    float2 q=p-size*0.5+radius;
+    float boundary=length(max(q,0))+min(max(q.x,q.y),0)-radius;
+    float border=clamp(size.y/20,1.0,2.5);
+    float3 face=WipeColor(float3(23,42,45)), rim=WipeColor(float3(111,181,165));
+    float3 color=lerp(face,rim,saturate(boundary+border+0.5));
+    float arrow=WipeSegment(p,float2(size.x*0.28,0),size*float2(0.17,0.18));
+    float bar=length(float2(p.x,max(0,p.y-size.y*0.22)));
+    float ink=saturate(0.5+max(0.9,size.y/22)-min(arrow,bar));
+    return float4(lerp(color,WipeColor(float3(170,246,226)),ink),saturate(0.5-boundary));
+}

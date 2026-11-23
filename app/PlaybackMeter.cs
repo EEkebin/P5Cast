@@ -27,6 +27,9 @@ namespace Cadrivect
         readonly Action<string> compare;
         readonly RadioButton[] views=new RadioButton[ViewIds.Length];
         readonly Slider divider;
+        readonly ToggleButton horizontalSplit;
+        internal bool WipeHorizontal {get {return horizontalSplit.IsChecked==true;} set {horizontalSplit.IsChecked=value;}}
+        internal event Action<bool> WipeHorizontalChanged;
         internal event Action<double> WipePositionChanged;
         internal double WipePosition {get {return divider.Value/100;} set {divider.Value=value*100;}}
         int selectedView,previousView;
@@ -100,12 +103,23 @@ namespace Cadrivect
             string[] viewTips={"Show your selected picture and interpolation settings.",
                 "Show the source picture at its original frame rate.","Show the full original on the left and the enhanced picture on the right.",
                 "Drag the divider across one full-size picture to reveal the original or enhanced image."};
-            comparisonGuide=Label("Left: Original    ·    Right: Enhanced",Muted,11,FontWeights.Normal);
+            horizontalSplit=new ToggleButton {Content="Horizontal split",Template=ChipTemplate,
+                ToolTip="Place the original above the divider and the enhanced picture below it."};
+            StyleChip(horizontalSplit);
+            horizontalSplit.Margin=new Thickness(0,5,0,0);
+            AutomationProperties.SetAutomationId(horizontalSplit,"WipeHorizontal");
+            picture.Children.Add(horizontalSplit);
+            comparisonGuide=Label("",Muted,11,FontWeights.Normal);
             comparisonGuide.Margin=new Thickness(0,4,0,0); picture.Children.Add(comparisonGuide);
             divider=new Slider {Minimum=0,Maximum=100,Value=50,SmallChange=1,LargeChange=10,IsMoveToPointEnabled=true,AutoToolTipPlacement=AutoToolTipPlacement.TopLeft,
                 ToolTip="Drag the divider in the picture or use the arrow keys here."};
             divider.SetResourceReference(FrameworkElement.StyleProperty,"WipeSlider");
-            AutomationProperties.SetName(divider,"Original picture percentage");
+            RoutedEventHandler rotate=delegate {
+                UpdateComparisonGuide();
+                if(WipeHorizontalChanged!=null) WipeHorizontalChanged(WipeHorizontal);
+            };
+            horizontalSplit.Checked+=rotate; horizontalSplit.Unchecked+=rotate;
+            AutomationProperties.SetName(divider,"Divider position");
             AutomationProperties.SetAutomationId(divider,"WipePosition");
             divider.ValueChanged+=delegate {if(WipePositionChanged!=null) WipePositionChanged(WipePosition);};
             picture.Children.Add(divider);
@@ -278,8 +292,14 @@ namespace Cadrivect
         {
             if(index==1 && selectedView!=1) previousView=selectedView;
             selectedView=index; views[index].IsChecked=true;
+            horizontalSplit.Visibility=index==3 ? Visibility.Visible : Visibility.Collapsed;
+            UpdateComparisonGuide();
             comparisonGuide.Visibility=index>=2 ? Visibility.Visible : Visibility.Collapsed;
             divider.Visibility=index==3 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        void UpdateComparisonGuide()
+        {
+            comparisonGuide.Text=selectedView==3 && WipeHorizontal ? "Top: Original    ·    Bottom: Enhanced" : "Left: Original    ·    Right: Enhanced";
         }
         public void ToggleOriginal()
         {

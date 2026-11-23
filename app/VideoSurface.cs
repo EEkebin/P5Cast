@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows.Interop;
 
@@ -9,7 +10,7 @@ namespace Cadrivect
     {
         internal event Action DoubleClicked;
         internal event Action<double> WipePositionChanged;
-        bool wipeActive, dragging;
+        bool wipeActive, horizontalWipe, dragging;
         double wipePosition=.5, pictureAspect;
         double initialPosition, grabOffset;
         [DllImport("user32.dll", CharSet=CharSet.Unicode,SetLastError=true)]
@@ -33,7 +34,9 @@ namespace Cadrivect
         [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr hwnd);
         [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern IntPtr LoadCursor(IntPtr instance,IntPtr resource);
         [DllImport("user32.dll")] static extern IntPtr SetCursor(IntPtr cursor);
-        static readonly IntPtr resizeCursor=LoadCursor(IntPtr.Zero,new IntPtr(32644)); // IDC_SIZEWE
+        static readonly IntPtr resizeWE=LoadCursor(IntPtr.Zero,new IntPtr(32644)); // IDC_SIZEWE
+        static readonly IntPtr resizeNS=LoadCursor(IntPtr.Zero,new IntPtr(32645)); // IDC_SIZENS
+        IntPtr ResizeCursor {get {return horizontalWipe ? resizeNS : resizeWE;}}
         [DllImport("user32.dll")] static extern int FillRect(IntPtr dc,ref Rect rect,IntPtr brush);
         [DllImport("gdi32.dll")] static extern IntPtr GetStockObject(int index);
         [DllImport("user32.dll")] internal static extern bool SetWindowPos(IntPtr hwnd,IntPtr after,int x,int y,int width,int height,uint flags);
@@ -46,37 +49,40 @@ namespace Cadrivect
             return new HandleRef(this,child);
         }
         protected override void DestroyWindowCore(HandleRef hwnd) { EndDrag(hwnd.Handle); DestroyWindow(hwnd.Handle); }
-        internal void ConfigureWipe(bool active,double position,double sourceAspect)
+        internal void ConfigureWipe(bool active,double position,double sourceAspect,bool horizontal)
         {
             wipeActive=active && sourceAspect>0 && !double.IsInfinity(sourceAspect);
-            if(!wipeActive && dragging) EndDrag(Handle);
+            if(dragging && (!wipeActive || horizontalWipe!=horizontal)) EndDrag(Handle);
+            horizontalWipe=horizontal;
             wipePosition=Math.Max(0,Math.Min(1,position));
             pictureAspect=sourceAspect;
         }
-        bool GetPicture(IntPtr hwnd,out Rect picture)
+        bool GetPicture(IntPtr hwnd,out Rectangle picture)
         {
             // Fit the source to the live client. A fullscreen change or drawer resize
             // can reach this HWND before the next engine telemetry sample.
-            if(!GetClientRect(hwnd,out picture) || !wipeActive || picture.Right<1 || picture.Bottom<1) return false;
-            int width=Math.Max(1,(int)Math.Round(Math.Min(picture.Right,picture.Bottom*pictureAspect)));
-            int height=Math.Max(1,(int)Math.Round(Math.Min(picture.Bottom,picture.Right/pictureAspect)));
-            picture.Left=(picture.Right-width)/2; picture.Top=(picture.Bottom-height)/2;
-            picture.Right=picture.Left+width; picture.Bottom=picture.Top+height;
+            picture=Rectangle.Empty;
+            Rect client;
+            if(!GetClientRect(hwnd,out client) || !wipeActive || client.Right<1 || client.Bottom<1) return false;
+            int width=Math.Max(1,(int)Math.Round(Math.Min(client.Right,client.Bottom*pictureAspect)));
+            int height=Math.Max(1,(int)Math.Round(Math.Min(client.Bottom,client.Right/pictureAspect)));
+            picture=new Rectangle((client.Right-width)/2,(client.Bottom-height)/2,width,height);
             return true;
         }
         bool HitDivider(IntPtr hwnd,int x,int y)
         {
-            Rect picture;
-            if(!GetPicture(hwnd,out picture)) return false;
-            double seam=picture.Left+wipePosition*(picture.Right-picture.Left);
+            Rectangle picture;
+            if(!GetPicture(hwnd,out picture) || !picture.Contains(x,y)) return false;
+            var layout=new WipeLayout(picture,horizontalWipe,wipePosition);
             double slop=8*Math.Max(96u,GetDpiForWindow(hwnd))/96.0;
-            return y>=picture.Top && y<picture.Bottom && x>=picture.Left && x<picture.Right && Math.Abs(x-seam)<=slop;
+            return layout.Handle.Contains(x,y) || Math.Abs((horizontalWipe ? y : x)-layout.Center)<=slop;
         }
-        double PointerFraction(IntPtr hwnd,int x)
+        double PointerFraction(IntPtr hwnd,int x,int y)
         {
-            Rect picture;
+            Rectangle picture;
             if(!GetPicture(hwnd,out picture)) return wipePosition;
-            return (x-picture.Left)/(double)(picture.Right-picture.Left);
+            var layout=new WipeLayout(picture,horizontalWipe,wipePosition);
+            return layout.PositionAt(horizontalWipe ? y : x);
         }
         void ChangePosition(double next)
         {
@@ -105,12 +111,12 @@ namespace Cadrivect
                 int y=unchecked((short)((lp.ToInt64() >> 16) & 0xffff));
                 if((msg==ButtonDown || msg==DoubleClick) && HitDivider(hwnd,x,y)) {
                     initialPosition=wipePosition;
-                    grabOffset=wipePosition-PointerFraction(hwnd,x);
+                    grabOffset=wipePosition-PointerFraction(hwnd,x,y);
                     SetCapture(hwnd); dragging=GetCapture()==hwnd;
-                    SetCursor(resizeCursor); handled=true; return IntPtr.Zero;
+                    SetCursor(ResizeCursor); handled=true; return IntPtr.Zero;
                 }
                 if(dragging && (msg==MouseMove || msg==ButtonUp)) {
-                    ChangePosition(PointerFraction(hwnd,x)+grabOffset);
+                    ChangePosition(PointerFraction(hwnd,x,y)+grabOffset);
                     if(msg==ButtonUp) EndDrag(hwnd);
                     handled=true; return IntPtr.Zero;
                 }
@@ -118,7 +124,7 @@ namespace Cadrivect
             if(msg==Cursor && wipeActive) {
                 PixelPoint pt;
                 if(dragging || (GetCursorPos(out pt) && ScreenToClient(hwnd,ref pt) && HitDivider(hwnd,pt.X,pt.Y))) {
-                    SetCursor(resizeCursor); handled=true; return new IntPtr(1);
+                    SetCursor(ResizeCursor); handled=true; return new IntPtr(1);
                 }
             }
             if(msg==CaptureChanged) dragging=false;

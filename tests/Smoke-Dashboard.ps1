@@ -132,6 +132,9 @@ $runId = [Guid]::NewGuid().ToString('N')
 $stage = Join-Path ([IO.Path]::GetTempPath()) "P5Cast-smoke-$runId"
 $snapshot = Join-Path ([IO.Path]::GetTempPath()) "P5Cast-dashboard-$runId.png"
 [IO.Directory]::CreateDirectory($stage) | Out-Null
+$testPrefs=Join-Path $stage 'LumaRelay'
+[void][IO.Directory]::CreateDirectory($testPrefs)
+[IO.File]::WriteAllText((Join-Path $testPrefs 'dashboard.json'),'{"discordPresence":false}')
 $process = $null
 try {
     $start = New-Object Diagnostics.ProcessStartInfo $app.FullName

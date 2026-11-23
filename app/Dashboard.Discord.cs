@@ -17,14 +17,19 @@ namespace Cadrivect
             var enabled=UI<CheckBox>("SharePresence");
             var includeGame=UI<CheckBox>("ShareGame");
             var includeProject=UI<CheckBox>("ShareProject");
-            enabled.IsChecked=Field(saved,"discordPresence")=="True";
+            enabled.IsChecked=DiscordSettingEnabled(saved,"discordPresence");
             includeGame.IsChecked=Field(saved,"discordGame")!="False";
-            includeProject.IsChecked=Field(saved,"discordProject")=="True";
+            includeProject.IsChecked=DiscordSettingEnabled(saved,"discordProject");
             foreach(var option in new[]{enabled,includeGame,includeProject}) option.Click+=delegate {
                 ResetTitleLookup(); TickDiscord(); SaveSettings();
             };
             UI<TextBox>("GameTitle").TextChanged+=delegate {applyTitleAfter=DateTime.UtcNow.AddMilliseconds(700);};
             TickDiscord();
+        }
+        static bool DiscordSettingEnabled(Dictionary<string,object> saved,string key)
+        {
+            bool enabled;
+            return !saved.ContainsKey(key) || (bool.TryParse(Field(saved,key),out enabled) && enabled);
         }
         void ResetTitleLookup()
         {
@@ -56,6 +61,7 @@ namespace Cadrivect
             UI<CheckBox>("ShareGame").IsEnabled=enabled;
             UI<CheckBox>("ShareProject").IsEnabled=enabled;
             var manual=UI<TextBox>("GameTitle"); manual.IsEnabled=enabled && game;
+            if(!window.IsLoaded) return;
             string state;
             bool button=UI<CheckBox>("ShareProject").IsChecked==true;
             if(!enabled || closing) {

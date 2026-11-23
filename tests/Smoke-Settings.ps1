@@ -32,8 +32,14 @@ try {
     Require ((IsShown StreamSettings) -and !(IsShown ConsoleSettings)) 'Direct stream group'
     Require ((Widget DirectBitrate).SelectedItem -eq '100 Mbps') 'Maximum Direct request'
     Click DiscordGroup
-    Require ((IsShown DiscordSettings) -and !(Widget SharePresence).IsChecked -and !(Widget ShareProject).IsChecked) 'Discord privacy defaults'
-    Require (!$type.GetField('discord','Instance,NonPublic').GetValue($dash)) 'No Discord client while idle'
+    Require ((IsShown DiscordSettings) -and (Widget SharePresence).IsChecked -and (Widget ShareProject).IsChecked) 'Discord presence and project button default on'
+    Require (!$type.GetField('discord','Instance,NonPublic').GetValue($dash)) 'No Discord client before the window opens'
+    (Widget SharePresence).IsChecked=$false; (Widget ShareProject).IsChecked=$false
+    Call SaveSettings
+    $secondFile=[IO.File]::OpenRead((Join-Path $AppRoot 'app\Main.xaml'))
+    try {$second=[Windows.Markup.XamlReader]::Load($secondFile)} finally {$secondFile.Dispose()}
+    $null=[Activator]::CreateInstance($type,[Reflection.BindingFlags]'Instance,NonPublic',$null,@($second,$false),$null)
+    Require (!$second.FindName('SharePresence').IsChecked -and !$second.FindName('ShareProject').IsChecked) 'Discord opt-outs survive reopening'
     Click DisplayGroup
     Require ((IsShown DisplaySettings) -and !(IsShown StreamSettings)) 'Display group'
     Click HostNav; Click DevicesGroup

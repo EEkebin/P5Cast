@@ -98,9 +98,25 @@ namespace Cadrivect.Engine
             ValidatePosition(position);
             lock(Gate) if(current!=null) current.WipePosition=position;
         }
+        public static void SetLoupe(bool active,float x,float y,int level,float scale)
+        {
+            ValidatePosition(x);
+            ValidatePosition(y);
+            if(level!=0 && (level<2 || level>5)) throw new ArgumentOutOfRangeException("level");
+            if(!(scale>0 && scale<=32)) throw new ArgumentOutOfRangeException("scale");
+            lock(Gate) if(current!=null) current.Loupe=active ? new LoupeState(x,y,level,scale) : null;
+        }
         public static void Compare(bool enabled) { SetComparison(enabled ? "original" : "enhanced"); }
         public static void Stop() { lock(Gate) if(current!=null) current.Stopped=true; }
         public static void InvalidateDisplay() { lock(Gate) if(current!=null) current.Invalidate(); }
+    }
+
+    // Publish the whole gesture update at once so the render thread sees a consistent cursor and zoom.
+    internal sealed class LoupeState
+    {
+        public readonly float X,Y,Scale;
+        public readonly int Level;
+        public LoupeState(float x,float y,int level,float scale) { X=x; Y=y; Level=level; Scale=scale; }
     }
 
     internal sealed class HostedSurface
@@ -121,6 +137,7 @@ namespace Cadrivect.Engine
         public volatile bool WipeHorizontal;
         public volatile int WipeGripState;
         public volatile float WipeGripScale=1;
+        public volatile LoupeState Loupe;
         public HostedSurface(IntPtr hwnd) {
             uint pid;
             using(var process=Process.GetCurrentProcess())

@@ -20,6 +20,8 @@ In the performance drawer, open **Picture → Comparison view**. Choose **Side b
 
 Choose **Draggable split** for one full-size picture. Drag the centered drawer-style grip or grab anywhere along the divider to compare the same screen pixels. Turn on **Horizontal split** to place Original above Enhanced and drag up or down. P5Cast remembers the orientation. The original and enhanced layers keep identical framing and scale, including in fullscreen. The slider in the drawer also accepts the arrow keys. The handle stops inside each edge so you can always drag it back. Choose **Original** or **Enhanced** for a completely unobstructed view.
 
+Hold the left mouse button on the picture to inspect it through a circular loupe. Move the pointer to inspect another spot and scroll while holding to select native size or 2×, 3×, 4×, or 5×. Release to dismiss it. The loupe starts at 2× and magnifies individual output pixels, including the enhancement visible at that spot. This works with Direct to PS5, Sony Remote Play capture, and the offline demo.
+
 For a spatial comparison of sharpening or upscaling, set **Frame interpolation → Off**. With interpolation on, the original holds each source frame while the enhanced side can advance between frames. Under **Stream diagnostics → Video**, **Processing resolution** shows the effect raster and **Display refresh** shows the Windows display mode in Hz. The FPS dial shows how many frames P5Cast submitted per second.
 
 Choose **Original** or **Enhanced** to give either picture the whole window. During playback, **Ctrl+Alt+B** switches to the original and back to your previous view, including side by side. You can try this with **Offline demo** and **Sharpen** before connecting.

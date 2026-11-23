@@ -223,6 +223,21 @@ internal static partial class EmbeddedProbe {
                             if(mode=="original") baseline=pixels;
                             else {
                                 pass&=MeasureQuality(baseline,pixels,prior,hdr,mode);
+                                // Inspect the actual enhanced output in its swap-chain format (including 10-bit PQ).
+                                const int cx=612,cy=248;
+                                var setLoupe=type.GetMethod("SetLoupe");
+                                setLoupe.Invoke(renderer,new object[]{true,(cx+.5f)/OutputW,(cy+.5f)/OutputH,5,1f});
+                                type.GetMethod("Repaint").Invoke(renderer,new object[]{mode});
+                                var enlarged=ReadPresentedTexture(device,target);
+                                int changed=0;
+                                for(int dy=-9;dy<=5;dy++) for(int dx=-9;dx<=9;dx++) {
+                                    int at=(cy+dy*5)*OutputW+cx+dx*5;
+                                    Check(enlarged[at]==pixels[(cy+dy)*OutputW+cx+dx],"The loupe changed an enhanced pixel's channel values.");
+                                    if(enlarged[at]!=pixels[at]) changed++;
+                                }
+                                Check(changed>10,"The quality fixture did not exercise magnification.");
+                                setLoupe.Invoke(renderer,new object[]{false,0f,0f,0,1f});
+                                Console.WriteLine("{0} {1} loupe preserved exact output pixel values at 5x.",hdr?"HDR":"SDR",mode);
                                 // A display resize changes the DLSS target while DLAA keeps its native input size.
                                 foreach(var size in new[]{new Size(OutputW+160,OutputH+90),new Size(OutputW,OutputH)}) {
                                     var watch=System.Diagnostics.Stopwatch.StartNew();

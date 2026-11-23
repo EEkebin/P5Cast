@@ -120,6 +120,70 @@ internal static partial class EmbeddedProbe
             Math.Abs(Convert.ToDouble(s["wipePosition"])-position)<.0001,"wipe at "+position);
     }
 
+    static void CheckLoupePixels(Bitmap baseline,Bitmap image,Rectangle frame,int cx,int cy,int level) {
+        const int radius=86; // The probe requests a 1:1 UI scale.
+        int factor=Math.Max(1,level),changedInterior=0,changedRim=0;
+        for(int y=0;y<image.Height;y++) for(int x=0;x<image.Width;x++) {
+            int dx=x-cx,dy=y-cy,distance=dx*dx+dy*dy;
+            if(!frame.Contains(x,y) || distance>(radius+2)*(radius+2)) {
+                // Include the previous lens location and the letterbox beyond the picture edge.
+                if(x%3==0 && y%3==0)
+                    Check(Matches(image.GetPixel(x,y),baseline.GetPixel(x,y)),"Loupe changed a pixel outside the circle or picture.");
+            } else if(distance>=(radius-4)*(radius-4)) {
+                if(!Matches(image.GetPixel(x,y),baseline.GetPixel(x,y))) changedRim++;
+            } else if(dy<radius/3) { // Leave the bottom of the lens free for its scale label.
+                int sx=(int)Math.Floor(cx+.5+dx/(double)factor),sy=(int)Math.Floor(cy+.5+dy/(double)factor);
+                var actual=image.GetPixel(x,y);
+                if(!Matches(actual,baseline.GetPixel(sx,sy)))
+                    throw new Exception("Loupe at "+level+"x, center "+cx+","+cy+", differs from source pixel "+
+                                        sx+","+sy+" at destination "+x+","+y+".");
+                if(!Matches(actual,baseline.GetPixel(x,y))) changedInterior++;
+            }
+        }
+        Check(changedRim>30,"The localized loupe outline was missing at "+level+"x.");
+        if(factor>1 && cx>frame.Left+radius)
+            Check(changedInterior>200,"The loupe fixture did not distinguish magnified output from native pixels.");
+    }
+
+    static void CheckPausedLoupe(Window window,Type api) {
+        api.GetMethod("SetWipeHorizontal").Invoke(null,new object[]{false});
+        var initial=SetWipePosition(api,.5f);
+        var still=WaitSnapshot(api,s=>!(bool)s["wipeHorizontal"] && !(bool)s["loupeActive"] &&
+            Convert.ToInt32(s["sampleId"])>Convert.ToInt32(initial["sampleId"]) && Convert.ToDouble(s["submittedFps"])==0,"paused wipe before loupe");
+        int repaints=Convert.ToInt32(still["repaints"]);
+        using(var baseline=CaptureComparison(window)) {
+            var frame=new Rectangle(Convert.ToInt32(still["pictureX"]),Convert.ToInt32(still["pictureY"]),
+                                    Convert.ToInt32(still["pictureWidth"]),Convert.ToInt32(still["pictureHeight"]));
+            var setter=api.GetMethod("SetLoupe");
+            Action<bool,int,int,int> set=delegate(bool active,int x,int y,int level) {
+                float u=(x+.5f)/baseline.Width,v=(y+.5f)/baseline.Height;
+                setter.Invoke(null,new object[]{active,u,v,level,1f});
+                var updated=WaitSnapshot(api,s=>Equals(s["loupeActive"],active) && Convert.ToInt32(s["repaints"])>repaints &&
+                    (!active || (Convert.ToInt32(s["loupeLevel"])==level && Math.Abs(Convert.ToDouble(s["loupeX"])-u)<.0001 &&
+                                 Math.Abs(Convert.ToDouble(s["loupeY"])-v)<.0001)),"loupe repaint");
+                repaints=Convert.ToInt32(updated["repaints"]);
+                Check(Equals(still["captured"],updated["captured"]) && Equals(still["presented"],updated["presented"]) &&
+                      Equals(still["generated"],updated["generated"]) && Convert.ToDouble(updated["submittedFps"])==0,
+                      "Moving the loupe inflated the video frame counters.");
+            };
+            // Include the wipe seam and glyph edges inside the circle; the magnified image must come from the composite.
+            int cx=frame.Left+frame.Width/2-5,cy=frame.Top+frame.Height/2;
+            foreach(int level in new[]{0,2,5}) {
+                set(true,cx,cy,level);
+                using(var image=CaptureComparison(window)) CheckLoupePixels(baseline,image,frame,cx,cy,level);
+            }
+            cx=frame.Left+3; cy=frame.Top+frame.Height/3;
+            set(true,cx,cy,5);
+            using(var corner=CaptureComparison(window)) CheckLoupePixels(baseline,corner,frame,cx,cy,5);
+            set(false,cx,cy,0);
+            using(var restored=CaptureComparison(window)) {
+                for(int y=0;y<restored.Height;y+=2) for(int x=0;x<restored.Width;x+=2)
+                    Check(Matches(baseline.GetPixel(x,y),restored.GetPixel(x,y)),"Releasing the loupe left pixels on the paused image.");
+            }
+        }
+        Console.WriteLine("Loupe matched native, 2x and 5x composite pixels, tracked the pointer to the picture edge, and released without changing video FPS.");
+    }
+
     static void CheckFullSizeWipe(Window window,Type api,Action<string> setView,
                                   Func<string,string,Dictionary<string,object>> waitView,float[] positions) {
         setView("original"); waitView("original","original");
@@ -220,6 +284,7 @@ internal static partial class EmbeddedProbe
             }
             if(supportsCapture) {
                 CheckFullSizeWipe(window,api,setView,waitView,new[]{.5f,.25f,.75f,0f,1f});
+                CheckPausedLoupe(window,api);
                 // Resize and cap the processing raster while the source is paused. The letterboxed output is wider than the 720p processing cap.
                 window.Width=1403; window.Height=811; window.UpdateLayout(); Pump();
                 ClientBounds resized;

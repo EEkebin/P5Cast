@@ -26,6 +26,7 @@ namespace Cadrivect
         }
         void ToggleFullscreen()
         {
+            surface.CancelLoupe();
             SetFullscreenFrame(!fullscreen);
             fullscreen=!fullscreen;
             UI<Button>("Fullscreen").Content=fullscreen?"Windowed":"Fullscreen";
@@ -89,7 +90,7 @@ namespace Cadrivect
         double sourceAspect;
         void UpdateWipeInput()
         {
-            surface.ConfigureWipe(rendering!=null && meter.ComparisonView=="wipe",meter.WipePosition,sourceAspect,meter.WipeHorizontal);
+            surface.ConfigurePicture(meter.ComparisonView,meter.WipePosition,rendering!=null ? sourceAspect : 0,meter.WipeHorizontal);
         }
         void Tick()
         {

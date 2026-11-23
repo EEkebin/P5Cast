@@ -39,7 +39,7 @@ $refs = @('/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Web.E
 $refs += Get-ChildItem (Join-Path $env:WINDIR 'System32\WinMetadata') -Filter '*.winmd' | ForEach-Object { "/r:$($_.FullName)" }
 $refs += 'SharpDX','SharpDX.DXGI','SharpDX.Direct3D11' | ForEach-Object { "/r:$intermediate\$_.dll" }
 $resources = Get-ChildItem $intermediate -Filter '*.cso' | ForEach-Object { "/resource:$($_.FullName),$($_.Name)" }
-$playerFiles=@('Player.cs','EmbeddedPlayback.cs','PlaybackControls.cs','PlaybackGraph.cs','DirectVideo.cs','DemoVideo.cs','GpuCapabilities.cs','Renderer.cs','WipeLayout.cs','Presentation.cs','Capture.cs','Renderer.Nvidia.cs','HdrPipeline.cs','DisplayHdr.cs','DisplayTarget.cs',
+$playerFiles=@('Player.cs','EmbeddedPlayback.cs','PlaybackControls.cs','PlaybackGraph.cs','DirectVideo.cs','DemoVideo.cs','GpuCapabilities.cs','Renderer.cs','Renderer.Loupe.cs','WipeLayout.cs','Presentation.cs','Capture.cs','Renderer.Nvidia.cs','HdrPipeline.cs','DisplayHdr.cs','DisplayTarget.cs',
     'optical\NvidiaOpticalFlow.cs','nvidia\NgxVideo.cs','rtxvideo\RtxVideo.cs') | ForEach-Object { Join-Path $PSScriptRoot $_ }
 & $csc /nologo /target:winexe /platform:x64 /optimize+ "/win32icon:$PSScriptRoot\..\app\assets\mark.ico" @refs @resources "/out:$OutDir\CadrivectPlayer.exe" @playerFiles
 if ($LASTEXITCODE) { throw 'Player compilation failed.' }

@@ -46,6 +46,7 @@ internal static partial class WindowChromeProbe
             double sx=native.Width/Convert.ToDouble(frame["outputWidth"]),sy=native.Height/Convert.ToDouble(frame["outputHeight"]);
             var picture=new Rectangle((int)Math.Round(sx*Convert.ToDouble(frame["pictureX"])),(int)Math.Round(sy*Convert.ToDouble(frame["pictureY"])),
                                      (int)Math.Round(sx*Convert.ToDouble(frame["pictureWidth"])),(int)Math.Round(sy*Convert.ToDouble(frame["pictureHeight"])));
+            if(!horizontal) await CheckLoupeInput(backend,picture,native,sample);
             await CheckWipeAxis(backend,picture,horizontal,slider,sample);
         }
         if(fullscreen) {
@@ -56,6 +57,38 @@ internal static partial class WindowChromeProbe
         ViewButton("ViewEnhanced").IsChecked=true;
         await Until(()=>Equals(sample()["comparisonView"],"enhanced"),"Wipe view did not exit.");
         Note(backend+" passed native dragging, cancellation and inset handle recovery on both axes.");
+    }
+
+    static async Task CheckLoupeInput(string backend,Rectangle picture,Bounds native,Func<Dictionary<string,object>> sample) {
+        int x=picture.Left+picture.Width/4,y=picture.Top+picture.Height/4;
+        Action<IntPtr,int> wheel=(target,delta)=>SendMessage(target,0x20A,new IntPtr(delta<<16),IntPtr.Zero);
+        SendMessage(video,0x201,new IntPtr(1),Packed(x,y));
+        await Until(()=>GetCapture()==video && Equals(sample()["loupeActive"],true),"Holding the picture did not open the loupe.");
+        Require(Convert.ToInt32(sample()["loupeLevel"])==2,"The loupe did not open at 2x.");
+        int moved=x+12;
+        SendMessage(video,0x200,new IntPtr(1),Packed(moved,y));
+        await Until(()=>Math.Abs(Convert.ToDouble(sample()["loupeX"])-(moved+.5)/native.Width)<.0005 &&
+                        Math.Abs(Convert.ToDouble(sample()["loupeY"])-(y+.5)/native.Height)<.0005,
+                    "The loupe did not track the pointer in screen pixels.");
+        if(backend=="d3d11") {
+            wheel(video,60); wheel(hwnd,60);
+            await Until(()=>Convert.ToInt32(sample()["loupeLevel"])==3,"Partial wheel deltas did not accumulate to one zoom step.");
+            wheel(video,1200);
+            await Until(()=>Convert.ToInt32(sample()["loupeLevel"])==5,"The loupe did not stop at 5x.");
+            wheel(hwnd,-1200);
+            await Until(()=>Convert.ToInt32(sample()["loupeLevel"])==0,"The focused dashboard wheel did not reach native scale.");
+            wheel(video,120);
+            await Until(()=>Convert.ToInt32(sample()["loupeLevel"])==2,"One wheel step did not leave native scale.");
+        }
+        SendMessage(video,0x202,IntPtr.Zero,Packed(-5,y));
+        await Until(()=>GetCapture()!=video && Equals(sample()["loupeActive"],false),"Releasing outside the picture left the loupe active.");
+        SendMessage(video,0x201,new IntPtr(1),Packed(x,y));
+        Require(GetCapture()==video,"Cannot reopen loupe.");
+        SetCapture(hwnd);
+        try {Require(GetCapture()==hwnd,"Loupe stole capture back.");} finally {ReleaseCapture();}
+        SendMessage(video,0x201,new IntPtr(1),Packed(x,y)); SendMessage(video,0x1F,IntPtr.Zero,IntPtr.Zero);
+        Require(GetCapture()!=video,"Cancel mode left the loupe captured.");
+        Note(backend+" passed hold-to-inspect input, tracking and release.");
     }
 
     static async Task CheckWipeAxis(string backend,Rectangle picture,bool horizontal,Slider slider,
@@ -79,14 +112,12 @@ internal static partial class WindowChromeProbe
         mouse(0x201,layout.Center,crossMin-2);
         Require(GetCapture()!=video,"A click outside the picture grabbed the divider.");
         mouse(0x202,layout.Center,crossMin-2);
-        mouse(0x201,minimum+1,crossQuarter);
-        Require(GetCapture()!=video,"A click away from the divider started a drag.");
-        mouse(0x202,minimum+1,crossQuarter);
         await Until(delegate {mouse(0x201,layout.Center,crossQuarter); return GetCapture()==video;},"Cannot grab the divider rail.");
         mouse(0x200,new WipeLayout(picture,horizontal,.76,scale).Center,crossQuarter);
         Require(Math.Abs(slider.Value-76)<1,"The drawer slider did not track the drag.");
         await Until(()=>Math.Abs(Convert.ToDouble(sample()["wipePosition"])-.76)<.01,"Dragging did not move the rendered divider.");
         Require(Convert.ToInt32(sample()["wipeGripState"])==2,"Captured divider did not use the drawer's active grip color.");
+        Require(Equals(sample()["loupeActive"],false),"Grabbing the divider activated the loupe.");
         SendMessage(video,0x1F,IntPtr.Zero,IntPtr.Zero);
         await Until(()=>Math.Abs(Convert.ToDouble(sample()["wipePosition"])-initial)<.01 && GetCapture()!=video,"Cancel did not restore the drag.");
         mouse(0x201,layout.Center,crossQuarter); SetCapture(hwnd);

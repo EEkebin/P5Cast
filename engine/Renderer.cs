@@ -144,7 +144,7 @@ internal sealed partial class Renderer : IDisposable
             blend.RenderTarget[0]=targetBlend;
             handleBlend=new BlendState(Device,blend);
             vertex=new VertexShader(Device,Shader("Fullscreen"));
-            foreach(string name in new [] {"Original","Sharp","Easu","Rcas","Motion","Interpolate","OpticalField","NgxVectors","PreserveNgxStrokes","WipeDivider","WipeHandle"})
+            foreach(string name in new [] {"Original","Sharp","Easu","Rcas","Motion","Interpolate","OpticalField","NgxVectors","PreserveNgxStrokes","WipeDivider","WipeHandle","InspectionLoupe"})
                 shaders.Add(name,new PixelShader(Device,Shader(name)));
             InitHdrShaders();
             context.InputAssembler.PrimitiveTopology=PrimitiveTopology.TriangleList;
@@ -533,6 +533,7 @@ internal sealed partial class Renderer : IDisposable
             Draw("WipeHandle",display,layout.Handle,null,hdrUi);
             context.OutputMerger.SetBlendState(null);
         }
+        if(loupeActive) DrawLoupe();
         if(VerifyNextOutput)
         {
             SampleOutput();
@@ -601,6 +602,9 @@ internal sealed partial class Renderer : IDisposable
             } catch(SharpDXException) { /* A removed device can no longer present. */ }
         }
         if(context!=null) context.ClearState();
+        if(loupePixels!=null) loupePixels.Dispose();
+        if(loupeLabels!=null) loupeLabels.Dispose();
+        if(loupeConstants!=null) loupeConstants.Dispose();
         ReleaseSource();
         if(scaled!=null) scaled.Dispose();
         if(display!=null) display.Dispose();

@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.13.0.0")]
+[assembly: AssemblyVersion("0.14.0.0")]
 
 namespace Cadrivect
 {
@@ -116,6 +116,13 @@ namespace Cadrivect
             window.Icon = new BitmapImage(new Uri(Path.Combine(Program.Root,"app","assets","mark.ico")));
             UI<Border>("VideoHost").Child=surface;
             surface.DoubleClicked+=ToggleFullscreen;
+            surface.LoupeChanged+=delegate(bool active,float x,float y,int level,float scale) {
+                if(rendering!=null) engine.SetLoupe(active,x,y,level,scale);
+            };
+            window.Deactivated+=delegate {surface.CancelLoupe();};
+            window.PreviewMouseWheel+=delegate(object sender,MouseWheelEventArgs e) {
+                if(surface.ZoomWheel(e.Delta)) e.Handled=true;
+            };
             meter=new PlaybackMeter(delegate(int selectedMode,int multiplier) {
                 mode=selectedMode; factor=multiplier;
                 if(rendering!=null) engine.Configure(mode,factor);
@@ -236,7 +243,7 @@ namespace Cadrivect
                 else if(chord && key==Key.O) ToggleStats();
                 else if(chord && key==Key.Q) {e.Handled=true; await UserStop(); return;}
                 else if(chord && key==Key.B && rendering!=null) meter.ToggleOriginal();
-                else if(key==Key.Escape && surface.CancelWipeDrag()) {e.Handled=true; return;}
+                else if(key==Key.Escape && (surface.CancelLoupe() || surface.CancelWipeDrag())) {e.Handled=true; return;}
                 else if(key==Key.Escape && UI<StackPanel>("StopPanel").IsVisible && !requestingRest) SetPage("Play");
                 else if(key==Key.Escape && UI<StackPanel>("PairPanel").IsVisible) SetPage("Play");
                 else if(key==Key.Escape && fullscreen) ToggleFullscreen();
@@ -319,6 +326,10 @@ namespace Cadrivect
         string SelectedIP() { return Convert.ToString(UI<ComboBox>("BindIP").SelectedItem); }
         IntPtr DisplayChanged(IntPtr hwnd,int message,IntPtr wp,IntPtr lp,ref bool handled)
         {
+            // Windows may deliver the wheel to the focused dashboard instead of its captured child.
+            if(message==0x20A && surface.ZoomWheel(unchecked((short)(wp.ToInt64()>>16)))) {
+                handled=true; return IntPtr.Zero;
+            }
             if(message==0x02E0 || message==0x007E) QueueInterfaceScale(); // WM_DPICHANGED / WM_DISPLAYCHANGE
             if(message==0x232 || message==0x7E) {
                 RefreshDisplays(DisplayTarget.DeviceForWindow(hwnd));

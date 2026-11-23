@@ -11,7 +11,11 @@ namespace Cadrivect
         internal event Action DoubleClicked;
         internal event Action<double> WipePositionChanged;
         internal event Action<int,float> WipeGripChanged;
+        internal event Action<bool,float,float,int,float> LoupeChanged;
         bool wipeActive, horizontalWipe, dragging;
+        bool sideBySide, inspecting, loupeVisible;
+        int loupeLevel=2, wheelRemainder;
+        float loupeX,loupeY;
         int gripState;
         float gripScale=1;
         double wipePosition=.5, pictureAspect;
@@ -52,12 +56,13 @@ namespace Cadrivect
             if(child==IntPtr.Zero) throw new Win32Exception();
             return new HandleRef(this,child);
         }
-        protected override void DestroyWindowCore(HandleRef hwnd) { EndDrag(hwnd.Handle); DestroyWindow(hwnd.Handle); }
+        protected override void DestroyWindowCore(HandleRef hwnd) { EndLoupe(hwnd.Handle); EndDrag(hwnd.Handle); DestroyWindow(hwnd.Handle); }
         internal void SetWipeScale(float scale)
         {
             if(gripScale==scale) return;
             gripScale=scale;
             if(wipeActive && WipeGripChanged!=null) WipeGripChanged(gripState,scale);
+            if(loupeVisible) PublishLoupe();
         }
         void SetGrip(int state)
         {
@@ -74,40 +79,48 @@ namespace Cadrivect
             }
             SetGrip(hit ? 1 : 0);
         }
-        internal void ConfigureWipe(bool active,double position,double sourceAspect,bool horizontal)
+        internal void ConfigurePicture(string view,double position,double sourceAspect,bool horizontal)
         {
             bool wasActive=wipeActive;
-            wipeActive=active && sourceAspect>0 && !double.IsInfinity(sourceAspect);
+            pictureAspect=sourceAspect>0 && !double.IsInfinity(sourceAspect) ? sourceAspect : 0;
+            if(inspecting && (pictureAspect==0 || sideBySide!=(view=="side-by-side"))) EndLoupe(Handle);
+            sideBySide=view=="side-by-side";
+            wipeActive=view=="wipe" && pictureAspect>0;
             if(dragging && (!wipeActive || horizontalWipe!=horizontal)) EndDrag(Handle);
             if(!wipeActive || horizontalWipe!=horizontal) SetGrip(0);
             if(wipeActive && !wasActive && WipeGripChanged!=null) WipeGripChanged(gripState,gripScale);
             horizontalWipe=horizontal;
             wipePosition=Math.Max(0,Math.Min(1,position));
-            pictureAspect=sourceAspect;
         }
-        bool GetPicture(IntPtr hwnd,out Rectangle picture)
+        Rectangle PictureAt(Rect client,int x)
         {
             // Fit the source to the live client. A fullscreen change or drawer resize
             // can reach this HWND before the next engine telemetry sample.
-            picture=Rectangle.Empty;
-            Rect client;
-            if(!GetClientRect(hwnd,out client) || !wipeActive || client.Right<1 || client.Bottom<1) return false;
-            int width=Math.Max(1,(int)Math.Round(Math.Min(client.Right,client.Bottom*pictureAspect)));
-            int height=Math.Max(1,(int)Math.Round(Math.Min(client.Bottom,client.Right/pictureAspect)));
-            picture=new Rectangle((client.Right-width)/2,(client.Bottom-height)/2,width,height);
-            return true;
+            if(pictureAspect==0 || client.Right<1 || client.Bottom<1) return Rectangle.Empty;
+            int pane=client.Right,offset=0;
+            if(sideBySide && pane>=2) {
+                pane/=2;
+                if(x>=client.Right-pane) offset=client.Right-pane;
+            }
+            int width=Math.Max(1,(int)Math.Round(Math.Min(pane,client.Bottom*pictureAspect)));
+            int height=Math.Max(1,(int)Math.Round(Math.Min(client.Bottom,pane/pictureAspect)));
+            return new Rectangle(offset+(pane-width)/2,(client.Bottom-height)/2,width,height);
         }
         bool HitDivider(IntPtr hwnd,int x,int y)
         {
-            Rectangle picture;
-            if(!GetPicture(hwnd,out picture) || !picture.Contains(x,y)) return false;
+            Rect client;
+            if(!wipeActive || !GetClientRect(hwnd,out client)) return false;
+            var picture=PictureAt(client,x);
+            if(!picture.Contains(x,y)) return false;
             var layout=new WipeLayout(picture,horizontalWipe,wipePosition,gripScale);
             return Math.Abs((horizontalWipe ? y : x)-layout.Center)<=Math.Max(6,8*gripScale);
         }
         double PointerFraction(IntPtr hwnd,int x,int y)
         {
-            Rectangle picture;
-            if(!GetPicture(hwnd,out picture)) return wipePosition;
+            Rect client;
+            if(!GetClientRect(hwnd,out client)) return wipePosition;
+            var picture=PictureAt(client,x);
+            if(picture.IsEmpty) return wipePosition;
             var layout=new WipeLayout(picture,horizontalWipe,wipePosition,gripScale);
             return layout.PositionAt(horizontalWipe ? y : x);
         }
@@ -130,6 +143,59 @@ namespace Cadrivect
             if(!dragging) return false;
             EndDrag(Handle); ChangePosition(initialPosition); return true;
         }
+        void PublishLoupe()
+        {
+            if(LoupeChanged!=null) LoupeChanged(loupeVisible,loupeX,loupeY,loupeLevel,gripScale);
+        }
+        bool TrackLoupe(IntPtr hwnd,int x,int y,bool start)
+        {
+            Rect client;
+            bool inside=GetClientRect(hwnd,out client) && PictureAt(client,x).Contains(x,y);
+            if(start) {
+                if(!inside) return false;
+                SetCapture(hwnd);
+                if(GetCapture()!=hwnd) return false;
+                inspecting=true;
+                wheelRemainder=0;
+            }
+            if(inside) {
+                // Input and rendering agree on physical pixel centers at every DPI.
+                loupeX=(x+.5f)/client.Right;
+                loupeY=(y+.5f)/client.Bottom;
+            }
+            if(inside || loupeVisible) {
+                loupeVisible=inside;
+                PublishLoupe();
+            }
+            return true;
+        }
+        void EndLoupe(IntPtr hwnd)
+        {
+            if(!inspecting) return;
+            inspecting=loupeVisible=false;
+            wheelRemainder=0;
+            if(GetCapture()==hwnd) ReleaseCapture();
+            PublishLoupe();
+        }
+        internal bool CancelLoupe()
+        {
+            if(!inspecting) return false;
+            EndLoupe(Handle); return true;
+        }
+        internal bool ZoomWheel(int delta)
+        {
+            if(!inspecting) return false;
+            if(!loupeVisible) return true;
+            wheelRemainder+=delta;
+            int steps=wheelRemainder/120;
+            wheelRemainder%=120;
+            // Native is displayed as 0x. A single wheel notch takes it to 2x.
+            int index=loupeLevel==0 ? 0 : loupeLevel-1;
+            index=Math.Max(0,Math.Min(4,index+steps));
+            int next=index==0 ? 0 : index+1;
+            if(next!=loupeLevel) {loupeLevel=next; PublishLoupe();}
+            return true;
+        }
         protected override IntPtr WndProc(IntPtr hwnd,int msg,IntPtr wp,IntPtr lp,ref bool handled)
         {
             const int MouseMove=0x200, ButtonDown=0x201, ButtonUp=0x202, DoubleClick=0x203;
@@ -137,6 +203,11 @@ namespace Cadrivect
             if(msg==MouseMove || msg==ButtonDown || msg==ButtonUp || msg==DoubleClick) {
                 int x=unchecked((short)(lp.ToInt64() & 0xffff));
                 int y=unchecked((short)((lp.ToInt64() >> 16) & 0xffff));
+                if(inspecting && (msg==MouseMove || msg==ButtonUp)) {
+                    if(msg==ButtonUp) {EndLoupe(hwnd); if(wipeActive) UpdateHover(hwnd,x,y);}
+                    else TrackLoupe(hwnd,x,y,false);
+                    handled=true; return IntPtr.Zero;
+                }
                 if(msg==MouseMove && !dragging && wipeActive) UpdateHover(hwnd,x,y);
                 if((msg==ButtonDown || msg==DoubleClick) && HitDivider(hwnd,x,y)) {
                     initialPosition=wipePosition;
@@ -153,16 +224,21 @@ namespace Cadrivect
                     }
                     handled=true; return IntPtr.Zero;
                 }
+                if(msg==ButtonDown && TrackLoupe(hwnd,x,y,true)) {
+                    SetGrip(0); handled=true; return IntPtr.Zero;
+                }
             }
-            if(msg==Cursor && wipeActive) {
+            if(msg==0x20A && ZoomWheel(unchecked((short)(wp.ToInt64()>>16)))) {handled=true; return IntPtr.Zero;}
+            if(msg==Cursor && wipeActive && !inspecting) {
                 PixelPoint pt;
                 if(dragging || (GetCursorPos(out pt) && ScreenToClient(hwnd,ref pt) && HitDivider(hwnd,pt.X,pt.Y))) {
                     SetCursor(ResizeCursor); handled=true; return new IntPtr(1);
                 }
             }
-            if(msg==CaptureChanged) { dragging=false; SetGrip(0); }
+            if(msg==CaptureChanged) { dragging=false; SetGrip(0); EndLoupe(hwnd); }
+            if(msg==0x0008) EndLoupe(hwnd); // WM_KILLFOCUS
             if(msg==0x02A3 && !dragging) SetGrip(0); // WM_MOUSELEAVE
-            if(msg==CancelMode && CancelWipeDrag()) {handled=true; return IntPtr.Zero;}
+            if(msg==CancelMode && (CancelLoupe() || CancelWipeDrag())) {handled=true; return IntPtr.Zero;}
             if(msg==0x203 && DoubleClicked!=null) {DoubleClicked(); handled=true; return IntPtr.Zero;}
             if(msg==15 || msg==20) {
                 Paint paint=new Paint(); IntPtr dc=msg==15?BeginPaint(hwnd,out paint):wp;

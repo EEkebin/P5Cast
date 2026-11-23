@@ -297,6 +297,7 @@ internal static class Player
                         bool wipeHorizontal=host!=null ? host.WipeHorizontal : initialHorizontal;
                         int gripState=0;
                         float gripScale=1;
+                        LoupeState loupe=null;
                         string previousView="enhanced",comparisonView="enhanced";
                         Action<string,int> change=delegate(string picture,int factor) {
                             if(picture!=null) requestedMode=picture;
@@ -338,6 +339,13 @@ internal static class Player
                                 wipeHorizontal=horizontal;
                                 wipePosition=requestedPosition;
                                 if(redraw || previousView!=comparisonView) renderer.SetWipe(comparisonView=="wipe",wipePosition,wipeHorizontal,gripState,gripScale);
+                                var requestedLoupe=host==null ? null : host.Loupe;
+                                if(requestedLoupe!=loupe) {
+                                    loupe=requestedLoupe;
+                                    if(loupe==null) renderer.SetLoupe(false,0,0,0,1);
+                                    else renderer.SetLoupe(true,loupe.X,loupe.Y,loupe.Level,loupe.Scale);
+                                    redraw=true;
+                                }
                                 string newSize,newHdr;
                                 if(host!=null && host.TakeOutput(out newSize,out newHdr)) {
                                     try {
@@ -376,6 +384,10 @@ internal static class Player
                                         renderer.Captured,renderer.Presented,renderer.Generated,(renderer.Captured-snapshotInput)*perSecond,
                                         (renderer.Presented-snapshotPresented)*perSecond,(renderer.Generated-snapshotGenerated)*perSecond)
                                         +",\"repaints\":"+renderer.Repaints+",\"mode\":"+JsonString(mode)+",\"multiplier\":"+multiplier+",\"effectivePictureMode\":"+JsonString(renderer.EffectivePictureMode)
+                                        +",\"loupeActive\":"+(loupe!=null ? "true":"false")+",\"loupeLevel\":"+(loupe==null ? 0 : loupe.Level)
+                                        +",\"loupeX\":"+(loupe==null ? "0" : loupe.X.ToString("R",CultureInfo.InvariantCulture))
+                                        +",\"loupeY\":"+(loupe==null ? "0" : loupe.Y.ToString("R",CultureInfo.InvariantCulture))
+                                        +",\"loupeScale\":"+Number(loupe==null ? 1 : loupe.Scale)
                                         +",\"effectNotice\":"+JsonString(settingsNotice ?? (string.IsNullOrEmpty(renderer.EffectNotice) ? renderer.OutputNotice : renderer.EffectNotice))+",\"compare\":"+(compare ? "true":"false")
                                         +",\"wipeGripState\":"+gripState+",\"wipeGripScale\":"+Number(gripScale)+",\"wipeHorizontal\":"+(wipeHorizontal ? "true" : "false")+",\"wipePosition\":"+wipePosition.ToString("R",CultureInfo.InvariantCulture)+",\"comparisonView\":"+JsonString(comparisonView)+",\"sampleId\":"+(++sampleId)+",\"elapsedMs\":"+Number(now)+",\"display\":"+JsonString(renderer.DisplayName)
                                         +",\"hdrEnabled\":"+(renderer.HdrEnabled ? "true":"false")+",\"outputWidth\":"+renderer.OutputSize.Width+",\"outputHeight\":"+renderer.OutputSize.Height

@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.15.2.0")]
+[assembly: AssemblyVersion("0.15.3.0")]
 
 namespace Cadrivect
 {
@@ -139,6 +139,11 @@ namespace Cadrivect
             };
             UI<Border>("MeterHost").Child=meter;
             var saved = ReadSettings();
+            meter.DlssQuality=Field(saved,"dlssQuality");
+            meter.DlssQualityChanged+=delegate(string quality) {
+                if(rendering!=null) engine.SetDlssQuality(quality);
+                if(window.IsLoaded) SaveSettings();
+            };
             meter.WipeHorizontal=Field(saved,"wipeHorizontal").Equals("True",StringComparison.OrdinalIgnoreCase);
             meter.WipeHorizontalChanged+=delegate(bool horizontal){
                 if(rendering!=null) engine.SetWipeHorizontal(horizontal);
@@ -545,7 +550,7 @@ namespace Cadrivect
                 Directory.CreateDirectory(Path.GetDirectoryName(preferences));
                 var hostTarget=UI<ComboBox>("HostDisplay").SelectedItem as DisplayTarget;
                 var console=UI<ComboBox>("ConsolePicker").SelectedItem as DirectConsole;
-                var settings = new { wipeHorizontal=meter.WipeHorizontal,sidebarOpen=stats,sidebarWidth=sidebarWidth,settingsOpen=settingsOpen,settingsHeight=settingsHeight,
+                var settings = new { dlssQuality=meter.DlssQuality,wipeHorizontal=meter.WipeHorizontal,sidebarOpen=stats,sidebarWidth=sidebarWidth,settingsOpen=settingsOpen,settingsHeight=settingsHeight,
                     discordPresence=UI<CheckBox>("SharePresence").IsChecked==true,
                     discordGame=UI<CheckBox>("ShareGame").IsChecked==true,discordProject=UI<CheckBox>("ShareProject").IsChecked==true,stopChoices=stopChoices,directMbps=DirectKbps()/1000, relayMbps=networkRates[UI<ComboBox>("NetworkBitrate").SelectedIndex],audioLayout=UI<ComboBox>("NetworkAudio").SelectedIndex,pictureDefaults=1, mode=mode, multiplier=factor-1,
                     consoleMac=console==null?"":console.Mac,consoleAddresses=consoleAddresses,directStreamHeight=DirectStreamHeight(),directFps=UI<ComboBox>("DirectFps").SelectedIndex,

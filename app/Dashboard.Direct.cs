@@ -106,6 +106,8 @@ namespace Cadrivect
                 var snapshot=json.Deserialize<Dictionary<string,object>>(raw);
                 if(source=="Direct") snapshot["requestedVideoKbps"]=sessionVideoKbps;
                 // A selection made while the engine worker starts may precede its session.
+                if(!firstFrame && Field(snapshot,"dlssQuality")!=meter.DlssQuality)
+                    engine.SetDlssQuality(meter.DlssQuality);
                 if(!firstFrame && Field(snapshot,"comparisonView")!=meter.ComparisonView)
                     engine.SetComparison(meter.ComparisonView);
                 if(!firstFrame && meter.ComparisonView=="wipe") {
@@ -181,6 +183,7 @@ namespace Cadrivect
                     }
                     Show("Capturing your Sony Remote Play session…");
                 }
+                args.AddRange(new[]{"--dlss-quality",meter.DlssQuality});
                 if(meter.WipeHorizontal) args.Add("--wipe-horizontal");
                 args.AddRange(new[]{"--comparison",meter.ComparisonView,"--wipe-position",meter.WipePosition.ToString("R",CultureInfo.InvariantCulture)});
                 rendering=engine.Start(args.ToArray()); preparing=false; UpdateTransport();

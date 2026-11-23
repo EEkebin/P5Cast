@@ -100,6 +100,9 @@ try {
     }
     (Widget VideoRenderer).SelectedItem='OpenGL'
     Require ((Widget HdrOutput).SelectedItem -eq 'SDR' -and !(Widget HdrOutput).IsEnabled) 'OpenGL requests SDR'
+    $quality=$meter.GetType().GetProperty('DlssQuality',[Reflection.BindingFlags]'Instance,NonPublic')
+    Require ($quality.GetValue($meter) -eq 'auto') 'DLSS quality defaults to Auto'
+    $quality.SetValue($meter,'balanced')
     $orientation=$meter.GetType().GetProperty('WipeHorizontal',[Reflection.BindingFlags]'Instance,NonPublic')
     Require (!$orientation.GetValue($meter)) 'Existing preferences open with a vertical divider'
     $orientation.SetValue($meter,$true)
@@ -109,6 +112,9 @@ try {
     $reopened=[Activator]::CreateInstance($type,[Reflection.BindingFlags]'Instance,NonPublic',$null,@($second,$false),$null)
     $restoredMeter=$type.GetField('meter','Instance,NonPublic').GetValue($reopened)
     Require ($orientation.GetValue($restoredMeter)) 'Horizontal divider survives reopening'
+    Require ($quality.GetValue($restoredMeter) -eq 'balanced') 'DLSS quality survives reopening'
+    $quality.SetValue($restoredMeter,'invalid')
+    Require ($quality.GetValue($restoredMeter) -eq 'auto') 'Unknown DLSS quality reverts to Auto'
     Require (!$second.FindName('SharePresence').IsChecked -and !$second.FindName('ShareProject').IsChecked) 'Discord opt-outs survive reopening'
     Require ($second.FindName('VideoRenderer').SelectedItem -eq 'OpenGL' -and !$second.FindName('HdrOutput').IsEnabled) 'Renderer choice survives reopening'
     Require ($second.FindName('DirectStreamSize').SelectedItem -eq '720p') 'Saved 720p source survives reopening'

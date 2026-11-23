@@ -449,7 +449,14 @@ internal static partial class WindowChromeProbe
                                     var restored=Rect(video);
                                     dlss.IsChecked=true;
                                     await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"mode\":\"dlss\""),"DLSS did not activate.");
+                                    var quality=(ComboBox)FindVisual(picture,"ComboBox",e=>AutomationProperties.GetAutomationId(e)=="DlssQuality");
+                                    Require(quality.IsEnabled && quality.Items.Cast<string>().SequenceEqual(new[]{"Auto","Quality","Balanced","Performance","Ultra Performance"}),
+                                            "DLSS mode choices are incomplete.");
+                                    quality.SelectedItem="Balanced";
+                                    await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"dlssQuality\":\"balanced\""),"The dashboard failed to apply Balanced.");
                                     await CheckFullscreenFrame(()=>Click("Fullscreen"),()=>Fits(Rect(video),Screen().Full,2),"DLSS HDR enter fullscreen");
+                                    await Until(()=>((string)snapshot.Invoke(null,null)).Contains("\"activeDlssQuality\":\"balanced\"") &&
+                                        PictureMetric("ActiveDlssQuality").Text=="Active · Balanced","Balanced was not reported as active.");
                                     string enlarged=(string)snapshot.Invoke(null,null);
                                     Require(enlarged.Contains("\"effectivePictureMode\":\"dlss\"") && enlarged.Contains("\"presenterHdr10\":true"),
                                             "Fullscreen lost DLSS or HDR10.");
@@ -463,6 +470,8 @@ internal static partial class WindowChromeProbe
                                             .Deserialize<Dictionary<string,object>>((string)snapshot.Invoke(null,null)));
                                     }
                                     ((RadioButton)FindVisual(picture,"RadioButton",e=>Equals(((RadioButton)e).Content,"Original"))).IsChecked=true;
+                                    Require(!quality.IsVisible && !quality.IsEnabled,"DLSS selector should only be available for DLSS.");
+                                    Note("Balanced selected through the dashboard, verified by live HDR playback telemetry.");
                                 }
                             }
                         }

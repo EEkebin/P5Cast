@@ -11,7 +11,7 @@ namespace Cadrivect
         readonly Func<string[],int> run;
         internal readonly Action Stop, InvalidateDisplay;
         internal readonly Action<int,int> Configure;
-        internal readonly Action<string> SetComparison;
+        internal readonly Action<string> SetComparison, SetDlssQuality;
         internal readonly Action<float> SetWipePosition;
         internal readonly Action<bool> SetWipeHorizontal;
         internal readonly Action<int,float> SetWipeGrip;
@@ -28,6 +28,7 @@ namespace Cadrivect
             var engine=assembly.GetType("Cadrivect.Engine.EmbeddedPlayback",true);
             run=Method<Func<string[],int>>(engine,"Run"); Stop=Method<Action>(engine,"Stop");
             Configure=Method<Action<int,int>>(engine,"Configure"); SetComparison=Method<Action<string>>(engine,"SetComparison");
+            SetDlssQuality=Method<Action<string>>(engine,"SetDlssQuality");
             SetWipeHorizontal=Method<Action<bool>>(engine,"SetWipeHorizontal");
             SetWipeGrip=Method<Action<int,float>>(engine,"SetWipeGrip");
             SetLoupe=Method<Action<bool,float,float,int,float>>(engine,"SetLoupe");

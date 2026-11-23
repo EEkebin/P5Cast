@@ -60,6 +60,17 @@ namespace Cadrivect.Engine
             }
             lock(Gate) if(current!=null) current.SetOutput(resolution,hdr);
         }
+        public static void SetDlssQuality(string quality)
+        {
+            ValidateDlssQuality(quality);
+            lock(Gate) if(current!=null) Interlocked.Exchange(ref current.PendingDlssQuality,quality);
+        }
+        internal static string ValidateDlssQuality(string quality)
+        {
+            if(quality!="auto" && quality!="quality" && quality!="balanced" && quality!="performance" && quality!="ultra-performance")
+                throw new ArgumentException("Choose auto, quality, balanced, performance or ultra-performance.","quality");
+            return quality;
+        }
         internal static string ValidateComparison(string view)
         {
             if(view!="enhanced" && view!="original" && view!="side-by-side" && view!="wipe")
@@ -132,6 +143,7 @@ namespace Cadrivect.Engine
         string resolution,hdr;
         public readonly IntPtr Handle;
         public volatile bool Stopped;
+        public string PendingDlssQuality;
         public volatile string ComparisonView="enhanced";
         public volatile float WipePosition=0.5f;
         public volatile bool WipeHorizontal;

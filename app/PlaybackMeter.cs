@@ -26,6 +26,16 @@ namespace Cadrivect
         static readonly string[] ViewIds={"enhanced","original","side-by-side","wipe"};
         readonly Action<string> compare;
         readonly RadioButton[] views=new RadioButton[ViewIds.Length];
+        static readonly string[] QualityIds={"auto","quality","balanced","performance","ultra-performance"};
+        static readonly string[] QualityLabels={"Auto","Quality","Balanced","Performance","Ultra Performance"};
+        readonly ComboBox qualityChoice;
+        readonly StackPanel qualityGroup;
+        readonly TextBlock activeQuality;
+        internal string DlssQuality {
+            get {return QualityIds[qualityChoice.SelectedIndex];}
+            set {qualityChoice.SelectedIndex=Math.Max(0,Array.IndexOf(QualityIds,value));}
+        }
+        internal event Action<string> DlssQualityChanged;
         readonly Slider divider;
         readonly ToggleButton horizontalSplit;
         internal bool WipeHorizontal {get {return horizontalSplit.IsChecked==true;} set {horizontalSplit.IsChecked=value;}}
@@ -77,10 +87,26 @@ namespace Cadrivect
                 StyleChip(button); modes[i]=button; int index=i;
                 button.Checked+=delegate {
                     if(syncing) return;
-                    selectedMode=index; SendSettings();
+                    selectedMode=index; RefreshQualityChoice(); SendSettings();
                 };
                 modeGrid.Children.Add(button);
             }
+            qualityGroup=new StackPanel {Margin=new Thickness(0,7,0,0)};
+            picture.Children.Add(qualityGroup);
+            var qualityHeader=new DockPanel {Margin=new Thickness(0,0,0,3)};
+            activeQuality=Label("",Mint,11,FontWeights.SemiBold);
+            AutomationProperties.SetAutomationId(activeQuality,"ActiveDlssQuality");
+            DockPanel.SetDock(activeQuality,Dock.Right);
+            qualityHeader.Children.Add(activeQuality);
+            qualityHeader.Children.Add(Label("DLSS mode",Muted,11,FontWeights.Normal));
+            qualityGroup.Children.Add(qualityHeader);
+            qualityChoice=new ComboBox {ItemsSource=QualityLabels,SelectedIndex=0,
+                ToolTip="Auto chooses a mode for the enlargement ratio. At source resolution, DLAA takes over."};
+            qualityChoice.SetResourceReference(FrameworkElement.StyleProperty,typeof(ComboBox));
+            AutomationProperties.SetName(qualityChoice,"DLSS mode");
+            AutomationProperties.SetAutomationId(qualityChoice,"DlssQuality");
+            qualityChoice.SelectionChanged+=delegate {if(DlssQualityChanged!=null) DlssQualityChanged(DlssQuality);};
+            qualityGroup.Children.Add(qualityChoice);
             var resolutionHeader=new DockPanel {Margin=new Thickness(0,7,0,0)};
             pictureScale=Label("",Mint,11,FontWeights.SemiBold);
             DockPanel.SetDock(pictureScale,Dock.Right);
@@ -328,7 +354,7 @@ namespace Cadrivect
             finally {syncing=false;}
             hdr=false; lastSample=-1; pendingSettings=DateTime.MinValue; dial.SetRates(double.NaN,double.NaN,double.NaN,double.NaN);
             sourceValue.Text=generatedValue.Text="—"; targetValue.Text="Target —";
-            pictureSize.Text="Waiting for video"; pictureScale.Text="";
+            pictureSize.Text="Waiting for video"; pictureScale.Text=""; activeQuality.Text="";
             foreach(var label in values.Values) label.Text="—";
             values["format"].ToolTip=null;
             ShowRequested(directSelected);
@@ -351,6 +377,12 @@ namespace Cadrivect
                 modes[i].IsEnabled=available; modes[i].ToolTip=reason;
             }
             for(int i=0;i<factors.Length;i++) factors[i].IsEnabled=i==0 || !noAdapter;
+            RefreshQualityChoice();
+        }
+        void RefreshQualityChoice()
+        {
+            qualityGroup.Visibility=selectedMode==4 ? Visibility.Visible : Visibility.Collapsed;
+            qualityChoice.IsEnabled=selectedMode==4 && modes[4].IsEnabled;
         }
         static object Field(Dictionary<string,object> data,string key)
         {
@@ -440,11 +472,13 @@ namespace Cadrivect
             syncing=true;
             try {
                 if(DateTime.UtcNow>=pendingSettings || (mode==selectedMode && factor==selectedFactor)) {
-                    if(mode>=0) {selectedMode=mode; modes[mode].IsChecked=true;}
+                    if(mode>=0 && mode!=selectedMode) {selectedMode=mode; modes[mode].IsChecked=true; RefreshQualityChoice();}
                     if(factor>=1 && factor<=4) {selectedFactor=(int)factor; factors[selectedFactor-1].IsChecked=true;}
                     pendingSettings=DateTime.MinValue;
                 }
             } finally {syncing=false;}
+            int quality=Array.IndexOf(QualityIds,Text(snapshot,"activeDlssQuality"));
+            activeQuality.Text=effective=="dlss" && quality>0 ? "Active · "+QualityLabels[quality] : "";
             string message=Text(snapshot,"effectNotice");
             int active=Array.IndexOf(ModeIds,effective);
             if(string.IsNullOrEmpty(message) && comparing!=true && active>=0 && mode>=0 && active!=mode && effective!="dlaa") message="Active picture · "+ModeLabels[active];

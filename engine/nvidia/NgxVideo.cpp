@@ -30,8 +30,11 @@ static NVSDK_NGX_PerfQuality_Value qualityForSize(const VideoState& state, unsig
     return NVSDK_NGX_PerfQuality_Value_MaxQuality;
 }
 
-EXPORT unsigned NgxConfigureFeature(VideoState* state, ID3D11DeviceContext* context,
-    unsigned outputWidth, unsigned outputHeight, int dlaa, int hdr) {
+EXPORT unsigned NgxConfigureFeature2(VideoState* state, ID3D11DeviceContext* context,
+    unsigned outputWidth, unsigned outputHeight, int dlaa, int hdr, int requestedQuality, int* activeQuality) {
+    // The bridge uses NGX PerfQuality values. -1 means choose from the live image dimensions.
+    if (requestedQuality != -1 && (requestedQuality < NVSDK_NGX_PerfQuality_Value_MaxPerf ||
+        requestedQuality > NVSDK_NGX_PerfQuality_Value_UltraPerformance)) return NVSDK_NGX_Result_FAIL_InvalidParameter;
     if (!state || !context || !outputWidth || !outputHeight) return NVSDK_NGX_Result_FAIL_InvalidParameter;
     if (state->feature) {
         auto released=NVSDK_NGX_D3D11_ReleaseFeature(state->feature);
@@ -43,15 +46,23 @@ EXPORT unsigned NgxConfigureFeature(VideoState* state, ID3D11DeviceContext* cont
     create.Feature.InHeight=state->inputHeight;
     create.Feature.InTargetWidth=outputWidth;
     create.Feature.InTargetHeight=outputHeight;
-    create.Feature.InPerfQualityValue=qualityForSize(*state,outputWidth,outputHeight,dlaa!=0);
+    create.Feature.InPerfQualityValue=(dlaa || requestedQuality == -1)
+        ? qualityForSize(*state,outputWidth,outputHeight,dlaa!=0)
+        : static_cast<NVSDK_NGX_PerfQuality_Value>(requestedQuality);
     create.InFeatureCreateFlags=NVSDK_NGX_DLSS_Feature_Flags_MVLowRes | NVSDK_NGX_DLSS_Feature_Flags_AutoExposure;
     if (hdr) create.InFeatureCreateFlags |= NVSDK_NGX_DLSS_Feature_Flags_IsHDR;
-    return NGX_D3D11_CREATE_DLSS_EXT(context,&state->feature,state->parameters,&create);
+    auto result=NGX_D3D11_CREATE_DLSS_EXT(context,&state->feature,state->parameters,&create);
+    if (NVSDK_NGX_SUCCEED(result) && activeQuality) *activeQuality=create.Feature.InPerfQualityValue;
+    return result;
 }
-EXPORT unsigned NgxOpen2(ID3D11Device* device, ID3D11DeviceContext* context,
+EXPORT unsigned NgxConfigureFeature(VideoState* state, ID3D11DeviceContext* context,
+    unsigned outputWidth, unsigned outputHeight, int dlaa, int hdr) {
+    return NgxConfigureFeature2(state,context,outputWidth,outputHeight,dlaa,hdr,-1,nullptr);
+}
+EXPORT unsigned NgxOpen3(ID3D11Device* device, ID3D11DeviceContext* context,
     const wchar_t* runtimeFolder, const wchar_t* dataFolder, unsigned inputWidth,
     unsigned inputHeight, unsigned outputWidth, unsigned outputHeight, int dlaa, int hdr,
-    VideoState** out, int* stage) {
+    int requestedQuality, int* activeQuality, VideoState** out, int* stage) {
     if (!out || !stage || !device || !context || !runtimeFolder || !dataFolder)
         return NVSDK_NGX_Result_FAIL_InvalidParameter;
     *out=nullptr;
@@ -83,11 +94,17 @@ EXPORT unsigned NgxOpen2(ID3D11Device* device, ID3D11DeviceContext* context,
     }
     if (NVSDK_NGX_SUCCEED(result)) {
         *stage=4;
-        result=static_cast<NVSDK_NGX_Result>(NgxConfigureFeature(state,context,outputWidth,outputHeight,dlaa,hdr));
+        result=static_cast<NVSDK_NGX_Result>(NgxConfigureFeature2(state,context,outputWidth,outputHeight,dlaa,hdr,requestedQuality,activeQuality));
     }
     if (NVSDK_NGX_FAILED(result)) delete state;
     else *out=state;
     return result;
+}
+EXPORT unsigned NgxOpen2(ID3D11Device* device, ID3D11DeviceContext* context,
+    const wchar_t* runtimeFolder, const wchar_t* dataFolder, unsigned inputWidth,
+    unsigned inputHeight, unsigned outputWidth, unsigned outputHeight, int dlaa, int hdr,
+    VideoState** out, int* stage) {
+    return NgxOpen3(device,context,runtimeFolder,dataFolder,inputWidth,inputHeight,outputWidth,outputHeight,dlaa,hdr,-1,nullptr,out,stage);
 }
 // Keep the original SDR entry point available during in-place application upgrades.
 EXPORT unsigned NgxOpen(ID3D11Device* device, ID3D11DeviceContext* context,

@@ -254,6 +254,7 @@ internal static class Player
             string hdr=Option(args,"--hdr","auto").ToLowerInvariant();
             if(hdr!="auto" && hdr!="off" && hdr!="hdr10") throw new ArgumentException("Choose auto, off, or hdr10 for --hdr.");
             string mode=Option(args,"--mode",testing ? "fsr":"original").ToLowerInvariant();
+            string dlssQuality=EmbeddedPlayback.ValidateDlssQuality(Option(args,"--dlss-quality","auto").ToLowerInvariant());
             string filename=Option(args,"--report",null);
             string pipe=Option(args,"--direct-pipe",null), runtime=Option(args,"--direct-runtime",null);
             bool direct=pipe!=null;
@@ -288,6 +289,7 @@ internal static class Player
                     using(var controls=host==null ? new PlaybackControls(window,source,mode,multiplier,targetFps):null)
                     using(var live=filename==null ? null:new LiveReport(filename))
                     {
+                        renderer.SetDlssQuality(dlssQuality);
                         string requestedMode=null, settingsNotice=null;
                         int requestedMultiplier=multiplier;
                         bool changeRequested=false,compare=false;
@@ -345,6 +347,11 @@ internal static class Player
                                     if(loupe==null) renderer.SetLoupe(false,0,0,0,1);
                                     else renderer.SetLoupe(true,loupe.X,loupe.Y,loupe.Level,loupe.Scale);
                                     redraw=true;
+                                }
+                                string newQuality=host==null ? null : Interlocked.Exchange(ref host.PendingDlssQuality,null);
+                                if(newQuality!=null && newQuality!=renderer.DlssQuality) {
+                                    renderer.SetDlssQuality(newQuality);
+                                    if(mode=="dlss") {step=0; previousTime=0; redraw=true;}
                                 }
                                 string newSize,newHdr;
                                 if(host!=null && host.TakeOutput(out newSize,out newHdr)) {
@@ -543,6 +550,7 @@ internal static class Player
                +",\"presentationColorSpace\":"+JsonString(renderer.PresenterHdr10 ? "BT.2020 PQ":"sRGB")
                +",\"presenterHdrFormat\":"+(renderer.PresenterHdr10 ? "\"RGB10A2_UNORM\"":"null")
                +",\"outputNotice\":"+JsonString(renderer.OutputNotice)
+               +",\"dlssQuality\":"+JsonString(renderer.DlssQuality)+",\"activeDlssQuality\":"+JsonString(renderer.ActiveDlssQuality)
                +",\"renderer\":"+JsonString(renderer.Backend)+",\"processingRenderer\":\"d3d11\""+",\"inputWidth\":"+input.Width+",\"inputHeight\":"+input.Height+",\"targetFps\":"+Number(targetFps==0 ? -1:targetFps)
                +",\"targetPresentedFps\":"+Number(targetFps==0 ? -1:targetFps*factor)+",\"lastPcSubmitMs\":"+Number(age)
                +",\"sourceKind\":"+JsonString(demo ? "demo":direct==null ? "window":"direct")

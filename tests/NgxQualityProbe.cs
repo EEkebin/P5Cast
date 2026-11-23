@@ -199,6 +199,44 @@ internal static partial class EmbeddedProbe {
             hdr?"HDR":"SDR",mode,p99Loss,peakLoss,whiteLoss.Count);
         return p99Loss<.016 && peakLoss<.035;
     }
+    static void CheckDlssPresets(Type type,object renderer,Device device,Texture2D input,FieldInfo backBuffer,bool hdr) {
+        var source=new Size(input.Description.Width,input.Description.Height);
+        var fullscreen=new Size(2560,1440);
+        var active=type.GetProperty("ActiveDlssQuality");
+        var choose=type.GetMethod("SetDlssQuality");
+        var resize=type.GetMethod("Resize");
+        var evaluations=type.GetProperty("VendorEvaluations");
+        int frame=0;
+        Action<string,Size> checkFrame=(expected,size)=>{
+            int before=(int)evaluations.GetValue(renderer,null);
+            UploadQualityFrame(device,input,frame++,hdr);
+            type.GetMethod("Receive").Invoke(renderer,new object[]{input,new Rectangle(System.Drawing.Point.Empty,source),false});
+            type.GetMethod("Show").Invoke(renderer,new object[]{"dlss",1f,false,false});
+            Check((int)evaluations.GetValue(renderer,null)>before,"No real NGX evaluation for "+expected+".");
+            Check((string)active.GetValue(renderer,null)==expected,"Wrong active DLSS quality; expected "+expected+".");
+            Check((Size)type.GetProperty("InputSize").GetValue(renderer,null)==source &&
+                  (Size)type.GetProperty("RenderSize").GetValue(renderer,null)==size,"Choosing "+expected+" changed the stream or processing resolution.");
+            var target=(Texture2D)backBuffer.GetValue(renderer);
+            Check(target.Description.Width==size.Width && target.Description.Height==size.Height,"Unexpected presentation size.");
+            var pixels=ReadPresentedTexture(device,target);
+            int x=320*size.Width/source.Width,y=36*size.Height/source.Height;
+            double code=Code(pixels[y*size.Width+x],0,hdr);
+            Check(hdr ? Math.Abs(Nits(code)-200)<5 : Math.Abs(code-224.0/255)<.02,"Missing reference patch for "+expected+".");
+        };
+        foreach(string preset in new[]{"performance","quality","balanced","ultra-performance","auto"}) {
+            choose.Invoke(renderer,new object[]{preset});
+            checkFrame(preset=="auto" ? "quality" : preset,fullscreen);
+        }
+        choose.Invoke(renderer,new object[]{"balanced"});
+        resize.Invoke(renderer,new object[]{source});
+        checkFrame("dlaa",source);
+        resize.Invoke(renderer,new object[]{fullscreen});
+        checkFrame("balanced",fullscreen);
+        type.GetMethod("SetPictureMode").Invoke(renderer,new object[]{"original"});
+        Check(string.IsNullOrEmpty((string)active.GetValue(renderer,null)),"Original still reports an active DLSS preset.");
+        Console.WriteLine("{0} 1080p to 1440p: all four manual NGX modes, Auto, native DLAA, and returning to Balanced passed.",
+                          hdr ? "HDR" : "SDR");
+    }
     static bool CheckFullHdFit(Type type,object renderer,Device device,FieldInfo backBuffer,bool hdr) {
         var fullHd=new Size(1920,1080);
         bool pass=true;
@@ -229,6 +267,7 @@ internal static partial class EmbeddedProbe {
                     pass&=MeasureMovingWhites(baseline,pixels,fit.Width,crop,hdr,effect+" at "+fit.Width+"x"+fit.Height);
                 }
             }
+            CheckDlssPresets(type,renderer,device,input,backBuffer,hdr);
         }
         return pass;
     }

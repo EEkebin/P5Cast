@@ -14,12 +14,24 @@ internal sealed partial class Renderer
     GpuImage neuralCurrent, neuralPrevious, rgba, vectors, depth, strokeMask, ngxOutput;
     Size neuralSize;
     string neuralMode;
+    string dlssQuality="auto",configuredQuality;
     int evaluatedFrame = -1;
     bool havePriorEnhanced, resetHistory;
     float frameMilliseconds = 16.67f;
     public int VendorEvaluations { get; private set; }
     public int HardwareMotionPairs { get; private set; }
     public string ActiveEffect { get { return IsVendor(EffectivePictureMode) ? neuralMode ?? "" : ""; } }
+
+    public string DlssQuality { get { return dlssQuality; } }
+    public string ActiveDlssQuality { get { return ngx!=null && (ActiveEffect=="dlss" || ActiveEffect=="dlaa") ? ngx.ActiveQuality : ""; } }
+
+    public void SetDlssQuality(string key)
+    {
+        NgxVideo.QualityValue(key);
+        if(dlssQuality==key) return;
+        dlssQuality=key;
+        if(failedMode=="dlss") { failedMode=null; EffectNotice=""; }
+    }
 
     public void SetFrameTiming(double delta,bool continuous)
     {
@@ -60,7 +72,8 @@ internal sealed partial class Renderer
         var target=ProcessingSize(mode);
         bool native=mode=="dlaa" || (mode=="dlss" && target==srcSize);
         string effective=native ? "dlaa" : mode;
-        if(neuralMode!=effective || neuralSize!=target)
+        string quality=effective=="dlss" ? dlssQuality : "auto";
+        if(neuralMode!=effective || neuralSize!=target || configuredQuality!=quality)
         {
             // The input and GPU device are unchanged on a window resize. Keep their
             // initialized SDK runtime while rebuilding the size-dependent output.
@@ -68,6 +81,7 @@ internal sealed partial class Renderer
             ReleaseEffects(reuseRuntime);
             neuralSize=target;
             neuralMode=effective;
+            configuredQuality=quality;
             var format=HdrEnabled ? Format.R16G16B16A16_Float : Format.R8G8B8A8_UNorm;
             neuralCurrent=new GpuImage(Device,target.Width,target.Height,format,true,true);
             neuralPrevious=new GpuImage(Device,target.Width,target.Height,format,true,true);
@@ -83,8 +97,8 @@ internal sealed partial class Renderer
                 depth=new GpuImage(Device,srcSize.Width,srcSize.Height,Format.R32_Float,true);
                 // Remote Play supplies no scene geometry. Model the finished video as one plane.
                 context.ClearRenderTargetView(depth.Write,new RawColor4(0.5f,0,0,1));
-                if(ngx==null) ngx=new NgxVideo(Device,srcSize.Width,srcSize.Height,target.Width,target.Height,native,HdrEnabled);
-                else ngx.Resize(context,target.Width,target.Height,native,HdrEnabled);
+                if(ngx==null) ngx=new NgxVideo(Device,srcSize.Width,srcSize.Height,target.Width,target.Height,native,HdrEnabled,quality);
+                else ngx.Resize(context,target.Width,target.Height,native,HdrEnabled,quality);
             }
             RestoreDrawState();
         }

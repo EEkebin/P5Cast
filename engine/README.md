@@ -24,6 +24,7 @@ Choose a renderer before starting a session with `--renderer auto`, `d3d11`, `d3
 | `--mode sharp` | Bounded cubic enlargement and a spatial detail filter. |
 | `--mode fsr` | FidelityFX Super Resolution 1 EASU for enlargement and RCAS sharpening. Native-size input goes directly to RCAS. |
 | `--mode rtxvideo` | NVIDIA RTX Video Super Resolution at High quality on SDR. |
+| `--dlss-quality auto\|quality\|balanced\|performance\|ultra-performance` | Select the NGX quality mode for DLSS enlargement. Auto chooses by scale ratio. Native-size processing uses DLAA. |
 | `--mode dlss` or `dlaa` | Experimental NVIDIA NGX processing in SDR or floating-point HDR. The player estimates motion, uses a constant depth plane and supplies zero camera jitter. DLSS uses DLAA when the input already fills or exceeds the processing dimensions. |
 | `--comparison enhanced`, `original`, `side-by-side`, `wipe` | Changes the view independently of picture settings. Side by side fits the entire image into each pane. Wipe overlays the original and enhanced frames at the same full-size pixel coordinates. |
 | `--wipe-position 0.5` | Initial divider position along its usable travel, from 0 to 1. Both endpoints leave room to grab the handle. Embedded callers can change this live with `SetWipePosition(float)`. |

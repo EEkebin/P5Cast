@@ -7,11 +7,21 @@ internal sealed class NgxVideo : IDisposable
 {
     const string Bridge = "Cadrivect.Ngx.dll";
     IntPtr state;
+    // NGX PerfQuality values in SDK order. Ultra Quality (4) is reserved.
+    static readonly string[] Qualities={"performance","balanced","quality","ultra-performance",null,"dlaa"};
+    public string ActiveQuality { get; private set; }
+    public static int QualityValue(string key)
+    {
+        if (key=="auto") return -1;
+        int value=Array.IndexOf(Qualities,key,0,4);
+        if (value<0) throw new ArgumentException("Unknown DLSS quality mode.","key");
+        return value;
+    }
 
     [DefaultDllImportSearchPaths(DllImportSearchPath.AssemblyDirectory | DllImportSearchPath.System32)]
     [DllImport(Bridge, CallingConvention=CallingConvention.Cdecl, ExactSpelling=true, CharSet=CharSet.Unicode)]
-    static extern uint NgxOpen2(IntPtr device, IntPtr context, string runtimeDirectory, string dataDirectory,
-        int inputWidth, int inputHeight, int outputWidth, int outputHeight, int dlaa, int hdr, out IntPtr state, out int stage);
+    static extern uint NgxOpen3(IntPtr device, IntPtr context, string runtimeDirectory, string dataDirectory,
+        int inputWidth, int inputHeight, int outputWidth, int outputHeight, int dlaa, int hdr, int requestedQuality, out int activeQuality, out IntPtr state, out int stage);
 
     [DefaultDllImportSearchPaths(DllImportSearchPath.AssemblyDirectory | DllImportSearchPath.System32)]
     [DllImport(Bridge, CallingConvention=CallingConvention.Cdecl, ExactSpelling=true)]
@@ -24,9 +34,12 @@ internal sealed class NgxVideo : IDisposable
 
     [DefaultDllImportSearchPaths(DllImportSearchPath.AssemblyDirectory | DllImportSearchPath.System32)]
     [DllImport(Bridge, CallingConvention=CallingConvention.Cdecl, ExactSpelling=true)]
-    static extern uint NgxConfigureFeature(IntPtr state, IntPtr context, int outputWidth, int outputHeight, int dlaa, int hdr);
+    static extern uint NgxConfigureFeature2(IntPtr state, IntPtr context, int outputWidth, int outputHeight, int dlaa, int hdr, int requestedQuality, out int activeQuality);
 
     public NgxVideo(Device device,int inputWidth,int inputHeight,int outputWidth,int outputHeight,bool dlaa,bool hdr=false)
+        : this(device,inputWidth,inputHeight,outputWidth,outputHeight,dlaa,hdr,"auto") {}
+
+    public NgxVideo(Device device,int inputWidth,int inputHeight,int outputWidth,int outputHeight,bool dlaa,bool hdr,string quality)
     {
         if (inputWidth<1 || inputHeight<1 || outputWidth<1 || outputHeight<1)
             throw new ArgumentOutOfRangeException("inputWidth","NVIDIA frame dimensions must be positive.");
@@ -39,11 +52,12 @@ internal sealed class NgxVideo : IDisposable
             throw new FileNotFoundException("Install the complete Windows package including the NVIDIA runtime.");
         string data=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Cadrivect","NGX");
         Directory.CreateDirectory(data);
-        int stage;
-        uint result=NgxOpen2(device.NativePointer,device.ImmediateContext.NativePointer,runtime,data,
-            inputWidth,inputHeight,outputWidth,outputHeight,dlaa ? 1 : 0,hdr ? 1 : 0,out state,out stage);
+        int stage,activeQuality;
+        uint result=NgxOpen3(device.NativePointer,device.ImmediateContext.NativePointer,runtime,data,
+            inputWidth,inputHeight,outputWidth,outputHeight,dlaa ? 1 : 0,hdr ? 1 : 0,QualityValue(quality),out activeQuality,out state,out stage);
         string[] stages={"allocation","driver initialization","capability query","DLSS availability","feature creation"};
         Check(result,stages[Math.Max(0,Math.Min(stage,stages.Length-1))]);
+        ActiveQuality=Qualities[activeQuality];
     }
 
     public void Evaluate(DeviceContext context,Texture2D color,Texture2D motion,Texture2D depth,Texture2D output,
@@ -55,9 +69,12 @@ internal sealed class NgxVideo : IDisposable
         Check(result,"frame evaluation");
     }
 
-    public void Resize(DeviceContext context,int width,int height,bool dlaa,bool hdr)
+    public void Resize(DeviceContext context,int width,int height,bool dlaa,bool hdr,string quality="auto")
     {
-        Check(NgxConfigureFeature(state,context.NativePointer,width,height,dlaa ? 1 : 0,hdr ? 1 : 0),"resizing the output");
+        int activeQuality;
+        Check(NgxConfigureFeature2(state,context.NativePointer,width,height,dlaa ? 1 : 0,hdr ? 1 : 0,
+            QualityValue(quality),out activeQuality),"configuring the output");
+        ActiveQuality=Qualities[activeQuality];
     }
 
     static void Check(uint result,string operation)

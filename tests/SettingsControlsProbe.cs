@@ -43,7 +43,7 @@ internal static partial class WindowChromeProbe
     {
         Click("DisplayGroup");
         var graphics=Find<Button>("DisplayGroup");
-        Require(Find<ComboBox>("VideoRenderer").IsVisible &&
+        await Until(()=>Find<ComboBox>("VideoRenderer").IsVisible &&
                 System.Windows.Automation.AutomationProperties.GetItemStatus(graphics)=="Selected",
                 "Graphics & display did not expose the graphics API selector.");
         var selector=Find<ComboBox>("RenderResolution");
@@ -75,6 +75,7 @@ internal static partial class WindowChromeProbe
         double originalHeight=settings.MaxHeight;
         try {
             settings.MaxHeight=70; settings.ScrollToTop(); window.UpdateLayout();
+            await window.Dispatcher.InvokeAsync(delegate {},System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             await Until(delegate{return settings.ScrollableHeight>15;},"Settings content did not become scrollable.");
             var bar=SettingsBar(settings);
             var track=(Track)bar.Template.FindName("PART_Track",bar);

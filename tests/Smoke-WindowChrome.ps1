@@ -1,6 +1,6 @@
 # After Build.ps1. The WPF test only opens on a disposable, inactive Windows desktop.
 [CmdletBinding()]
-param([string]$AppRoot,[switch]$CheckRenderers,[switch]$CheckHdr,[switch]$CheckScaling,[switch]$CheckDrawers,[string]$Screenshot,[switch]$CheckWipeInput,[switch]$CheckTransport)
+param([string]$AppRoot,[switch]$CheckRenderers,[switch]$CheckHdr,[switch]$CheckScaling,[switch]$CheckDrawers,[string]$Screenshot,[switch]$CheckWipeInput,[switch]$CheckTransport,[switch]$CheckSetup)
 $ErrorActionPreference='Stop'
 if(!$AppRoot){$AppRoot=Split-Path $PSScriptRoot}
 $AppRoot=(Resolve-Path -LiteralPath $AppRoot).Path
@@ -14,7 +14,7 @@ try {
     $manifest=Join-Path (Split-Path $PSScriptRoot) 'app\app.manifest'
     $refs=@('PresentationFramework','PresentationCore','WindowsBase','UIAutomationTypes','UIAutomationProvider') | ForEach-Object {"/r:$fx\WPF\$_.dll"}
     $probe=Join-Path $stage 'WindowChromeProbe.exe'
-    & "$fx\csc.exe" /nologo /target:exe /optimize+ /platform:x64 /r:System.Xaml.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll "/win32manifest:$manifest" @refs "/out:$probe" "$PSScriptRoot\WindowChromeProbe.cs" "$PSScriptRoot\DrawerProbe.cs" "$PSScriptRoot\SettingsControlsProbe.cs" "$PSScriptRoot\WipeInputProbe.cs" "$PSScriptRoot\..\engine\WipeLayout.cs" "$PSScriptRoot\TransportProbe.cs"
+    & "$fx\csc.exe" /nologo /target:exe /optimize+ /platform:x64 /r:System.Xaml.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll "/win32manifest:$manifest" @refs "/out:$probe" "$PSScriptRoot\WindowChromeProbe.cs" "$PSScriptRoot\DrawerProbe.cs" "$PSScriptRoot\SettingsControlsProbe.cs" "$PSScriptRoot\WipeInputProbe.cs" "$PSScriptRoot\..\engine\WipeLayout.cs" "$PSScriptRoot\TransportProbe.cs" "$PSScriptRoot\SetupWizardProbe.cs"
     if($LASTEXITCODE){throw 'Window chrome probe compilation failed.'}
     $prior=$env:P5CAST_PROBE_RENDERERS
     $priorScale=$env:P5CAST_PROBE_SCALING
@@ -22,7 +22,9 @@ try {
     $priorShot=$env:P5CAST_SCREENSHOT
     $priorTransport=$env:P5CAST_PROBE_TRANSPORT
     $priorWipe=$env:P5CAST_PROBE_WIPE_INPUT
+    $priorSetup=$env:P5CAST_PROBE_SETUP
     try {
+        $env:P5CAST_PROBE_SETUP=if($CheckSetup){'1'}else{'0'}
         $env:P5CAST_PROBE_TRANSPORT=if($CheckTransport){'1'}else{'0'}
         $env:P5CAST_PROBE_DRAWERS=if($CheckDrawers){'1'}else{'0'}
         $env:P5CAST_SCREENSHOT=if($Screenshot){[IO.Path]::GetFullPath($Screenshot)}else{$null}
@@ -35,6 +37,7 @@ try {
         $env:P5CAST_PROBE_DRAWERS=$priorDrawer; $env:P5CAST_SCREENSHOT=$priorShot
         $env:P5CAST_PROBE_TRANSPORT=$priorTransport
         $env:P5CAST_PROBE_WIPE_INPUT=$priorWipe
+        $env:P5CAST_PROBE_SETUP=$priorSetup
     }
     if($LASTEXITCODE){throw 'Window chrome regression failed.'}
 } finally {

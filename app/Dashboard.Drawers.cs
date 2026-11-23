@@ -16,7 +16,8 @@ namespace Cadrivect
         const double SettingsDefault=220, SettingsMinimum=112, SettingsMaximum=640;
         const double PlaybackMinimumWidth=472, PlaybackMinimumHeight=180;
         double sidebarWidth,settingsHeight;
-        bool settingsOpen;
+        bool settingsOpen,updatingSettingsNavigation;
+        readonly string[] settingsModes={"Play","Host","Client"};
         int sidebarMotion,settingsMotion;
 
         static double ReadDrawerSize(Dictionary<string,object> saved,string key,double fallback,double minimum,double maximum)
@@ -38,8 +39,77 @@ namespace Cadrivect
             RoutedEventHandler change=delegate {SetSettingsDrawer(toggle.IsChecked==true);};
             toggle.Checked+=change; toggle.Unchecked+=change;
             BindDrawerGrip(true); BindDrawerGrip(false);
+            InitSettingsNavigation();
             UI<Grid>("Workspace").SizeChanged+=delegate {RefreshDrawerSizes();};
             ApplySettingsDrawer();
+        }
+
+        void InitSettingsNavigation()
+        {
+            for(int i=0;i<settingsModes.Length;i++) {
+                var group=settingsGroups[i];
+                var picker=UI<ComboBox>(settingsModes[i]+"SectionPicker");
+                picker.SelectionChanged+=delegate {
+                    var choice=picker.SelectedItem as ComboBoxItem;
+                    if(!updatingSettingsNavigation && choice!=null) SelectGroup(group,(string)choice.Tag);
+                };
+                UI<StackPanel>(settingsModes[i]+"Page").IsVisibleChanged+=delegate(object sender,DependencyPropertyChangedEventArgs e) {
+                    if((bool)e.NewValue) UI<ScrollViewer>("SettingsContentScroll").ScrollToTop();
+                };
+            }
+            var surface=UI<DockPanel>("SettingsWorkbench");
+            surface.SizeChanged+=delegate {
+                bool compact=surface.ActualWidth<704 || surface.ActualHeight<172;
+                UI<Grid>("CompactSettingsSections").Visibility=compact?Visibility.Visible:Visibility.Collapsed;
+                UI<Grid>("SettingsSections").Visibility=compact?Visibility.Collapsed:Visibility.Visible;
+                foreach(string mode in settingsModes)
+                    UI<TextBlock>(mode+"SettingsHeading").Visibility=compact?Visibility.Collapsed:Visibility.Visible;
+            };
+            var fields=UI<Grid>("Pages");
+            fields.SizeChanged+=delegate {
+                int count=Math.Max(1,(int)(fields.ActualWidth/186));
+                UI<UniformGrid>("ConsoleFields").Columns=Math.Min(count,2);
+                UI<UniformGrid>("HostFields").Columns=Math.Min(count,2);
+                UI<UniformGrid>("DisplayFields").Columns=Math.Min(Math.Max(1,(int)(fields.ActualWidth/204)),4);
+                foreach(string name in new[]{"StreamFields","PairFields","ClientFields"})
+                    UI<UniformGrid>(name).Columns=Math.Min(count,3);
+            };
+            var transport=UI<DockPanel>("TransportBar");
+            var fullscreenButton=UI<Button>("Fullscreen");
+            AutomationProperties.SetName(fullscreenButton,"Fullscreen");
+            transport.SizeChanged+=delegate {
+                // The playback controls remain reachable when the sidebar leaves a narrow viewport.
+                bool compact=transport.ActualWidth<525;
+                UI<ComboBox>("SourceChoice").Width=compact?122:142;
+                UI<TextBlock>("SettingsActionLabel").Visibility=compact?Visibility.Collapsed:Visibility.Visible;
+                UI<System.Windows.Shapes.Path>("SettingsActionGlyph").Visibility=compact?Visibility.Visible:Visibility.Collapsed;
+            };
+        }
+
+        void UpdateSettingsNavigation(string[] group,string selected)
+        {
+            int index=Array.IndexOf(settingsGroups,group);
+            if(index<0) return;
+            string mode=settingsModes[index];
+            updatingSettingsNavigation=true;
+            try {
+                var picker=UI<ComboBox>(mode+"SectionPicker");
+                var visible=new List<string>();
+                foreach(string key in group)
+                    if(UI<Button>(key+"Group").Visibility==Visibility.Visible) visible.Add(key);
+                // Sony capture and the offline demo omit the Direct-only console and stream pages.
+                bool rebuild=visible.Count!=picker.Items.Count;
+                for(int i=0;!rebuild && i<visible.Count;i++)
+                    rebuild=!Equals(((ComboBoxItem)picker.Items[i]).Tag,visible[i]);
+                if(rebuild) {
+                    picker.Items.Clear();
+                    foreach(string key in visible)
+                        picker.Items.Add(new ComboBoxItem {Content=UI<Button>(key+"Group").Content,Tag=key});
+                }
+                picker.SelectedIndex=visible.IndexOf(selected);
+                UI<TextBlock>(mode+"SettingsHeading").Text=Convert.ToString(UI<Button>(selected+"Group").Content);
+                UI<ScrollViewer>("SettingsContentScroll").ScrollToTop();
+            } finally {updatingSettingsNavigation=false;}
         }
 
         double DrawerLimit(bool side)

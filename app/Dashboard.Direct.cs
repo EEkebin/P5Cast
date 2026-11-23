@@ -50,6 +50,11 @@ namespace Cadrivect
         }
         void UpdateTransport()
         {
+            if(!Active && !preparing && pendingSetupConsole!=null) {
+                string selected=pendingSetupConsole;
+                pendingSetupConsole=null;
+                ReloadConsoles(selected);
+            }
             var button=UI<Button>("OpenSource");
             var glyph=button.Content as TransportGlyph;
             if(glyph==null) button.Content=glyph=new TransportGlyph();

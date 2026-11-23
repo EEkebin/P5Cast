@@ -85,6 +85,10 @@ namespace Cadrivect
         }
         async void OnDashboardClosing(object sender,System.ComponentModel.CancelEventArgs e)
         {
+            if(SetupOpen) {
+                if(setupPairing) {e.Cancel=true; return;}
+                CloseSetup(false);
+            }
             if(!closing && (requestingRest || (!stopping && directCore!=null && firstFrame && playingMac!=null))) {
                 e.Cancel=true;
                 await RequestDisconnect(true);

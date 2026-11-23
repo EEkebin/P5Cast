@@ -1,4 +1,4 @@
-# Inspect the actual WPF panels without showing a window or starting a session.
+﻿# Inspect the actual WPF panels without showing a window or starting a session.
 [CmdletBinding()]
 param([string]$AppRoot)
 $ErrorActionPreference='Stop'
@@ -149,6 +149,21 @@ try {
     Require (!(Widget VideoRenderer).IsEnabled) 'Connecting locks the renderer'
     State preparing $false; Call UpdateTransport
     Require ((Widget VideoRenderer).IsEnabled) 'Stopping unlocks the renderer'
+    $sourcePicker=Widget SourceChoice
+    $previousSource=$sourcePicker.SelectedIndex
+    $sectionPicker=Widget PlaySectionPicker
+    try {
+        foreach($sourceIndex in @(0,1,0)) {
+            $sourcePicker.SelectedIndex=$sourceIndex
+            $expected=if($sourceIndex -eq 0){'Console,Stream,Display,Interface,Discord'}else{'Display,Interface,Discord'}
+            $actual=($sectionPicker.Items | ForEach-Object {$_.Tag}) -join ','
+            Require ($actual -eq $expected) 'Compact settings follow Direct and Sony source availability'
+            $sectionPicker.SelectedIndex=$sectionPicker.Items.Count-1
+            Require ((IsShown DiscordSettings) -and !(IsShown ConsoleSettings)) 'Compact selection opens the corresponding settings group'
+            Click DisplayGroup
+            Require ($sectionPicker.SelectedItem.Tag -eq 'Display') 'Rail selection synchronizes the compact selector'
+        }
+    } finally {$sourcePicker.SelectedIndex=$previousSource}
     Click DisplayGroup
     Require ((IsShown DisplaySettings) -and !(IsShown StreamSettings)) 'Display group'
     Click HostNav; Click DevicesGroup

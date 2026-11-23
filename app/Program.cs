@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.16.1.0")]
+[assembly: AssemblyVersion("0.17.0.0")]
 
 namespace Cadrivect
 {
@@ -144,6 +144,7 @@ namespace Cadrivect
                 catch(System.ComponentModel.Win32Exception ex) {Show(ex.Message,true);}
             };
             var saved = ReadSettings();
+            InitSetup(saved,client);
             meter.DlssModelHint=Field(saved,"dlssModelHint");
             meter.DlssModelChanged+=delegate(string model) {
                 if(rendering!=null) engine.SetDlssModel(model);
@@ -266,6 +267,13 @@ namespace Cadrivect
             window.PreviewKeyDown+=async delegate(object sender,KeyEventArgs e) {
                 bool chord=(Keyboard.Modifiers & (ModifierKeys.Control|ModifierKeys.Alt))==(ModifierKeys.Control|ModifierKeys.Alt);
                 var key=e.Key==Key.System?e.SystemKey:e.Key;
+                if(SetupOpen) {
+                    if(key==Key.Escape && !SetupDropDownOpen()) {
+                        if(!setupPairing) CloseSetup(true);
+                        e.Handled=true;
+                    } else if(key==Key.F11 || chord) e.Handled=true;
+                    return;
+                }
                 if(key==Key.Escape && !fullscreen && UI<Border>("StatusHistorySheet").IsVisible) SetStatusHistory(false);
                 else if(key==Key.F11 || (chord && key==Key.Enter)) ToggleFullscreen();
                 else if(chord && key==Key.O) ToggleStats();
@@ -513,6 +521,7 @@ namespace Cadrivect
                 var button=UI<Button>(key+"Group");
                 System.Windows.Automation.AutomationProperties.SetItemStatus(button,on?"Selected":"");
             }
+            UpdateSettingsNavigation(group,selected);
         }
         void SetSource(string value)
         {
@@ -608,7 +617,7 @@ namespace Cadrivect
                 var settings = new { dlssQuality=meter.DlssQuality,dlssModelHint=meter.DlssModelHint,wipeHorizontal=meter.WipeHorizontal,sidebarOpen=stats,sidebarWidth=sidebarWidth,settingsOpen=settingsOpen,settingsHeight=settingsHeight,
                     discordPresence=UI<CheckBox>("SharePresence").IsChecked==true,
                     discordGame=UI<CheckBox>("ShareGame").IsChecked==true,discordProject=UI<CheckBox>("ShareProject").IsChecked==true,stopChoices=stopChoices,directMbps=DirectKbps()/1000, relayMbps=networkRates[UI<ComboBox>("NetworkBitrate").SelectedIndex],audioLayout=UI<ComboBox>("NetworkAudio").SelectedIndex,pictureDefaults=1, mode=mode, multiplier=factor-1, frameGenerationProvider=meter.FrameGenerationProvider,
-                    consoleMac=console==null?"":console.Mac,consoleAddresses=consoleAddresses,directStreamHeight=DirectStreamHeight(),directFps=UI<ComboBox>("DirectFps").SelectedIndex,
+                    setupVersion=setupVersion,consoleMac=pendingSetupConsole ?? (console==null?"":console.Mac),consoleAddresses=consoleAddresses,directStreamHeight=DirectStreamHeight(),directFps=UI<ComboBox>("DirectFps").SelectedIndex,
                     display=SelectedDisplayName(), uiScale=PreferredScalePercent, resolution=UI<ComboBox>("RenderResolution").SelectedIndex,hdr=preferredHdr,renderer=SelectedRenderer,
                     maximized=(fullscreen?previousWindowState:window.WindowState)==WindowState.Maximized,
                     clientHdr=UI<CheckBox>("ClientHdr").IsChecked==true,hostDisplay=hostTarget==null ? "" : hostTarget.DeviceName,

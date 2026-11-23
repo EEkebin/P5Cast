@@ -283,9 +283,10 @@ internal static partial class WindowChromeProbe
         Require(scale.SelectedItem.ToString()=="200%" && Find<TextBlock>("ScaleStatus").Text.Contains("fitted"),
                 "The compact layout should communicate its effective scale and preserve the requested 200%.");
         var content=ScreenRect((FrameworkElement)window.Content);
-        var buttons=new[]{"OpenSource","Fullscreen","CloseWindow","InterfaceGroup"};
-        foreach(var id in buttons) {
-            var button=Find<Button>(id); var bounds=ScreenRect(button);
+        string sectionNavigation=Find<ComboBox>("PlaySectionPicker").IsVisible?"PlaySectionPicker":"InterfaceGroup";
+        var controls=new[]{"OpenSource","OpenSetup","Fullscreen","CloseWindow",sectionNavigation};
+        foreach(string id in controls) {
+            var button=Find<Control>(id); var bounds=ScreenRect(button);
             Require(button.IsVisible && bounds.Width>0 && bounds.Height>0 && Contains(content,bounds),id+" escaped the compact window: "+Geometry(bounds));
             RequireButtonPixel(button,(bounds.Left+bounds.Right)/2,(bounds.Top+bounds.Bottom)/2);
         }
@@ -540,10 +541,12 @@ internal static partial class WindowChromeProbe
         Environment.SetEnvironmentVariable("LOCALAPPDATA",local);
         string prefs=Path.Combine(local,"LumaRelay");
         Directory.CreateDirectory(prefs);
-        if(!reopen) File.WriteAllText(Path.Combine(prefs,"dashboard.json"),"{\"discordPresence\":false,\"source\":\"Demo\",\"maximized\":false}");
+        bool setup=Environment.GetEnvironmentVariable("P5CAST_PROBE_SETUP")=="1";
+        if(setup) IsolateSetupProfile();
+        else if(!reopen) File.WriteAllText(Path.Combine(prefs,"dashboard.json"),"{\"discordPresence\":false,\"source\":\"Demo\",\"maximized\":false}");
         var production=Assembly.LoadFrom(Path.Combine(root,"P5Cast.exe"));
         production.GetType("Cadrivect.Program",true).GetField("Root",BindingFlags.Static|BindingFlags.NonPublic).SetValue(null,root);
-        Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle,reopen ? (Action)CheckSavedScale : CheckWindow);
+        Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle,setup ? (Action)CheckSetupWindow : reopen ? (Action)CheckSavedScale : CheckWindow);
         int code=(int)production.EntryPoint.Invoke(null,new object[]{new string[0]});
         if(failure!=null) throw failure;
         Require(completed && code==0,"The production window did not close normally.");
@@ -574,9 +577,11 @@ internal static partial class WindowChromeProbe
         } finally {CloseDesktop(desktop);}
     }
     [STAThread] static int Main(string[] args) {
+        if(args.Length==2 && args[0]=="--register") return RegisterSetupFixture(args[1]);
         report=Path.Combine(args[1],"chrome.log");
         try {
             if(args.Length==4) return OnPrivateDesktop(args[0],args[1],args[2],args[3]=="--reopen");
+            if(Environment.GetEnvironmentVariable("P5CAST_PROBE_SETUP")=="1") return LaunchSetupCases(args);
             int result=Launch(args[0],args[1],args[2],false);
             if(result==0 && (CheckDrawerOption || Environment.GetEnvironmentVariable("P5CAST_PROBE_SCALING")=="1")) result=Launch(args[0],args[1],args[2],true);
             return result;

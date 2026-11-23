@@ -218,7 +218,13 @@ internal static partial class WindowChromeProbe
         var small=Rect(video);
         Require(small.Width>=180 && small.Height>=90 && Video()==video,"A maximum-size drawer consumed the compact video viewport: "+Geometry(small));
         CheckGrip(side); CheckGrip(bottom);
-        foreach(string id in new[]{"OpenSource","ShowSettings","Fullscreen"}) {
+        var compactPicker=Find<ComboBox>("PlaySectionPicker");
+        Require(compactPicker.IsVisible && !Find<Grid>("SettingsSections").IsVisible,
+                "A narrow drawer must reserve field width by using the compact section selector.");
+        Require(compactPicker.Items.Count==3,"Offline demo must expose only its three applicable settings sections.");
+        compactPicker.SelectedIndex=1;
+        await Until(()=>Find<ComboBox>("InterfaceScale").IsVisible,"Compact section selector did not open Interface.");
+        foreach(string id in new[]{"OpenSource","OpenSetup","ShowSettings","Fullscreen"}) {
             var control=Find<Control>(id); var b=ScreenRect(control);
             RequireButtonPixel(control,(b.Left+b.Right)/2,(b.Top+b.Bottom)/2);
         }
@@ -226,6 +232,8 @@ internal static partial class WindowChromeProbe
         Require(Rect(video).Width>small.Width && Rect(video).Height>small.Height,"Home/End did not bound the two drawer sizes.");
         Click("MaximizeWindow"); await Until(delegate{return IsZoomed(hwnd);},"Unable to return to maximized playback.");
         Drag(side,SideWidth-initialSide,0); Drag(bottom,0,BottomHeight-initialBottom);
+        await Until(()=>Find<Grid>("SettingsSections").IsVisible && !compactPicker.IsVisible,
+            "A wide drawer did not restore its section rail.");
         await CheckSettingsControls();
         Note("Both drawers resized and restored across drag, keyboard, hide/show, fullscreen, navigation and compact layout with an uninterrupted native video surface.");
     }

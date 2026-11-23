@@ -67,17 +67,37 @@
     </Style>
     <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="#172127"/><Setter Property="BorderBrush" Value="#2C3A41"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="20"/><Setter Property="Margin" Value="0,0,0,12"/></Style>
     <Style x:Key="GroupRail" TargetType="Border">
-      <Setter Property="Background" Value="#111B20"/><Setter Property="BorderBrush" Value="#304048"/><Setter Property="BorderThickness" Value="1"/>
-      <Setter Property="CornerRadius" Value="9"/><Setter Property="Padding" Value="3"/><Setter Property="Margin" Value="0,0,0,12"/><Setter Property="HorizontalAlignment" Value="Left"/>
+      <Setter Property="Width" Value="158"/><Setter Property="Background" Value="#111B20"/>
+      <Setter Property="BorderBrush" Value="#2A393F"/><Setter Property="BorderThickness" Value="0,0,1,0"/>
+      <Setter Property="Padding" Value="8,9"/>
     </Style>
-    <Style x:Key="GroupTab" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-      <Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Foreground" Value="#ADBDC0"/>
-      <Setter Property="FontSize" Value="13"/><Setter Property="Padding" Value="10,3"/><Setter Property="MinHeight" Value="28"/><Setter Property="Margin" Value="0"/>
-      <Style.Triggers>
-        <Trigger Property="AutomationProperties.ItemStatus" Value="Selected">
-          <Setter Property="Background" Value="#264039"/><Setter Property="BorderBrush" Value="#42665B"/><Setter Property="Foreground" Value="#B7F3DF"/><Setter Property="FontWeight" Value="SemiBold"/>
-        </Trigger>
-      </Style.Triggers>
+    <Style x:Key="GroupTab" TargetType="Button">
+      <Setter Property="Foreground" Value="#BECCCE"/><Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="MinHeight" Value="28"/><Setter Property="Margin" Value="0,1"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+        <Border Name="Face" Background="Transparent" BorderBrush="Transparent" BorderThickness="1" CornerRadius="5">
+          <Grid>
+            <Border Name="Marker" Width="2" Margin="0,5" HorizontalAlignment="Left" Background="Transparent" CornerRadius="1"/>
+            <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center" Margin="10,2,5,2" RecognizesAccessKey="True"/>
+          </Grid>
+        </Border>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Face" Property="Background" Value="#26343A"/></Trigger>
+          <Trigger Property="AutomationProperties.ItemStatus" Value="Selected">
+            <Setter TargetName="Face" Property="Background" Value="#20362F"/><Setter TargetName="Marker" Property="Background" Value="#8FE6D0"/>
+            <Setter Property="Foreground" Value="#BBF1DE"/><Setter Property="FontWeight" Value="SemiBold"/>
+          </Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Face" Property="BorderBrush" Value="#8FE6D0"/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style x:Key="SettingsCaption" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="#9FB2B5"/><Setter Property="FontSize" Value="12"/>
+      <Setter Property="FontWeight" Value="SemiBold"/><Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+    <Style x:Key="SettingsHeading" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="18"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Margin" Value="0,0,0,9"/>
     </Style>
     <Style x:Key="ScrollPage" TargetType="RepeatButton">
       <Setter Property="Focusable" Value="False"/><Setter Property="IsTabStop" Value="False"/>
@@ -263,7 +283,9 @@
           <ComboBox DockPanel.Dock="Left" Name="SourceChoice" Padding="6,4" VerticalContentAlignment="Center" Width="142" Margin="0,0,10,0"/>
           <Button DockPanel.Dock="Right" Name="Fullscreen" Content="Fullscreen" ToolTip="Fullscreen video (F11). Press Escape or double-click the video to return." Margin="0"/>
           <ToggleButton DockPanel.Dock="Right" Name="ShowSettings" Style="{StaticResource TitleAction}" AutomationProperties.Name="Settings drawer" Margin="0,0,6,0">
-            <StackPanel Orientation="Horizontal"><TextBlock Text="Settings" VerticalAlignment="Center"/>
+            <StackPanel Orientation="Horizontal"><TextBlock Name="SettingsActionLabel" Text="Settings" VerticalAlignment="Center"/>
+              <Path Name="SettingsActionGlyph" Width="15" Height="15" Stretch="Uniform" Visibility="Collapsed" Stroke="#C6DDD7" StrokeThickness="1.5"
+                    Data="M1,3 H5 M9,3 H15 M1,9 H8 M12,9 H15 M5,1 V5 H9 V1 Z M8,7 V11 H12 V7 Z"/>
               <Path Stroke="#9CBAB6" StrokeThickness="1.5" Data="M0,0 L4,4 L8,0" VerticalAlignment="Center" Margin="7,0,0,0" RenderTransformOrigin=".5,.5">
                 <Path.Style><Style TargetType="Path"><Style.Triggers>
                   <DataTrigger Binding="{Binding IsChecked, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Value="False"><Setter Property="RenderTransform"><Setter.Value><RotateTransform Angle="180"/></Setter.Value></Setter></DataTrigger>
@@ -271,122 +293,173 @@
               </Path>
             </StackPanel>
           </ToggleButton>
+          <Button DockPanel.Dock="Right" Name="OpenSetup" AutomationProperties.Name="Guided setup" ToolTip="Open guided setup"
+                  Foreground="#B9F2E2" Background="#1B342F" BorderBrush="#365B50" Margin="0,0,5,0" Padding="10,4">
+            <StackPanel Orientation="Horizontal">
+              <Path Width="15" Height="15" Stretch="Uniform" Stroke="#A2ECD5" StrokeThickness="1.45" StrokeLineJoin="Round"
+                    Data="M8,1 A7,7 0 1 1 7.99,1 M10.8,5.2 L9,9 L5.2,10.8 L7,7 Z"/>
+              <TextBlock Text="Setup" VerticalAlignment="Center" Margin="6,0,0,0"/>
+            </StackPanel>
+          </Button>
         </DockPanel>
         <Border Name="SettingsDrawer" Grid.Row="2" Height="0" ClipToBounds="True">
         <DockPanel Name="SettingsBody" VerticalAlignment="Top">
         <Thumb Name="SettingsResize" Style="{StaticResource DrawerGrip}" DockPanel.Dock="Top" Height="12" Cursor="SizeNS"
                AutomationProperties.Name="Resize settings drawer" ToolTip="Drag or use Up and Down to resize. Enter collapses the drawer."/>
         <Border Background="#172127" CornerRadius="8" BorderBrush="#2C3A41" BorderThickness="1">
-        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <Grid Name="Pages" Margin="14,10">
-        <StackPanel Name="PlayPage">
-          <Border Style="{StaticResource GroupRail}">
-            <WrapPanel KeyboardNavigation.DirectionalNavigation="Cycle">
-              <Button Name="ConsoleGroup" Style="{StaticResource GroupTab}" Content="Console"/>
-              <Button Name="DisplayGroup" Style="{StaticResource GroupTab}" Content="Graphics &amp; display"/>
-              <Button Name="StreamGroup" Style="{StaticResource GroupTab}" Content="Stream quality"/>
-              <Button Name="InterfaceGroup" Style="{StaticResource GroupTab}" Content="Interface"/>
-              <Button Name="DiscordGroup" Style="{StaticResource GroupTab}" Content="Discord"/>
-            </WrapPanel>
-          </Border>
-          <Grid Name="ConsoleSettings">
-            <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <StackPanel Margin="0,0,12,0"><TextBlock Text="Paired console" Margin="0,0,0,5"/><ComboBox Name="ConsolePicker"/></StackPanel>
-            <StackPanel Grid.Column="1" Margin="0,0,12,0"><TextBlock Text="Console address" Margin="0,0,0,5"/><TextBox Name="ConsoleAddress" ToolTip="Local IP address or DNS name of your PS5"/></StackPanel>
-            <Button Grid.Column="2" Name="AddConsole" Content="Add console" VerticalAlignment="Bottom"/>
-            <WrapPanel Grid.Row="1" Grid.ColumnSpan="3" Margin="0,8,0,0"><TextBlock Text="When I disconnect" VerticalAlignment="Center" Margin="0,0,9,0"/><ComboBox Name="StopBehavior" Width="182" ToolTip="Applies when stopping a Direct session or closing P5Cast. Remembered separately for each paired console."/><Button Name="WakeConsole" Content="Wake PS5" Margin="12,0,0,0" ToolTip="Wake the paired PS5 from rest mode without starting a stream."/></WrapPanel>
-          </Grid>
-          <StackPanel Name="StreamSettings" Visibility="Collapsed">
-            <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
-              <StackPanel Margin="0,0,12,0"><Label Content="PS5 stream resolution" Target="{Binding ElementName=DirectStreamSize}" Foreground="#DFEBEA" Padding="0,0,0,5"/><ComboBox Name="DirectStreamSize" AutomationProperties.Name="PS5 stream resolution" ToolTip="Resolution requested from the console on your next Direct connection."/></StackPanel>
-              <StackPanel Grid.Column="1" Margin="0,0,12,0"><TextBlock Text="Requested video bitrate" Margin="0,0,0,5"/><ComboBox Name="DirectBitrate" ToolTip="Requested at connection time. The console adjusts the actual bitrate."/></StackPanel>
-              <StackPanel Grid.Column="2"><TextBlock Text="Frame rate" Margin="0,0,0,5"/><ComboBox Name="DirectFps"/></StackPanel>
+          <DockPanel Name="SettingsWorkbench">
+            <Grid Name="CompactSettingsSections" DockPanel.Dock="Top" Background="#131E23" Visibility="Collapsed" IsEnabled="{Binding IsEnabled, ElementName=Pages}">
+              <DockPanel Visibility="{Binding Visibility, ElementName=PlayPage}" Margin="12,8">
+                <TextBlock DockPanel.Dock="Left" Style="{StaticResource SettingsCaption}" Text="Play settings" Margin="0,0,12,0"/>
+                <ComboBox Name="PlaySectionPicker" MaxWidth="290" HorizontalAlignment="Left" MinWidth="172" AutomationProperties.Name="Play settings section"/>
+              </DockPanel>
+              <DockPanel Visibility="{Binding Visibility, ElementName=HostPage}" Margin="12,8">
+                <TextBlock DockPanel.Dock="Left" Style="{StaticResource SettingsCaption}" Text="Host settings" Margin="0,0,12,0"/>
+                <ComboBox Name="HostSectionPicker" MaxWidth="290" HorizontalAlignment="Left" MinWidth="172" AutomationProperties.Name="Host settings section"/>
+              </DockPanel>
+              <DockPanel Visibility="{Binding Visibility, ElementName=ClientPage}" Margin="12,8">
+                <TextBlock DockPanel.Dock="Left" Style="{StaticResource SettingsCaption}" Text="Client settings" Margin="0,0,12,0"/>
+                <ComboBox Name="ClientSectionPicker" MaxWidth="290" HorizontalAlignment="Left" MinWidth="172" AutomationProperties.Name="Client settings section"/>
+              </DockPanel>
             </Grid>
-            <TextBlock Style="{StaticResource Detail}" Margin="0,6,0,0" Text="Changes apply on your next connection. The PS5 sets the Opus audio bitrate."/>
-          </StackPanel>
-          <StackPanel Name="DisplaySettings" Visibility="Collapsed">
-            <WrapPanel>
-              <StackPanel Width="165" Margin="0,0,12,6"><Label Content="Graphics API" Target="{Binding ElementName=VideoRenderer}" Foreground="#DFEBEA" Padding="0,0,0,5"/><ComboBox Name="VideoRenderer" AutomationProperties.Name="Graphics API" ToolTipService.ShowOnDisabled="True" ToolTip="Choose the graphics API between playback sessions."/></StackPanel>
-              <StackPanel Width="230" Margin="0,0,12,6"><TextBlock Text="Playback display" Margin="0,0,0,5"/>
-                <ComboBox Name="PlaybackDisplay" ToolTip="{Binding SelectedItem, RelativeSource={RelativeSource Self}}">
-                  <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/></DataTemplate></ComboBox.ItemTemplate>
-                </ComboBox>
+            <Grid Name="SettingsSections" DockPanel.Dock="Left" IsEnabled="{Binding IsEnabled, ElementName=Pages}">
+              <Border Style="{StaticResource GroupRail}" Visibility="{Binding Visibility, ElementName=PlayPage}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <StackPanel KeyboardNavigation.DirectionalNavigation="Cycle">
+                    <TextBlock Style="{StaticResource SettingsCaption}" Text="Play settings" Margin="10,0,0,6"/>
+                    <Button Name="ConsoleGroup" Style="{StaticResource GroupTab}" Content="Console"/>
+                    <Button Name="StreamGroup" Style="{StaticResource GroupTab}" Content="Stream quality"/>
+                    <Button Name="DisplayGroup" Style="{StaticResource GroupTab}" Content="Graphics &amp; display"/>
+                    <Button Name="InterfaceGroup" Style="{StaticResource GroupTab}" Content="Interface"/>
+                    <Button Name="DiscordGroup" Style="{StaticResource GroupTab}" Content="Discord"/>
+                  </StackPanel>
+                </ScrollViewer>
+              </Border>
+              <Border Style="{StaticResource GroupRail}" Visibility="{Binding Visibility, ElementName=HostPage}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <StackPanel KeyboardNavigation.DirectionalNavigation="Cycle">
+                    <TextBlock Style="{StaticResource SettingsCaption}" Text="Host settings" Margin="10,0,0,6"/>
+                    <Button Name="SharingGroup" Style="{StaticResource GroupTab}" Content="Sharing"/>
+                    <Button Name="DevicesGroup" Style="{StaticResource GroupTab}" Content="Paired devices"/>
+                  </StackPanel>
+                </ScrollViewer>
+              </Border>
+              <Border Style="{StaticResource GroupRail}" Visibility="{Binding Visibility, ElementName=ClientPage}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <StackPanel KeyboardNavigation.DirectionalNavigation="Cycle">
+                    <TextBlock Style="{StaticResource SettingsCaption}" Text="Client settings" Margin="10,0,0,6"/>
+                    <Button Name="NetworkGroup" Style="{StaticResource GroupTab}" Content="Connection"/>
+                    <Button Name="QualityGroup" Style="{StaticResource GroupTab}" Content="Stream quality"/>
+                  </StackPanel>
+                </ScrollViewer>
+              </Border>
+            </Grid>
+            <ScrollViewer Name="SettingsContentScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+              <Grid Name="Pages" Margin="14,10">
+              <StackPanel Name="PlayPage">
+                <TextBlock Name="PlaySettingsHeading" Style="{StaticResource SettingsHeading}"/>
+                <Grid Name="ConsoleSettings">
+                  <StackPanel>
+                    <UniformGrid Name="ConsoleFields" Columns="2">
+                      <StackPanel Margin="0,0,10,6"><TextBlock Text="Paired console" Margin="0,0,0,5"/><ComboBox Name="ConsolePicker"/></StackPanel>
+                      <StackPanel Margin="0,0,10,6"><TextBlock Text="Console address" Margin="0,0,0,5"/><TextBox Name="ConsoleAddress" ToolTip="Local IP address or DNS name of your PS5"/></StackPanel>
+                    </UniformGrid>
+                    <WrapPanel Margin="0,0,0,9"><Button Name="AddConsole" Content="Add console"/><Button Name="WakeConsole" Content="Wake PS5" ToolTip="Wake the paired PS5 from rest mode without starting a stream."/></WrapPanel>
+                    <WrapPanel><TextBlock Text="When I disconnect" VerticalAlignment="Center" Margin="0,0,10,0"/><ComboBox Name="StopBehavior" Width="182" ToolTip="Applies when stopping a Direct session or closing P5Cast. Remembered separately for each paired console."/></WrapPanel>
+                  </StackPanel>
+                </Grid>
+                <StackPanel Name="StreamSettings" Visibility="Collapsed">
+                  <UniformGrid Name="StreamFields" Columns="3">
+                    <StackPanel Margin="0,0,10,6"><Label Content="PS5 stream resolution" Target="{Binding ElementName=DirectStreamSize}" Foreground="#DFEBEA" Padding="0,0,0,5"/><ComboBox Name="DirectStreamSize" AutomationProperties.Name="PS5 stream resolution" ToolTip="Resolution requested from the console on your next Direct connection."/></StackPanel>
+                    <StackPanel Margin="0,0,10,6"><TextBlock Text="Requested video bitrate" Margin="0,0,0,5"/><ComboBox Name="DirectBitrate" ToolTip="Requested at connection time. The console adjusts the actual bitrate."/></StackPanel>
+                    <StackPanel Margin="0,0,10,6"><TextBlock Text="Frame rate" Margin="0,0,0,5"/><ComboBox Name="DirectFps"/></StackPanel>
+                  </UniformGrid>
+                  <TextBlock Style="{StaticResource Detail}" Margin="0,6,0,0" Text="Changes apply on your next connection. The PS5 sets the Opus audio bitrate."/>
+                </StackPanel>
+                <StackPanel Name="DisplaySettings" Visibility="Collapsed">
+                  <UniformGrid Name="DisplayFields" Columns="2">
+                    <StackPanel Margin="0,0,10,6"><Label Content="Graphics API" Target="{Binding ElementName=VideoRenderer}" Foreground="#DFEBEA" Padding="0,0,0,5"/><ComboBox Name="VideoRenderer" AutomationProperties.Name="Graphics API" ToolTipService.ShowOnDisabled="True" ToolTip="Choose the graphics API between playback sessions."/></StackPanel>
+                    <StackPanel Margin="0,0,10,6"><TextBlock Text="Playback display" Margin="0,0,0,5"/>
+                      <ComboBox Name="PlaybackDisplay" ToolTip="{Binding SelectedItem, RelativeSource={RelativeSource Self}}">
+                        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/></DataTemplate></ComboBox.ItemTemplate>
+                      </ComboBox>
+                    </StackPanel>
+                    <StackPanel Margin="0,0,10,6"><TextBlock Text="Upscaling limit" Margin="0,0,0,5"/><ComboBox Name="RenderResolution" ToolTip="Maximum resolution an upscaler can produce. A lower limit preserves the source resolution."/></StackPanel>
+                    <StackPanel Margin="0,0,10,6"><TextBlock Text="Color output" Margin="0,0,0,5"/><ComboBox Name="HdrOutput"/></StackPanel>
+                  </UniformGrid>
+                  <TextBlock Name="RendererHint" Style="{StaticResource Detail}" TextWrapping="Wrap"/>
+                </StackPanel>
+                <StackPanel Name="InterfaceSettings" Visibility="Collapsed">
+                  <Label Content="Interface scale" Target="{Binding ElementName=InterfaceScale}" Foreground="#E8F0F1" Padding="0,0,0,5"/>
+                  <ComboBox Name="InterfaceScale" HorizontalAlignment="Left" Width="182" AutomationProperties.Name="Interface scale" ToolTip="Auto adapts to the monitor. A percentage adjusts the interface relative to Windows display scaling."/>
+                  <TextBlock Name="ScaleStatus" Style="{StaticResource Detail}" Margin="0,6,0,0"/>
+                </StackPanel>
+                <StackPanel Name="DiscordSettings" Visibility="Collapsed">
+                  <WrapPanel>
+                    <CheckBox Name="SharePresence" Content="Show P5Cast activity on Discord" Foreground="#E8F0F1" Margin="0,0,18,7"/>
+                    <CheckBox Name="ShareProject" Content="Include private GitHub link" Foreground="#E8F0F1" Margin="0,0,0,7"/>
+                  </WrapPanel>
+                  <WrapPanel>
+                    <CheckBox Name="ShareGame" Content="Show game title" Foreground="#E8F0F1" VerticalAlignment="Center" Margin="0,0,15,0"/>
+                    <TextBlock Text="Title override" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <TextBox Name="GameTitle" Width="166" MaxLength="100" ToolTip="Optional title for this session. Direct can read the title if the PS5 supplies it."/>
+                  </WrapPanel>
+                  <TextBlock Name="DiscordState" Foreground="#B3C1C4" Margin="0,5,0,2"/>
+                  <TextBlock Foreground="#B3C1C4" Text="To broadcast, join a Discord voice channel, choose Share Your Screen → Applications → P5Cast, and enable sound."/>
+                </StackPanel>
               </StackPanel>
-              <StackPanel Width="144" Margin="0,0,12,6"><TextBlock Text="Upscaling limit" Margin="0,0,0,5"/><ComboBox Name="RenderResolution" ToolTip="Maximum resolution an upscaler can produce. A lower limit preserves the source resolution."/></StackPanel>
-              <StackPanel Width="124" Margin="0,0,0,6"><TextBlock Text="Color output" Margin="0,0,0,5"/><ComboBox Name="HdrOutput"/></StackPanel>
-            </WrapPanel>
-            <TextBlock Name="RendererHint" Style="{StaticResource Detail}" TextWrapping="Wrap"/>
-          </StackPanel>
-          <StackPanel Name="InterfaceSettings" Visibility="Collapsed">
-            <Label Content="Interface scale" Target="{Binding ElementName=InterfaceScale}" Foreground="#E8F0F1" Padding="0,0,0,5"/>
-            <ComboBox Name="InterfaceScale" HorizontalAlignment="Left" Width="182" AutomationProperties.Name="Interface scale" ToolTip="Auto adapts to the monitor. A percentage adjusts the interface relative to Windows display scaling."/>
-            <TextBlock Name="ScaleStatus" Style="{StaticResource Detail}" Margin="0,6,0,0"/>
-          </StackPanel>
-          <StackPanel Name="DiscordSettings" Visibility="Collapsed">
-            <WrapPanel>
-              <CheckBox Name="SharePresence" Content="Show P5Cast activity on Discord" Foreground="#E8F0F1" Margin="0,0,18,7"/>
-              <CheckBox Name="ShareProject" Content="Include private GitHub link" Foreground="#E8F0F1" Margin="0,0,0,7"/>
-            </WrapPanel>
-            <WrapPanel>
-              <CheckBox Name="ShareGame" Content="Show game title" Foreground="#E8F0F1" VerticalAlignment="Center" Margin="0,0,15,0"/>
-              <TextBlock Text="Title override" VerticalAlignment="Center" Margin="0,0,6,0"/>
-              <TextBox Name="GameTitle" Width="166" MaxLength="100" ToolTip="Optional title for this session. Direct can read the title if the PS5 supplies it."/>
-            </WrapPanel>
-            <TextBlock Name="DiscordState" Foreground="#B3C1C4" Margin="0,5,0,2"/>
-            <TextBlock Foreground="#B3C1C4" Text="To broadcast, join a Discord voice channel, choose Share Your Screen → Applications → P5Cast, and enable sound."/>
-          </StackPanel>
-        </StackPanel>
-        <StackPanel Name="StopPanel" Visibility="Collapsed">
-          <TextBlock Name="StopTitle" Text="Stop playing?" Style="{StaticResource Heading}" Margin="0,0,0,7"/>
-          <CheckBox Name="RestOnStop" Content="Put PS5 into rest mode" Foreground="#E8F0F1" Margin="0,0,0,6"/>
-          <CheckBox Name="RememberStop" Content="Remember my choice for this console" Foreground="#E8F0F1" Margin="0,0,0,9"/>
-          <StackPanel Orientation="Horizontal"><Button Name="ConfirmStop" Content="Stop session" Style="{StaticResource Primary}"/><Button Name="CancelStop" Content="Keep playing"/></StackPanel>
-        </StackPanel>
-        <StackPanel Name="PairPanel" Visibility="Collapsed">
-          <TextBlock Text="Add console" Style="{StaticResource Heading}" Margin="0,0,0,2"/>
-          <TextBlock Text="On your PS5, open Settings → System → Remote Play → Link Device." Foreground="#B3C1C4" Margin="0,0,0,7"/>
-          <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
-            <StackPanel Margin="0,0,8,0"><TextBlock Text="Console address"/><TextBox Name="PairAddress"/></StackPanel>
-            <StackPanel Grid.Column="1" Margin="0,0,8,0"><TextBlock Text="PSN Account ID (Base64)"/><TextBox Name="PsnAccount"/></StackPanel>
-            <StackPanel Grid.Column="2"><TextBlock Text="Link Device code"/><TextBox Name="PairCode" MaxLength="9"/></StackPanel>
-          </Grid>
-          <StackPanel Orientation="Horizontal" Margin="0,8,0,0"><Button Name="PairConsole" Content="Pair console" Style="{StaticResource Primary}"/><Button Name="CancelPair" Content="Cancel"/></StackPanel>
-        </StackPanel>
-        <StackPanel Name="HostPage" Visibility="Collapsed">
-          <Border Style="{StaticResource GroupRail}"><WrapPanel KeyboardNavigation.DirectionalNavigation="Cycle"><Button Name="SharingGroup" Style="{StaticResource GroupTab}" Content="Sharing"/><Button Name="DevicesGroup" Style="{StaticResource GroupTab}" Content="Paired devices"/></WrapPanel></Border>
-          <StackPanel Name="SharingSettings">
-            <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
-              <StackPanel Margin="0,0,12,0"><TextBlock Text="Listen on this network address" Margin="0,0,0,5"/><ComboBox Name="BindIP"/></StackPanel>
-              <StackPanel Grid.Column="1"><TextBlock Text="Display to share" Margin="0,0,0,5"/><ComboBox Name="HostDisplay"/></StackPanel>
-            </Grid>
-            <WrapPanel Margin="0,8,0,0"><Button Name="StartHost" Content="Start sharing" Style="{StaticResource Primary}"/><Button Name="StopHost" Content="Stop sharing"/><Button Name="HostStatus" Content="Check status"/></WrapPanel>
-            <TextBlock Name="HostState" Style="{StaticResource Detail}" Margin="0,4,0,0" Text="Sharing continues until you select Stop sharing."/>
-          </StackPanel>
-          <StackPanel Name="DevicesSettings" Visibility="Collapsed">
-            <TextBlock Text="Pair a client using its four-digit PIN" Margin="0,0,0,4"/>
-            <WrapPanel><TextBox Name="Pin" MaxLength="4" Width="86" Margin="0,0,8,0"/><Button Name="ApprovePin" Content="Approve PIN"/><Button Name="Controllers" Content="Controller driver setup &#8599;"/></WrapPanel>
-            <WrapPanel Margin="0,8,0,0"><Button Name="LoadPeers" Content="Load devices"/><ComboBox Name="Peers" DisplayMemberPath="Name" SelectedValuePath="Id" Width="166" Margin="0,0,8,0"/><Button Name="RemovePeer" Content="Revoke access"/></WrapPanel>
-          </StackPanel>
-        </StackPanel>
-        <StackPanel Name="ClientPage" Visibility="Collapsed">
-          <Border Style="{StaticResource GroupRail}"><WrapPanel KeyboardNavigation.DirectionalNavigation="Cycle"><Button Name="NetworkGroup" Style="{StaticResource GroupTab}" Content="Connection"/><Button Name="QualityGroup" Style="{StaticResource GroupTab}" Content="Stream quality"/></WrapPanel></Border>
-          <StackPanel Name="NetworkSettings">
-            <TextBlock Text="Host PC address" Margin="0,0,0,4"/>
-            <WrapPanel><TextBox Name="HostAddress" Width="215" Margin="0,0,8,0" ToolTip="Use the host's LAN or private VPN address."/><Button Name="ClientPair" Content="Pair with host"/><Button Name="ClientPlay" Style="{StaticResource Primary}" Content="Start stream"/></WrapPanel>
-            <Button Name="DirectClient" Content="Play directly from my PS5" HorizontalAlignment="Left" Margin="0,8,0,0"/>
-          </StackPanel>
-          <StackPanel Name="QualitySettings" Visibility="Collapsed">
-            <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
-              <StackPanel Margin="0,0,12,0"><TextBlock Text="Video preset" Margin="0,0,0,4"/><ComboBox Name="Quality"/></StackPanel>
-              <StackPanel Grid.Column="2"><TextBlock Text="Audio output" Margin="0,0,0,4"/><ComboBox Name="NetworkAudio"/></StackPanel>
-              <StackPanel Grid.Column="1" Margin="0,0,12,0"><TextBlock Text="Video bitrate" Margin="0,0,0,4"/><ComboBox Name="NetworkBitrate"/></StackPanel>
-            </Grid>
-            <CheckBox Name="ClientHdr" Foreground="#E8F0F1" Content="Request HDR" Margin="0,8,0,0"/>
-          </StackPanel>
-        </StackPanel>
-      </Grid>
-        </ScrollViewer></Border>
+              <StackPanel Name="StopPanel" Visibility="Collapsed">
+                <TextBlock Name="StopTitle" Text="Stop playing?" Style="{StaticResource Heading}" Margin="0,0,0,7"/>
+                <CheckBox Name="RestOnStop" Content="Put PS5 into rest mode" Foreground="#E8F0F1" Margin="0,0,0,6"/>
+                <CheckBox Name="RememberStop" Content="Remember my choice for this console" Foreground="#E8F0F1" Margin="0,0,0,9"/>
+                <StackPanel Orientation="Horizontal"><Button Name="ConfirmStop" Content="Stop session" Style="{StaticResource Primary}"/><Button Name="CancelStop" Content="Keep playing"/></StackPanel>
+              </StackPanel>
+              <StackPanel Name="PairPanel" Visibility="Collapsed">
+                <TextBlock Text="Add console" Style="{StaticResource Heading}" Margin="0,0,0,2"/>
+                <TextBlock Text="On your PS5, open Settings → System → Remote Play → Link Device." Foreground="#B3C1C4" Margin="0,0,0,7"/>
+                <UniformGrid Name="PairFields" Columns="3">
+                  <StackPanel Margin="0,0,10,6"><TextBlock Text="Console address"/><TextBox Name="PairAddress"/></StackPanel>
+                  <StackPanel Margin="0,0,10,6"><TextBlock Text="PSN Account ID (Base64)"/><TextBox Name="PsnAccount"/></StackPanel>
+                  <StackPanel Margin="0,0,10,6"><TextBlock Text="Link Device code"/><TextBox Name="PairCode" MaxLength="9"/></StackPanel>
+                </UniformGrid>
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0"><Button Name="PairConsole" Content="Pair console" Style="{StaticResource Primary}"/><Button Name="CancelPair" Content="Cancel"/></StackPanel>
+              </StackPanel>
+              <StackPanel Name="HostPage" Visibility="Collapsed">
+                <TextBlock Name="HostSettingsHeading" Style="{StaticResource SettingsHeading}"/>
+                <StackPanel Name="SharingSettings">
+                  <UniformGrid Name="HostFields" Columns="2">
+                    <StackPanel Margin="0,0,10,6"><TextBlock Text="Listen on this network address" Margin="0,0,0,5"/><ComboBox Name="BindIP"/></StackPanel>
+                    <StackPanel Margin="0,0,10,6"><TextBlock Text="Display to share" Margin="0,0,0,5"/><ComboBox Name="HostDisplay"/></StackPanel>
+                  </UniformGrid>
+                  <WrapPanel Margin="0,8,0,0"><Button Name="StartHost" Content="Start sharing" Style="{StaticResource Primary}"/><Button Name="StopHost" Content="Stop sharing"/><Button Name="HostStatus" Content="Check status"/></WrapPanel>
+                  <TextBlock Name="HostState" Style="{StaticResource Detail}" Margin="0,4,0,0" Text="Sharing continues until you select Stop sharing."/>
+                </StackPanel>
+                <StackPanel Name="DevicesSettings" Visibility="Collapsed">
+                  <TextBlock Text="Pair a client using its four-digit PIN" Margin="0,0,0,4"/>
+                  <WrapPanel><TextBox Name="Pin" MaxLength="4" Width="86" Margin="0,0,8,0"/><Button Name="ApprovePin" Content="Approve PIN"/><Button Name="Controllers" Content="Controller driver setup &#8599;"/></WrapPanel>
+                  <WrapPanel Margin="0,8,0,0"><Button Name="LoadPeers" Content="Load devices"/><ComboBox Name="Peers" DisplayMemberPath="Name" SelectedValuePath="Id" Width="166" Margin="0,0,8,0"/><Button Name="RemovePeer" Content="Revoke access"/></WrapPanel>
+                </StackPanel>
+              </StackPanel>
+              <StackPanel Name="ClientPage" Visibility="Collapsed">
+                <TextBlock Name="ClientSettingsHeading" Style="{StaticResource SettingsHeading}"/>
+                <StackPanel Name="NetworkSettings">
+                  <TextBlock Text="Host PC address" Margin="0,0,0,4"/>
+                  <WrapPanel><TextBox Name="HostAddress" Width="215" Margin="0,0,8,0" ToolTip="Use the host's LAN or private VPN address."/><Button Name="ClientPair" Content="Pair with host"/><Button Name="ClientPlay" Style="{StaticResource Primary}" Content="Start stream"/></WrapPanel>
+                  <Button Name="DirectClient" Content="Play directly from my PS5" HorizontalAlignment="Left" Margin="0,8,0,0"/>
+                </StackPanel>
+                <StackPanel Name="QualitySettings" Visibility="Collapsed">
+                  <UniformGrid Name="ClientFields" Columns="3">
+                    <StackPanel Margin="0,0,10,6"><TextBlock Text="Video preset" Margin="0,0,0,4"/><ComboBox Name="Quality"/></StackPanel>
+                    <StackPanel Margin="0,0,10,6"><TextBlock Text="Video bitrate" Margin="0,0,0,4"/><ComboBox Name="NetworkBitrate"/></StackPanel>
+                    <StackPanel Margin="0,0,10,6"><TextBlock Text="Audio output" Margin="0,0,0,4"/><ComboBox Name="NetworkAudio"/></StackPanel>
+                  </UniformGrid>
+                  <CheckBox Name="ClientHdr" Foreground="#E8F0F1" Content="Request HDR" Margin="0,8,0,0"/>
+                </StackPanel>
+              </StackPanel>
+              </Grid>
+            </ScrollViewer>
+          </DockPanel>
+        </Border>
         </DockPanel></Border>
       </Grid>
       <Border Name="SidebarDrawer" Grid.Column="1" Width="0" ClipToBounds="True">
@@ -466,6 +539,90 @@
         </Button>
       </StackPanel>
     </Border>
+    <Grid Name="SetupOverlay" Grid.Row="1" Grid.RowSpan="2" Panel.ZIndex="10" Visibility="Collapsed"
+          Background="#EB10171C" FocusManager.IsFocusScope="True" AutomationProperties.Name="P5Cast setup"
+          KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle" KeyboardNavigation.DirectionalNavigation="Contained">
+      <Grid.Resources>
+        <Style x:Key="SetupLabel" TargetType="Label">
+          <Setter Property="Foreground" Value="#E8F0F1"/><Setter Property="FontWeight" Value="SemiBold"/>
+          <Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,12,0,5"/>
+        </Style>
+        <Style x:Key="SetupHint" TargetType="TextBlock" BasedOn="{StaticResource Detail}">
+          <Setter Property="FontSize" Value="12"/><Setter Property="LineHeight" Value="17"/><Setter Property="Margin" Value="0,4,0,0"/>
+        </Style>
+      </Grid.Resources>
+      <Border MaxWidth="568" MaxHeight="630" Margin="16,12" HorizontalAlignment="Stretch" VerticalAlignment="Center"
+              CornerRadius="14" BorderThickness="1" BorderBrush="#3D5157" Background="#172329">
+        <Grid>
+          <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+          <StackPanel Margin="22,16,22,12">
+            <TextBlock Name="SetupStep" Text="Step 1 of 3" FontSize="12" FontWeight="SemiBold" Foreground="#8FE6D0"/>
+            <TextBlock Name="SetupTitle" Text="Choose your display" FontSize="25" FontWeight="SemiBold" Margin="0,3,0,0"
+                       Focusable="True" KeyboardNavigation.IsTabStop="False"/>
+          </StackPanel>
+          <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+            <Grid Margin="22,0,22,16">
+              <StackPanel Name="SetupDisplayPage">
+                <Label Style="{StaticResource SetupLabel}" Margin="0,0,0,5" Target="{Binding ElementName=SetupDisplay}" Content="Playback monitor"/>
+                <ComboBox Name="SetupDisplay" AutomationProperties.Name="Playback monitor"/>
+                <Label Style="{StaticResource SetupLabel}" Target="{Binding ElementName=SetupColor}" Content="Color output"/>
+                <ComboBox Name="SetupColor" AutomationProperties.Name="Color output"/>
+                <TextBlock Name="SetupDisplayHint" Style="{StaticResource SetupHint}" Text="Auto follows the selected monitor’s Windows HDR setting."/>
+                <Label Style="{StaticResource SetupLabel}" Target="{Binding ElementName=SetupRenderer}" Content="Graphics API"/>
+                <ComboBox Name="SetupRenderer" AutomationProperties.Name="Graphics API"/>
+                <TextBlock Name="SetupRendererHint" Style="{StaticResource SetupHint}" Text="This choice determines which GPU effects and color outputs are available."/>
+                <Label Style="{StaticResource SetupLabel}" Target="{Binding ElementName=SetupStream}" Content="PS5 stream resolution"/>
+                <ComboBox Name="SetupStream" AutomationProperties.Name="PS5 stream resolution"/>
+                <TextBlock Style="{StaticResource SetupHint}" Text="Choose the picture size to request from the console. Upscaling is available separately in Picture."/>
+              </StackPanel>
+              <StackPanel Name="SetupConsolePage" Visibility="Collapsed">
+                <Label Style="{StaticResource SetupLabel}" Margin="0,0,0,5" Target="{Binding ElementName=SetupConsole}" Content="Paired console"/>
+                <ComboBox Name="SetupConsole" AutomationProperties.Name="Paired console"/>
+                <TextBlock Name="SetupConsoleHint" Style="{StaticResource SetupHint}" Text="Use a saved console, add another one, or continue and pair later."/>
+                <Button Name="SetupAdd" Content="Add a console" HorizontalAlignment="Left" Margin="0,8,0,0"/>
+                <StackPanel Name="SetupPairForm" Visibility="Collapsed">
+                  <TextBlock Style="{StaticResource Detail}" Margin="0,12,0,0">
+                    On your PS5, open <Run FontWeight="SemiBold" Text="Settings → System → Remote Play"/>. Turn on <Run FontWeight="SemiBold" Text="Enable Remote Play"/>, then select <Run FontWeight="SemiBold" Text="Link Device"/>.
+                  </TextBlock>
+                  <Label Style="{StaticResource SetupLabel}" Target="{Binding ElementName=SetupAddress}" Content="PS5 IP address"/>
+                  <TextBox Name="SetupAddress" AutomationProperties.Name="PS5 IP address"/>
+                  <TextBlock Style="{StaticResource SetupHint}" Text="If your console is on another subnet, enter its reachable IP address. Find it under Settings → Network → Connection Status → View Connection Status."/>
+                  <Label Style="{StaticResource SetupLabel}" Target="{Binding ElementName=SetupAccount}" Content="PSN account ID (Base64)"/>
+                  <TextBox Name="SetupAccount" AutomationProperties.Name="Base64 PSN account ID"/>
+                  <TextBlock Style="{StaticResource SetupHint}" Text="Use the eight-byte account ID for the PS5 user, encoded in Base64."/>
+                  <Button Name="SetupAccountHelp" Content="Find my account ID ↗" AutomationProperties.Name="Open the PSN account ID guide"
+                          HorizontalAlignment="Left" Padding="5,2" MinHeight="26" Margin="0,3,0,0" Foreground="#8FE6D0" Background="Transparent" BorderBrush="Transparent"/>
+                  <Label Style="{StaticResource SetupLabel}" Target="{Binding ElementName=SetupCode}" Content="Eight-digit link code"/>
+                  <WrapPanel>
+                    <TextBox Name="SetupCode" MaxLength="9" Width="148" Margin="0,0,8,0" AutomationProperties.Name="Eight-digit Link Device code"/>
+                    <Button Name="SetupPair" Content="Pair console" VerticalAlignment="Center" Margin="0"/>
+                  </WrapPanel>
+                </StackPanel>
+              </StackPanel>
+              <StackPanel Name="SetupFinishPage" Visibility="Collapsed">
+                <Border Background="#111B20" BorderThickness="1" BorderBrush="#304147" CornerRadius="8" Padding="14,11">
+                  <TextBlock Name="SetupSummary" Foreground="#E8F0F1" LineHeight="22" TextWrapping="Wrap"/>
+                </Border>
+                <TextBlock Name="SetupFinishHint" Style="{StaticResource Detail}" Margin="0,12,0,0" Text="Press Play in the main window to connect. You can change these choices in Play settings."/>
+              </StackPanel>
+            </Grid>
+          </ScrollViewer>
+          <TextBlock Grid.Row="2" Name="SetupMessage" AutomationProperties.LiveSetting="Polite" Foreground="#EABC8E" TextWrapping="Wrap" Margin="22,0,22,10">
+            <TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers>
+              <Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger>
+            </Style.Triggers></Style></TextBlock.Style>
+          </TextBlock>
+          <Border Grid.Row="3" BorderBrush="#304147" BorderThickness="0,1,0,0" Padding="16,10">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <Button Name="SetupSkip" Content="Skip setup" HorizontalAlignment="Left" Margin="0" Background="Transparent" BorderBrush="Transparent" Foreground="#B7C9CA"/>
+              <Button Name="SetupBack" Grid.Column="1" Content="Back" Margin="0,0,6,0"/>
+              <Button Name="SetupNext" Grid.Column="2" Content="Next" Style="{StaticResource Primary}" Margin="0" MinWidth="74"/>
+            </Grid>
+          </Border>
+        </Grid>
+      </Border>
+    </Grid>
     </Grid>
   </Grid>
 </Window>

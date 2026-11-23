@@ -30,7 +30,7 @@ namespace Cadrivect
         Thread worker;
         Link activeLink;
         string title,status="Off";
-        bool button,closing,published,publishing;
+        bool button,idle,closing,published,publishing;
         long revision;
         public string Status {get {lock(gate) return status;}}
         public bool IsPublished {get {lock(gate) return published;}}
@@ -63,10 +63,17 @@ namespace Cadrivect
         }
         public void SetActivity(string gameTitle,bool includeProjectButton=false)
         {
-            string next=CleanTitle(gameTitle);
+            Update(CleanTitle(gameTitle),false,includeProjectButton);
+        }
+        public void SetIdle(bool includeProjectButton)
+        {
+            Update("",true,includeProjectButton);
+        }
+        void Update(string next,bool isIdle,bool includeProjectButton)
+        {
             lock(gate) {
-                if(closing || (title==next && button==includeProjectButton)) return;
-                title=next; button=includeProjectButton; revision++; status="Updating Discord activity";
+                if(closing || (title==next && idle==isIdle && button==includeProjectButton)) return;
+                title=next; idle=isIdle; button=includeProjectButton; revision++; status="Updating Discord activity";
                 if(worker==null) {
                     worker=new Thread(Run) {IsBackground=true,Name="P5Cast Discord presence"};
                     worker.Start();
@@ -122,8 +129,8 @@ namespace Cadrivect
             long acknowledged=-1;
             try {
                 for(;;) {
-                    string desired; bool withButton,stop; long version;
-                    lock(gate) {desired=title; withButton=button; stop=closing; version=revision;}
+                    string desired; bool withButton,isIdle,stop; long version;
+                    lock(gate) {desired=title; withButton=button; isIdle=idle; stop=closing; version=revision;}
                     try {
                         if(desired==null) {
                             if(link!=null) {
@@ -146,7 +153,7 @@ namespace Cadrivect
                                 if(closing || title==null || revision!=version) continue;
                                 publishing=true;
                             }
-                            link.Activity(pid,desired,withButton);
+                            link.Activity(pid,desired,withButton,isIdle);
                             acknowledged=version;
                             lock(gate) {publishing=false; published=true; if(revision==version) status="Shared with Discord";}
                             continue;
@@ -238,12 +245,13 @@ namespace Cadrivect
                 throw new TimeoutException();
             }
             public void Handshake() {Json(0,new {v=1,client_id=ApplicationId}); Await(null);}
-            public void Activity(int pid,string title,bool button)
+            public void Activity(int pid,string title,bool button,bool idle=false)
             {
                 Dictionary<string,object> activity=null;
                 if(title!=null) {
-                    activity=new Dictionary<string,object>{{"type",0},{"details",title.Length==0 ? "PS5 Remote Play" : title}};
-                    if(title.Length>0) activity["state"]="PS5 Remote Play";
+                    activity=new Dictionary<string,object>{{"type",0},{"details",idle ? "Idle" : title.Length==0 ? "PS5 Remote Play" : title}};
+                    if(idle) activity["state"]="Waiting for PS5 connection";
+                    else if(title.Length>0) activity["state"]="PS5 Remote Play";
                     if(button) activity["buttons"]=new[]{new {label="View project",url=ProjectUrl}};
                 }
                 string nonce=Guid.NewGuid().ToString("N");

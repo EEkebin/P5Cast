@@ -32,9 +32,9 @@ namespace Cadrivect
         }
         void EndDiscordSession()
         {
-            ResetTitleLookup(); titleAddress=null; publishedTitle=null;
+            ResetTitleLookup(); titleAddress=null; firstFrame=false;
             UI<TextBox>("GameTitle").Clear();
-            if(discord!=null) discord.Clear();
+            TickDiscord();
         }
         async void ReadDiscordTitle(string address,int generation)
         {
@@ -57,10 +57,15 @@ namespace Cadrivect
             UI<CheckBox>("ShareProject").IsEnabled=enabled;
             var manual=UI<TextBox>("GameTitle"); manual.IsEnabled=enabled && game;
             string state;
-            if(!enabled || closing || stopping || !firstFrame || rendering==null || (source!="Direct" && source!="Sony")) {
-                if(publishedTitle!=null && discord!=null) discord.Clear();
+            bool button=UI<CheckBox>("ShareProject").IsChecked==true;
+            if(!enabled || closing) {
+                if(discord!=null) discord.Clear();
                 publishedTitle=null;
-                state=enabled?"Rich Presence is waiting for PS5 playback.":"Rich Presence is off.";
+                state="Rich Presence is off.";
+            } else if(stopping || !firstFrame || rendering==null || (source!="Direct" && source!="Sony")) {
+                if(discord==null) discord=new DiscordPresence();
+                discord.SetIdle(button); publishedTitle=null;
+                state=discord.Status;
             } else {
                 string title=game?manual.Text.Trim():"";
                 if(game && title.Length==0) {
@@ -68,7 +73,6 @@ namespace Cadrivect
                         ReadDiscordTitle(titleAddress,lookupGeneration);
                     title=detectedTitle;
                 }
-                bool button=UI<CheckBox>("ShareProject").IsChecked==true;
                 if((publishedTitle!=title || publishedButton!=button) && (title.Length==0 || DateTime.UtcNow>=applyTitleAfter)) {
                     if(discord==null) discord=new DiscordPresence();
                     discord.SetActivity(title,button); publishedTitle=title; publishedButton=button;

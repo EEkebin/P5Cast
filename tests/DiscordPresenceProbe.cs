@@ -66,11 +66,14 @@ internal static class DiscordPresenceProbe
         using(var presence=new DiscordPresence(new[]{name},delegate{return true;},60,500)) {
             var accept=s.WaitForConnectionAsync();
             presence.Clear();Must(!accept.Wait(100),"Opening settings connected to IPC.");
-            presence.SetActivity(null);
+            presence.SetIdle(false);
             Must(accept.Wait(2000),"No connection.");Handshake(s);
             var request=Object(s,1);var a=Activity(request);
+            Must((string)a["details"]=="Idle" && (string)a["state"]=="Waiting for PS5 connection" && !a.ContainsKey("buttons"),"Startup idle activity was incorrect.");
+            Ack(s,request);Until(()=>presence.IsPublished,"Idle was not acknowledged.");
+            presence.SetActivity(null);request=Object(s,1);a=Activity(request);
             Must(a.Count==2 && (string)a["details"]=="PS5 Remote Play" && Convert.ToInt32(a["type"])==0,"Generic activity disclosed unexpected metadata.");
-            Frame(s,new {cmd="SET_ACTIVITY",nonce="other-request"});Thread.Sleep(40);Must(!presence.IsPublished,"Accepted unrelated ACK.");
+            Frame(s,new {cmd="SET_ACTIVITY",nonce="other-request"});Thread.Sleep(40);Must(presence.Status!="Shared with Discord","Accepted unrelated ACK.");
             Ack(s,request);Until(()=>presence.IsPublished,"Missing ACK state.");
             byte[] ping={4,3,2,1};Send(s,3,ping);Must(BitConverter.ToString(Read(s,4))=="04-03-02-01","Ping not echoed.");
             presence.SetActivity("  Astro\n  Bot  ",true);
@@ -78,7 +81,12 @@ internal static class DiscordPresenceProbe
             var buttons=(System.Collections.IList)a["buttons"];var button=(Dictionary<string,object>)buttons[0];
             Must((string)a["details"]=="Astro Bot" && (string)a["state"]=="PS5 Remote Play" && buttons.Count==1 &&
                 (string)button["label"]=="View project" && (string)button["url"]=="https://github.com/EEkebin/P5Cast","Incorrect optional title or button.");
-            Ack(s,request);Until(()=>presence.Status=="Shared with Discord","Title update missing ACK.");presence.SetActivity("Astro Bot",true);presence.Clear();
+            Ack(s,request);Until(()=>presence.Status=="Shared with Discord","Title update missing ACK.");
+            presence.SetIdle(true);request=Object(s,1);a=Activity(request);
+            var idleButton=(Dictionary<string,object>)((System.Collections.IList)a["buttons"])[0];
+            Must((string)a["details"]=="Idle" && (string)a["state"]=="Waiting for PS5 connection" &&
+                (string)idleButton["url"]=="https://github.com/EEkebin/P5Cast","Disconnect lost the idle activity or project link.");
+            Ack(s,request);Until(()=>presence.Status=="Shared with Discord","Idle update missing ACK.");presence.SetIdle(true);presence.Clear();
             request=Object(s,1);Must(Activity(request)==null,"Clear did not remove the activity.");Ack(s,request);
             Until(()=>!presence.IsPublished && presence.Status=="Off","Clear not acknowledged.");
         }

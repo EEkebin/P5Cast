@@ -110,7 +110,7 @@
           </Grid>
           <StackPanel Name="DiscordSettings" Visibility="Collapsed">
             <WrapPanel>
-              <CheckBox Name="SharePresence" Content="Show PS5 activity on Discord" Foreground="#E8F0F1" Margin="0,0,18,7"/>
+              <CheckBox Name="SharePresence" Content="Show P5Cast activity on Discord" Foreground="#E8F0F1" Margin="0,0,18,7"/>
               <CheckBox Name="ShareProject" Content="Include private GitHub link" Foreground="#E8F0F1" Margin="0,0,0,7"/>
             </WrapPanel>
             <WrapPanel>

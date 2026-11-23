@@ -18,7 +18,8 @@ $probe=Join-Path $OutputDirectory 'EmbeddedProbe.exe'
 & "$framework\csc.exe" /nologo /optimize+ /platform:x64 @refs "/out:$probe" "$PSScriptRoot\EmbeddedProbe.cs" "$PSScriptRoot\ComparisonProbe.cs"
 if ($LASTEXITCODE) { throw 'Embedded WPF probe compilation failed.' }
 if ($CheckComparison) {
-    & $probe $PlayerExe $DirectRuntime "$PSScriptRoot\fixtures\text.h264" "$PSScriptRoot\fixtures\text-inverted.h264" "$OutputDirectory\comparison.json" $Renderer --comparison
+    # Midtone glyph edges leave headroom for sharpening at the native video resolution.
+    & $probe $PlayerExe $DirectRuntime "$PSScriptRoot\fixtures\comparison.h264" "$PSScriptRoot\fixtures\comparison-inverted.h264" "$OutputDirectory\comparison.json" $Renderer --comparison
     if ($LASTEXITCODE) { throw "Embedded comparison test failed. Inspect $OutputDirectory" }
     return
 }

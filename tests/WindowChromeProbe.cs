@@ -171,11 +171,15 @@ internal static partial class WindowChromeProbe
         var bounds=Rect(video);
         await Until(delegate {
             var data=snapshot();
-            return Convert.ToInt32(data["outputWidth"])==bounds.Width && Convert.ToInt32(data["outputHeight"])==bounds.Height &&
+            return Convert.ToInt32(data["surfaceWidth"])==bounds.Width && Convert.ToInt32(data["surfaceHeight"])==bounds.Height &&
                 Convert.ToInt32(data["presented"])>before;
         },"Video stopped presenting at the new size on "+direction+".");
+        var resized=snapshot();
+        if((string)resized["effectivePictureMode"]=="original")
+            Require(Equals(resized["inputWidth"],resized["outputWidth"]) && Equals(resized["inputHeight"],resized["outputHeight"]),
+                    "Changing fullscreen resized native video output.");
         Note(direction+" layout settled in "+layoutMs+" ms. Playback telemetry confirmed "+bounds.Width+"x"+bounds.Height+
-             " output at "+timer.ElapsedMilliseconds+" ms (250 ms sampling).");
+             " surface at "+timer.ElapsedMilliseconds+" ms (250 ms sampling).");
     }
     static async Task CheckComparisonViews() {
         var api=AppDomain.CurrentDomain.GetAssemblies().Select(a=>a.GetType("Cadrivect.Engine.EmbeddedPlayback")).First(t=>t!=null);

@@ -57,7 +57,7 @@ internal sealed partial class Renderer : IDisposable
     Texture2D backBuffer;
     RenderTargetView display;
     GpuImage curr,prev,incoming,motion,mixed,scaled;
-    Size srcSize,outSize,screenSize;
+    Size srcSize,outSize,screenSize,upscaleTarget;
     Size pendingSize;
     long resizeStartedAt,sizeChangedAt;
     Rectangle viewport,originalViewport;
@@ -263,8 +263,8 @@ internal sealed partial class Renderer : IDisposable
         }
         if(hdr=="off") OutputNotice=null;
         renderLimit=limit; hdrMode=hdr;
-        Size before=outSize; SetViewport();
-        if(outSize!=before) ResetFrameHistory();
+        Size before=ProcessingSize(pictureMode); SetViewport();
+        if(ProcessingSize(pictureMode)!=before) ResetFrameHistory();
     }
     bool ChooseHdr(string hdr)
     {
@@ -324,6 +324,15 @@ internal sealed partial class Renderer : IDisposable
             double limit=Math.Min(ratio,Math.Min((double)renderLimit.Width/srcSize.Width,(double)renderLimit.Height/srcSize.Height));
             next=new Size(Math.Max(1,(int)Math.Round(srcSize.Width*limit)),Math.Max(1,(int)Math.Round(srcSize.Height*limit)));
         }
+        // A smaller window or resolution cap only affects the final display fit.
+        upscaleTarget=next.Width>srcSize.Width && next.Height>srcSize.Height ? next : srcSize;
+    }
+    Size ProcessingSize(string mode)
+    {
+        return mode=="fsr" || mode=="dlss" || mode=="rtxvideo" ? upscaleTarget : srcSize;
+    }
+    void SetProcessingSize(Size next)
+    {
         if(next==outSize) return;
         if(scaled!=null) { scaled.Dispose(); scaled=null; }
         if(raster!=null) { raster.Dispose(); raster=null; }
@@ -372,6 +381,9 @@ internal sealed partial class Renderer : IDisposable
         ReleaseHdr();
         foreach(var image in new [] {curr,prev,incoming,motion,mixed}) if(image!=null) image.Dispose();
         curr=prev=incoming=motion=mixed=null;
+        upscaleTarget=Size.Empty;
+        PictureViewport=Rectangle.Empty;
+        SetProcessingSize(Size.Empty);
     }
     void Draw(string name, RenderTargetView target, Rectangle area, ShaderResourceView input, float phase,
               ShaderResourceView previous=null, ShaderResourceView flow=null,Rectangle? clip=null,RenderTargetView auxiliary=null)
@@ -452,6 +464,7 @@ internal sealed partial class Renderer : IDisposable
         finishPrevious=finishPrevious && HasPrevious;
         var source=finishPrevious ? prev.Read:curr.Read;
         if(mode==failedMode) mode="original";
+        SetProcessingSize(ProcessingSize(mode));
         bool vendor=IsVendor(mode);
         if(vendor)
         {
@@ -460,6 +473,7 @@ internal sealed partial class Renderer : IDisposable
             {
                 if(!IsEffectFailure(error)) throw;
                 failedMode=mode; mode="original"; vendor=false;
+                SetProcessingSize(srcSize);
                 EffectNotice="Showing Original. "+error.Message;
                 ReleaseEffects(); RestoreDrawState();
             }
@@ -495,7 +509,7 @@ internal sealed partial class Renderer : IDisposable
             if(srcSize!=outSize)
             {
                 if(scaled==null) scaled=new GpuImage(Device,outSize.Width,outSize.Height,Format.B8G8R8A8_UNorm,true);
-                Draw(outSize.Width>srcSize.Width ? "Easu" : "Original",scaled.Write,new Rectangle(System.Drawing.Point.Empty,outSize),source,phase);
+                Draw("Easu",scaled.Write,new Rectangle(System.Drawing.Point.Empty,outSize),source,phase);
                 source=scaled.Read;
             }
             DrawFinal("Rcas",source,phase,viewport);
@@ -505,11 +519,12 @@ internal sealed partial class Renderer : IDisposable
     }
     void DrawOriginal(Rectangle area,bool holdPrevious,Rectangle? clip=null)
     {
-        if(HdrEnabled) DrawHdr("original",1,holdPrevious,area,clip);
-        else DrawFinal("Original",holdPrevious ? prev.Read : curr.Read,1,area,clip:clip);
+        Draw(HdrEnabled ? "HdrToPq" : "Original",display,area,holdPrevious ? prev.Read : curr.Read,1,clip:clip);
     }
     void DrawFinal(string shader,ShaderResourceView source,float phase,Rectangle area,ShaderResourceView previous=null,ShaderResourceView flow=null,bool linear2020=false,Rectangle? clip=null)
     {
+        // An existing source or enhanced texture only needs fitting to the presentation surface.
+        if(shader=="Original") { Draw(linear2020 ? "HdrLinear2020ToPq" : "Original",display,area,source,phase,clip:clip); return; }
         if(!linear2020 && outSize==area.Size) { Draw(shader,display,area,source,phase,previous,flow,clip); return; }
         var format=linear2020 ? Format.R16G16B16A16_Float : Format.B8G8R8A8_UNorm;
         if(raster==null || raster.Texture.Description.Format!=format)

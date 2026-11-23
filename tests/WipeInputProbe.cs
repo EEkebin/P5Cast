@@ -29,7 +29,7 @@ internal static partial class WindowChromeProbe
         if(fullscreen) {
             Click("Fullscreen");
             var full=Screen().Full;
-            await Until(()=>Fits(Rect(video),full,2) && Convert.ToInt32(sample()["outputWidth"])==full.Width,
+            await Until(()=>Fits(Rect(video),full,2) && Convert.ToInt32(sample()["surfaceWidth"])==full.Width,
                         "Wipe did not expand to the full-size playback surface.");
         }
         var meter=Find<Border>("MeterHost");
@@ -43,7 +43,7 @@ internal static partial class WindowChromeProbe
             var frame=sample();
             Bounds native;
             Require(GetClientRect(video,out native),"Cannot measure the playback HWND.");
-            double sx=native.Width/Convert.ToDouble(frame["outputWidth"]),sy=native.Height/Convert.ToDouble(frame["outputHeight"]);
+            double sx=native.Width/Convert.ToDouble(frame["surfaceWidth"]),sy=native.Height/Convert.ToDouble(frame["surfaceHeight"]);
             var picture=new Rectangle((int)Math.Round(sx*Convert.ToDouble(frame["pictureX"])),(int)Math.Round(sy*Convert.ToDouble(frame["pictureY"])),
                                      (int)Math.Round(sx*Convert.ToDouble(frame["pictureWidth"])),(int)Math.Round(sy*Convert.ToDouble(frame["pictureHeight"])));
             if(!horizontal) await CheckLoupeInput(backend,picture,native,sample);

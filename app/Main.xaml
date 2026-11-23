@@ -312,7 +312,7 @@
                   <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/></DataTemplate></ComboBox.ItemTemplate>
                 </ComboBox>
               </StackPanel>
-              <StackPanel Width="144" Margin="0,0,12,6"><TextBlock Text="Render resolution" Margin="0,0,0,5"/><ComboBox Name="RenderResolution"/></StackPanel>
+              <StackPanel Width="144" Margin="0,0,12,6"><TextBlock Text="Upscaling limit" Margin="0,0,0,5"/><ComboBox Name="RenderResolution" ToolTip="Maximum resolution an upscaler can produce. A lower limit preserves the source resolution."/></StackPanel>
               <StackPanel Width="124" Margin="0,0,0,6"><TextBlock Text="Color output" Margin="0,0,0,5"/><ComboBox Name="HdrOutput"/></StackPanel>
             </WrapPanel>
             <TextBlock Name="RendererHint" Style="{StaticResource Detail}" TextWrapping="Wrap"/>

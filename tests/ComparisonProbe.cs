@@ -317,14 +317,23 @@ internal static partial class EmbeddedProbe
             if(supportsCapture) {
                 CheckFullSizeWipe(window,api,setView,waitView,new[]{.5f,.25f,.75f,0f,1f});
                 CheckPausedLoupe(window,api);
-                // Resize and cap the processing raster while the source is paused. The letterboxed output is wider than the 720p processing cap.
+                // Wipe and sharpening retain native video resolution when a larger surface or upscale cap is selected.
                 window.Width=1403; window.Height=811; window.UpdateLayout(); Pump();
                 ClientBounds resized;
                 Check(GetClientRect(host.Handle,out resized),"Cannot measure resized fixture.");
-                WaitSnapshot(api,s=>Convert.ToInt32(s["outputWidth"])==resized.Right && Convert.ToInt32(s["outputHeight"])==resized.Bottom,"resized wipe output");
+                WaitSnapshot(api,s=>Convert.ToInt32(s["surfaceWidth"])==resized.Right && Convert.ToInt32(s["surfaceHeight"])==resized.Bottom,"resized wipe surface");
                 api.GetMethod("ConfigureOutput").Invoke(null,new object[]{"720",null});
                 var capped=WaitSnapshot(api,s=>(string)s["resolution"]=="720","capped processing raster");
-                Check(Convert.ToInt32(capped["renderWidth"])<Convert.ToInt32(capped["outputWidth"]),"Fixture did not exercise processing below output resolution.");
+                CheckVideoSize(capped,128,64);
+                Check(Convert.ToInt32(capped["surfaceWidth"])>1280,"Fixture did not exercise a surface wider than the cap.");
+                api.GetMethod("Configure").Invoke(null,new object[]{2,2});
+                var enlarged=WaitSnapshot(api,s=>(string)s["effectivePictureMode"]=="fsr" &&
+                    Convert.ToInt32(s["repaints"])>Convert.ToInt32(capped["repaints"]),"capped FSR frame");
+                CheckVideoSize(enlarged,1280,640);
+                api.GetMethod("Configure").Invoke(null,new object[]{1,2});
+                var sharpened=WaitSnapshot(api,s=>(string)s["effectivePictureMode"]=="sharp" &&
+                    Convert.ToInt32(s["repaints"])>Convert.ToInt32(enlarged["repaints"]),"native sharpened frame");
+                CheckVideoSize(sharpened,128,64);
                 CheckFullSizeWipe(window,api,setView,waitView,new[]{0f,.35f,.65f,1f});
             } else {
                 setView("wipe");
@@ -358,6 +367,7 @@ internal static partial class EmbeddedProbe
                 Pump();
             }
             var movingWipe=SetWipePosition(api,.45f);
+            CheckVideoSize(movingWipe,128,64);
             int inputs=Convert.ToInt32(movingWipe["captured"])-Convert.ToInt32(running["captured"]);
             int interpolated=Convert.ToInt32(movingWipe["generated"])-Convert.ToInt32(running["generated"]);
             int outputs=Convert.ToInt32(movingWipe["presented"])-Convert.ToInt32(running["presented"]);
@@ -368,6 +378,7 @@ internal static partial class EmbeddedProbe
             api.GetMethod("Stop").Invoke(null,null); clock.Restart(); while(worker.IsAlive && clock.ElapsedMilliseconds<3000) Pump();
             Check(!worker.IsAlive && result==0,"Comparison playback did not stop cleanly.");
             var final=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(File.ReadAllText(args[4]));
+            CheckVideoSize(final,128,64);
             Check(Convert.ToInt32(final["sampledFrames"])>0 && Convert.ToInt32(final["sampleMaxLuma"])>Convert.ToInt32(final["sampleMinLuma"])+64,
                   "The GPU output did not contain the high-contrast fixture.");
             Console.WriteLine(args[5]+" passed live view changes, focused original/enhanced output, side-by-side, and full-size wipe with interpolation.");

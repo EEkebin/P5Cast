@@ -390,9 +390,8 @@ internal static class Player
                                         +",\"loupeScale\":"+Number(loupe==null ? 1 : loupe.Scale)
                                         +",\"effectNotice\":"+JsonString(settingsNotice ?? (string.IsNullOrEmpty(renderer.EffectNotice) ? renderer.OutputNotice : renderer.EffectNotice))+",\"compare\":"+(compare ? "true":"false")
                                         +",\"wipeGripState\":"+gripState+",\"wipeGripScale\":"+Number(gripScale)+",\"wipeHorizontal\":"+(wipeHorizontal ? "true" : "false")+",\"wipePosition\":"+wipePosition.ToString("R",CultureInfo.InvariantCulture)+",\"comparisonView\":"+JsonString(comparisonView)+",\"sampleId\":"+(++sampleId)+",\"elapsedMs\":"+Number(now)+",\"display\":"+JsonString(renderer.DisplayName)
-                                        +",\"hdrEnabled\":"+(renderer.HdrEnabled ? "true":"false")+",\"outputWidth\":"+renderer.OutputSize.Width+",\"outputHeight\":"+renderer.OutputSize.Height
+                                        +",\"hdrEnabled\":"+(renderer.HdrEnabled ? "true":"false")
                                         +",\"resolution\":"+JsonString(resolution)+",\"hdrMode\":"+JsonString(hdr)
-                                        +",\"renderWidth\":"+renderer.RenderSize.Width+",\"renderHeight\":"+renderer.RenderSize.Height
                                         +Telemetry(renderer,decoded,targetFps,compare ? 1:multiplier,lastRealAge,demo)+"}";
                                     if(host!=null) EmbeddedPlayback.Publish(snapshot);
                                     if(live!=null && now-lastFile>=1000) { live.Update(snapshot); lastFile=now; }
@@ -483,8 +482,6 @@ internal static class Player
                             +",\"hardwareMotionPairs\":"+renderer.HardwareMotionPairs
                             +",\"display\":"+JsonString(renderer.DisplayName)+",\"resolution\":"+JsonString(resolution)
                             +",\"embedded\":"+(host!=null ? "true":"false")+",\"fullscreen\":"+(window!=null && window.Fullscreen ? "true":"false")+",\"hdrEnabled\":"+(renderer.HdrEnabled ? "true":"false")
-                            +",\"outputWidth\":"+renderer.OutputSize.Width+",\"outputHeight\":"+renderer.OutputSize.Height
-                            +",\"renderWidth\":"+renderer.RenderSize.Width+",\"renderHeight\":"+renderer.RenderSize.Height
                             +",\"wipeHorizontal\":"+(wipeHorizontal ? "true" : "false")+",\"wipePosition\":"+wipePosition.ToString("R",CultureInfo.InvariantCulture)+",\"comparisonView\":"+JsonString(comparisonView)+",\"outputStatus\":"+JsonString(renderer.OutputStatus)+",\"effectivePictureMode\":"+JsonString(renderer.EffectivePictureMode)
                             +",\"effectNotice\":"+JsonString(renderer.EffectNotice)
                             +",\"medianPcSubmitMs\":"+Number(liveFrameAges.Count==0 ? -1:liveFrameAges[median])
@@ -532,9 +529,14 @@ internal static class Player
     static string Telemetry(Renderer renderer,DirectVideo direct,int targetFps,int factor,double age,bool demo)
     {
         Size input=renderer.InputSize;
+        Size output=renderer.RenderSize;
+        Size surface=renderer.OutputSize;
         var picture=renderer.PictureViewport;
         var audio=direct==null ? null:direct.Audio;
         return ",\"presenterHdr10\":"+(renderer.PresenterHdr10 ? "true":"false")
+               +",\"outputWidth\":"+output.Width+",\"outputHeight\":"+output.Height
+               +",\"renderWidth\":"+output.Width+",\"renderHeight\":"+output.Height
+               +",\"surfaceWidth\":"+surface.Width+",\"surfaceHeight\":"+surface.Height
                +",\"displayRefreshHz\":"+Number(renderer.DisplayRefreshHz>0 ? renderer.DisplayRefreshHz : -1)
                +",\"pictureX\":"+picture.X+",\"pictureY\":"+picture.Y+",\"pictureWidth\":"+picture.Width+",\"pictureHeight\":"+picture.Height
                +",\"displayBitsPerColor\":"+Number(renderer.DisplayBitsPerColor>0 ? renderer.DisplayBitsPerColor : -1)

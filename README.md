@@ -22,7 +22,7 @@ Choose **Draggable split** for one full-size picture. Drag the centered drawer-s
 
 Hold the left mouse button on the picture to inspect it through a circular loupe. Grab the comparison divider to move the split and the loupe together. Scroll while holding to select native size or 2×, 3×, 4×, or 5×. Releasing the button dismisses the loupe and leaves the divider in place. Escape cancels the drag and restores the previous split. The loupe starts at 2× and magnifies individual output pixels, including the enhancement visible at that spot. This works with Direct to PS5, Sony Remote Play capture, and the offline demo.
 
-For a spatial comparison of sharpening or upscaling, set **Frame interpolation → Off**. With interpolation on, the original holds each source frame while the enhanced side can advance between frames. Under **Stream diagnostics → Video**, **Processing resolution** shows the effect raster and **Display refresh** shows the Windows display mode in Hz. The FPS dial shows how many frames P5Cast submitted per second.
+For a spatial comparison of sharpening or upscaling, set **Frame interpolation → Off**. With interpolation on, the original holds each source frame while the enhanced side can advance between frames. Under **Stream diagnostics → Video**, **Input → output** shows incoming and processed video resolution. **Playback area** shows the size of the player on screen, including any black bars. **Display refresh** shows the Windows display mode in Hz.
 
 Choose **Original** or **Enhanced** to give either picture the whole window. During playback, **Ctrl+Alt+B** switches to the original and back to your previous view, including side by side. You can try this with **Offline demo** and **Sharpen** before connecting.
 
@@ -53,19 +53,19 @@ On first use, Direct prepares its FFmpeg decoder. It reuses verified libraries f
 
 ## Picture quality and HDR
 
-The PS5 sends compressed video. Direct decodes those pixels once before enhancement. Hosting the PC adds another lossy encode. The playback resolution controls local processing and presentation. A 4K presentation can upscale the console’s 1080p input.
+The PS5 sends compressed video. Direct decodes those pixels once before enhancement. Hosting the PC adds another lossy encode. A 1080p stream produces 1080p video in Original, Sharpen and DLAA, including with frame interpolation. An upscaler such as FSR can produce a larger video frame when the playback area and upscaling limit allow it.
 
 | Picture mode | Processing |
 | --- | --- |
 | **Original** | Preserves native-size texels, fits the picture to the window and samples multiple regions when reducing it. |
-| **Sharpen** | Uses bounded cubic reconstruction during enlargement and a spatial detail filter to improve edges and fine lettering. |
+| **Sharpen** | Applies a spatial detail filter to edges and fine lettering at the incoming video resolution. |
 | **AMD FSR 1** | Uses AMD’s EASU for enlargement and RCAS for sharpening. Native-size input skips the enlargement pass. |
 | **NVIDIA RTX Video SR** | Runs the NVIDIA RTX Video SDK at High quality on SDR video. Select SDR to make this mode available during HDR playback. |
 | **NVIDIA DLSS / DLAA** | Uses the NVIDIA NGX runtime in SDR or floating-point HDR. DLSS uses DLAA when the input already meets or exceeds the processing resolution. P5Cast uses the decoded source to preserve thin, near-neutral menu and HUD lettering when reconstruction changes its contrast. These modes are experimental on finished console video. The player estimates motion from decoded frames because the stream omits game depth and camera jitter. |
 
 NVIDIA choices appear enabled after the app runs a capability test on the actual Direct3D adapter. Optical-flow hardware supplies motion estimates where supported; other adapters use a GPU block matcher. P5Cast’s interpolation inserts frames between source pictures. Its 2×–4× multipliers are targets. Interpolation adds processing delay and can distort moving text or objects. Native NVIDIA DLSS Frame Generation is unavailable in this build. [NVIDIA DLSS SDK](https://github.com/NVIDIA/DLSS) · [NVIDIA RTX Video SDK](https://developer.nvidia.com/rtx-video-sdk)
 
-Choose a **Playback display**, a **Resolution** cap or **Native**, and **Color output**. **Auto** follows the selected display and renderer. RTX Video SR uses SDR. Explicit **HDR10** requires an HDR-enabled display and a presentation surface that supports 10-bit PQ/BT.2020. Changing output settings during playback affects local presentation. Direct negotiates the console’s stream format when connecting; reconnect to request a different console format. Direct supports 10-bit HEVC HDR and maps HDR input to SDR for an SDR display. Sony capture uses floating-point scRGB for HDR. Follow Sony’s own Windows HDR setup for its client. [Sony HDR setup](https://remoteplay.dl.playstation.net/remoteplay/lang/en/1100001.html)
+Choose a **Playback display**, an **Upscaling limit**, and **Color output**. The default **Fit display** lets an active upscaler enlarge the video to fit the playback area. A fixed limit below the source resolution keeps the source at its original size. **Auto** color follows the selected display and renderer. RTX Video SR uses SDR. Explicit **HDR10** requires an HDR-enabled display and a presentation surface that supports 10-bit PQ/BT.2020. Direct negotiates the console’s stream format when connecting. Reconnect to request a different console format. Direct supports 10-bit HEVC HDR and maps HDR input to SDR for an SDR display. Sony capture uses floating-point scRGB for HDR. [Sony HDR setup](https://remoteplay.dl.playstation.net/remoteplay/lang/en/1100001.html)
 
 ## Reading Stats
 

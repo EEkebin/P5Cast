@@ -24,7 +24,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.14.1.0")]
+[assembly: AssemblyVersion("0.14.2.0")]
 
 namespace Cadrivect
 {
@@ -166,7 +166,7 @@ namespace Cadrivect
             rendererChoice.SelectedIndex=Math.Max(0,Array.IndexOf(rendererIds,Field(saved,"renderer")));
             rendererChoice.SelectionChanged+=delegate {RefreshRendererOutput();};
             RefreshRendererOutput();
-            UI<ComboBox>("RenderResolution").ItemsSource=new[]{"Native","720p","1080p","1440p","4K"};
+            UI<ComboBox>("RenderResolution").ItemsSource=new[]{"Fit display","720p","1080p","1440p","4K"};
             UI<ComboBox>("RenderResolution").SelectedIndex=ParseIndex(saved,"resolution",0,resolutionIds.Length);
             UI<ComboBox>("HdrOutput").SelectionChanged+=delegate {
                 if(!UsesSdrPresenter) preferredHdr=UI<ComboBox>("HdrOutput").SelectedIndex;

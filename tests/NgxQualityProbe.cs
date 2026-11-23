@@ -191,6 +191,9 @@ internal static partial class EmbeddedProbe {
             bool hdrAvailable=advanced.Contains(name,StringComparer.OrdinalIgnoreCase);
             if(!hdrAvailable) Console.WriteLine("SDR only. Windows HDR is off on "+name+".");
             bool pass=true;
+            var capsType=assembly.GetType("GpuCapabilities",true);
+            var caps=capsType.GetMethod("Probe").Invoke(null,null);
+            bool videoSr=(bool)capsType.GetMethod("Supports").Invoke(caps,new object[]{"rtxvideo"});
             using(var host=new VideoHost()) {
                 var window=new Window{WindowStyle=WindowStyle.None,ResizeMode=ResizeMode.NoResize,Left=screen.Bounds.Left+12,Top=screen.Bounds.Top+12,
                     Width=OutputW,Height=OutputH,ShowInTaskbar=false,Content=host};
@@ -217,6 +220,9 @@ internal static partial class EmbeddedProbe {
                                 if(f==7) prior=ReadPresentedTexture(device,target);
                             }
                             var pixels=ReadPresentedTexture(device,target);
+                            var expectedSize=mode=="dlss" ? new Size(OutputW,OutputH) : new Size(InputW,InputH);
+                            Check((Size)type.GetProperty("RenderSize").GetValue(renderer,null)==expectedSize,
+                                  mode+" processed video at the wrong resolution.");
                             Check((string)type.GetProperty("EffectivePictureMode").GetValue(renderer,null)==mode,"NGX fell back from "+mode+": "+type.GetProperty("EffectNotice").GetValue(renderer,null));
                             if(mode!="original") Check((int)type.GetProperty("VendorEvaluations").GetValue(renderer,null)-evaluations>=9,"Insufficient NVIDIA evaluations.");
                             if(args[3]!="-") SaveTextCrop(args[3],pixels,hdr,mode);
@@ -239,21 +245,30 @@ internal static partial class EmbeddedProbe {
                                 setLoupe.Invoke(renderer,new object[]{false,0f,0f,0,1f});
                                 Console.WriteLine("{0} {1} loupe preserved exact output pixel values at 5x.",hdr?"HDR":"SDR",mode);
                                 // A display resize changes the DLSS target while DLAA keeps its native input size.
-                                foreach(var size in new[]{new Size(OutputW+160,OutputH+90),new Size(OutputW,OutputH)}) {
+                                foreach(var size in new[]{new Size(OutputW+160,OutputH+90),new Size(InputW/2,InputH/2),new Size(OutputW,OutputH)}) {
                                     var watch=System.Diagnostics.Stopwatch.StartNew();
                                     type.GetMethod("Resize").Invoke(renderer,new object[]{size});
                                     UploadQualityFrame(device,input,9,hdr);
                                     type.GetMethod("Receive").Invoke(renderer,new object[]{input,new Rectangle(0,0,InputW,InputH),false});
                                     type.GetMethod("Show").Invoke(renderer,new object[]{mode,1f,false,false});
                                     var output=(Texture2D)backBuffer.GetValue(renderer);
+                                    bool enlarging=mode=="dlss" && size.Width>InputW;
                                     Check(output.Description.Width==size.Width && output.Description.Height==size.Height &&
-                                          (string)type.GetProperty("EffectivePictureMode").GetValue(renderer,null)==mode &&
+                                          (Size)type.GetProperty("RenderSize").GetValue(renderer,null)==(enlarging ? size : new Size(InputW,InputH)) &&
+                                          (string)type.GetProperty("EffectivePictureMode").GetValue(renderer,null)==(enlarging ? "dlss" : "dlaa") &&
                                           (bool)type.GetProperty("PresenterHdr10").GetValue(renderer,null)==hdr,
                                           "Resizing lost the selected NVIDIA effect or display format.");
                                     Console.WriteLine("{0} {1} resize to {2}x{3} and frame submission: {4} ms",
                                         hdr?"HDR":"SDR",mode,size.Width,size.Height,watch.ElapsedMilliseconds);
                                 }
                             }
+                        }
+                        if(!hdr && videoSr) {
+                            type.GetMethod("SetPictureMode").Invoke(renderer,new object[]{"rtxvideo"});
+                            type.GetMethod("Show").Invoke(renderer,new object[]{"rtxvideo",1f,false,false});
+                            Check((string)type.GetProperty("EffectivePictureMode").GetValue(renderer,null)=="rtxvideo" &&
+                                  (Size)type.GetProperty("RenderSize").GetValue(renderer,null)==new Size(OutputW,OutputH),
+                                  "RTX Video SR did not produce the enlarged video resolution.");
                         }
                     }
                 }

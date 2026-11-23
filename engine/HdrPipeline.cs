@@ -52,7 +52,6 @@ internal sealed partial class Renderer
     void DrawHdr(string mode,float phase,bool finishPrevious,Rectangle area,Rectangle? clip=null)
     {
         var srcArea=new Rectangle(Point.Empty,srcSize);
-        var outputArea=new Rectangle(Point.Empty,outSize);
         ShaderResourceView source=finishPrevious ? prev.Read : curr.Read;
         if (phase<1 && HasPrevious)
         {
@@ -62,6 +61,11 @@ internal sealed partial class Renderer
             source=hdrMixed.Read;
             Generated++;
         }
+        if(mode=="original") {
+            Draw("HdrToPq",display,area,source,1,clip:clip);
+            return;
+        }
+        var outputArea=new Rectangle(Point.Empty,outSize);
         bool separateOutput=outSize!=area.Size;
         if (separateOutput) HdrScratch(ref hdrProcessed,outSize,HdrFloatFormat);
         var target=separateOutput ? hdrProcessed.Write : display;
@@ -75,15 +79,15 @@ internal sealed partial class Renderer
             if(srcSize!=outSize)
             {
                 HdrScratch(ref hdrFsrScaled,outSize,HdrFloatFormat);
-                Draw(outSize.Width>srcSize.Width ? "Easu" : "Original",hdrFsrScaled.Write,outputArea,source,1);
+                Draw("Easu",hdrFsrScaled.Write,outputArea,source,1);
                 source=hdrFsrScaled.Read;
             }
             Draw("Rcas",target,targetArea,source,1);
         }
         else
         {
-            if (mode!="original" && mode!="sharp") throw new ArgumentException("The selected enhancement needs its own HDR rendering path.");
-            Draw(mode=="sharp" ? "HdrSharpToPq" : "HdrToPq",target,targetArea,source,1,clip:separateOutput ? null : clip);
+            if (mode!="sharp") throw new ArgumentException("The selected enhancement needs its own HDR rendering path.");
+            Draw("HdrSharpToPq",target,targetArea,source,1);
         }
         if (separateOutput) Draw("Original",display,area,hdrProcessed.Read,1,clip:clip);
     }

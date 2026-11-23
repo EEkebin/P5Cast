@@ -260,8 +260,8 @@ internal sealed class PlaybackControls : Form
             int index=Array.IndexOf(Modes,effective);
             format.Text=string.Format("{0}×{1}  ·  {2}  ·  {3}  ·  {4:0.#} Hz",size.Width,size.Height,renderer.HdrEnabled ? "HDR10":"SDR",
                                       compare ? "Original comparison":index>=0 ? Names[index]:effective,refreshHz);
-            var src=renderer.InputSize; var dst=renderer.OutputSize;
-            string detail=string.Format("Captured {0}×{1}  ·  Output {2}×{3}",src.Width,src.Height,dst.Width,dst.Height);
+            var src=renderer.InputSize;
+            string detail=string.Format("Captured {0}×{1}  ·  Video output {2}×{3}",src.Width,src.Height,size.Width,size.Height);
             if(direct!=null) detail+="  ·  "+direct.CodecName+"  ·  "+direct.BitrateMbps.ToString("0.0")+" Mb/s";
             tips.SetToolTip(format,detail);
             timing.Text=(direct==null ? "Capture → submit  ":"Receive → submit  ")+Ms(lastAge)+(direct==null ? "" : "     Decode  "+Ms(direct.DecodeMs));

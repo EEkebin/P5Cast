@@ -76,6 +76,12 @@ internal static partial class EmbeddedProbe
         }
     }
     static void Check(bool ok,string reason) { if(!ok) throw new Exception(reason); }
+    static void CheckVideoSize(Dictionary<string,object> data,int width,int height) {
+        Check(Convert.ToInt32(data["outputWidth"])==width && Convert.ToInt32(data["outputHeight"])==height &&
+              Convert.ToInt32(data["renderWidth"])==width && Convert.ToInt32(data["renderHeight"])==height,
+              "Expected video output "+width+"x"+height+" in "+data["effectivePictureMode"]+
+              ", got "+data["outputWidth"]+"x"+data["outputHeight"]+" on surface "+data["surfaceWidth"]+"x"+data["surfaceHeight"]+".");
+    }
     static HashSet<IntPtr> VisibleWindows(IntPtr desktop) {
         var result=new HashSet<IntPtr>();
         using(var process=Process.GetCurrentProcess())
@@ -299,12 +305,16 @@ internal static partial class EmbeddedProbe
                 int captured=Convert.ToInt32(data["captured"]); long elapsed=Convert.ToInt64(data["elapsedMs"]);
                 if(stage==0 && captured>5) {
                     Check((string)data["mode"]=="original" && Convert.ToInt32(data["multiplier"])==1,"Enhancement defaults changed.");
-                    width=Convert.ToInt32(data["outputWidth"]); window.Width+=170; window.Height+=50;
+                    CheckVideoSize(data,128,64);
+                    width=Convert.ToInt32(data["surfaceWidth"]); window.Width+=170; window.Height+=50;
                     api.GetMethod("Configure").Invoke(null,new object[]{2,2}); stage=1;
                 } else if(stage==1 && (string)data["effectivePictureMode"]=="fsr" && Convert.ToInt32(data["generated"])>2) {
-                    Check(Convert.ToInt32(data["outputWidth"])>width,"Surface did not resize.");
+                    Check(Convert.ToInt32(data["surfaceWidth"])>width,"Surface did not resize.");
+                    Check(Convert.ToInt32(data["pictureWidth"])>128 && Convert.ToInt32(data["pictureHeight"])>64,"FSR fixture did not upscale.");
+                    CheckVideoSize(data,Convert.ToInt32(data["pictureWidth"]),Convert.ToInt32(data["pictureHeight"]));
                     api.GetMethod("Compare").Invoke(null,new object[]{true}); stage=2;
                 } else if(stage==2 && (bool)data["compare"] && (string)data["effectivePictureMode"]=="original") {
+                    CheckVideoSize(data,128,64);
                     api.GetMethod("Compare").Invoke(null,new object[]{false}); start=captured; stage=3;
                 } else if(stage==3 && !(bool)data["compare"] && captured>start+8 && elapsed>2300) {
                     Check(Convert.ToInt32(data["targetPresentedFps"])==60 && Convert.ToInt32(data["audioQueueMs"])==17 &&
@@ -342,15 +352,22 @@ internal static partial class EmbeddedProbe
                 if(stage==0 && Convert.ToInt32(data["captured"])>5) {
                     api.GetMethod("ConfigureOutput").Invoke(null,new object[]{"720","auto"}); stage=1;
                 } else if(stage==1 && (string)data["resolution"]=="720" && (string)data["hdrMode"]=="auto" && Convert.ToInt32(data["elapsedMs"])>2200) {
-                    Check(Convert.ToInt32(data["inputWidth"])==960 && Convert.ToInt32(data["renderWidth"])<=1280 && data["audioQueueMs"]==null &&
+                    CheckVideoSize(data,960,540);
+                    Check(Convert.ToInt32(data["inputWidth"])==960 && data["audioQueueMs"]==null &&
                           data["audioBitrateKbps"]==null && data["audioSampleRate"]==null && data["audioChannels"]==null,
                           "Offline demo sizing or source metadata is wrong.");
-                    api.GetMethod("Stop").Invoke(null,null); stage=2;
+                    window.Width=550; window.Height=360; window.UpdateLayout();
+                    api.GetMethod("Configure").Invoke(null,new object[]{2,2}); stage=2;
+                } else if(stage==2 && (string)data["mode"]=="fsr" && Convert.ToInt32(data["surfaceWidth"])<960 &&
+                          Convert.ToInt32(data["surfaceHeight"])<540 && Convert.ToInt32(data["generated"])>2) {
+                    CheckVideoSize(data,960,540);
+                    api.GetMethod("Stop").Invoke(null,null); stage=3;
                 }
             }
-            Check(stage==2 && result==0,"Embedded demo/live output change failed. "+api.GetProperty("Error").GetValue(null,null));
+            Check(stage==3 && result==0,"Embedded demo/live output change failed. "+api.GetProperty("Error").GetValue(null,null));
             var measured=serializer.Deserialize<Dictionary<string,object>>(File.ReadAllText(demoReport));
             CheckRenderer(measured,renderer);
+            CheckVideoSize(measured,960,540);
             Check(Convert.ToInt32(measured["sampledFrames"])>=2 && Convert.ToInt32(measured["sampleMaxLuma"])>Convert.ToInt32(measured["sampleMinLuma"]),
                   "Offline motion scene did not produce measurable changing samples.");
             Console.WriteLine("Passed offline GPU scene and live output settings. "+demoReport);

@@ -16,7 +16,7 @@ namespace Cadrivect
     {
         static readonly string[] ModeIds={"original","sharp","fsr","rtxvideo","dlss","dlaa"};
         static readonly string[] ModeLabels={"Original","Sharpen","AMD FSR 1","RTX Video SR","DLSS","DLAA"};
-        static readonly string[] Descriptions={"Display the source picture.","Sharpen edges and upscale fine detail.","AMD FidelityFX Super Resolution 1.",
+        static readonly string[] Descriptions={"Display the source picture.","Sharpen edges at the source resolution.","AMD FidelityFX Super Resolution 1.",
             "NVIDIA RTX Video Super Resolution for SDR video.","Experimental DLSS with motion estimated from the stream.","Experimental DLAA at the source resolution."};
         static readonly Brush Ink=ColorBrush("#E9F3F1"), Muted=ColorBrush("#A5B9BB"), Line=ColorBrush("#304147"), Dark=ColorBrush("#141F24");
         static readonly Brush Mint=ColorBrush("#8FE6D0"), Amber=ColorBrush("#EABC8E");
@@ -145,9 +145,9 @@ namespace Cadrivect
             Separator(sections);
             var diagnostics=AddGroup(sections,"Stream diagnostics","StreamDiagnosticsGroup");
             Subheading(diagnostics,"Video");
-            AddMetric(diagnostics,"size","Input → output","Incoming frame size and presentation surface size in pixels.");
+            AddMetric(diagnostics,"size","Input → output","Incoming video resolution and video resolution after processing. Output grows only when an upscaler enlarges the frame.");
             AddMetric(diagnostics,"format","Video format","Source codec and active output color mode.");
-            AddMetric(diagnostics,"raster","Processing resolution","Resolution used by the selected picture effect before fitting the display.");
+            AddMetric(diagnostics,"surface","Playback area","Size of the player surface in screen pixels, including any black bars.");
             AddMetric(diagnostics,"refresh","Display refresh","Active Windows display mode in Hz. The FPS dial counts submitted frames.");
             AddMetric(diagnostics,"renderer","Video renderer","Graphics API currently presenting frames to the display.");
             AddMetric(diagnostics,"incomingFps","Incoming FPS","Frames received from the source each second.");
@@ -385,7 +385,7 @@ namespace Cadrivect
             values["incomingFps"].Text=Metric(waiting ? double.NaN : Number(snapshot,"sourceFps"),"","0.#");
             string input=Dimensions(snapshot,"input"),outputSize=Dimensions(snapshot,"output");
             values["size"].Text=input=="—" && outputSize=="—" ? "—" : input+" → "+outputSize;
-            values["raster"].Text=Dimensions(snapshot,"render");
+            values["surface"].Text=Dimensions(snapshot,"surface");
             values["refresh"].Text=Metric(Number(snapshot,"displayRefreshHz")," Hz","0.##");
             values["renderer"].Text=Dashboard.RendererName(Text(snapshot,"renderer"));
             string codec=Text(snapshot,"codec"); bool? hdrFlag=Flag(snapshot,"presenterHdr10") ?? Flag(snapshot,"hdrEnabled");

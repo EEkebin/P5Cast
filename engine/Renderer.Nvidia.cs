@@ -57,9 +57,9 @@ internal sealed partial class Renderer
     ShaderResourceView EnhancedFrame(string mode,bool previous)
     {
         // With no enlargement the NGX native-resolution feature is the appropriate configuration.
-        bool native=mode=="dlaa" || (mode=="dlss" && (outSize.Width<=srcSize.Width || outSize.Height<=srcSize.Height));
+        var target=ProcessingSize(mode);
+        bool native=mode=="dlaa" || (mode=="dlss" && target==srcSize);
         string effective=native ? "dlaa" : mode;
-        var target=native ? srcSize : outSize;
         if(neuralMode!=effective || neuralSize!=target)
         {
             // The input and GPU device are unchanged on a window resize. Keep their

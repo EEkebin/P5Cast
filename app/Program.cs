@@ -25,7 +25,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.26.0.0")]
+[assembly: AssemblyVersion("0.26.1.0")]
 
 namespace Cadrivect
 {
@@ -240,6 +240,9 @@ namespace Cadrivect
             streamSize.SelectedIndex=SavedChoiceIndex(saved,"directStreamHeight",DirectConsole.StreamHeights,1080);
             UI<ComboBox>("DirectFps").ItemsSource=new[]{"60 FPS","30 FPS"};
             UI<ComboBox>("DirectFps").SelectedIndex=ParseIndex(saved,"directFps",0,2);
+            var sdrCodec=UI<ComboBox>("DirectSdrCodec");
+            sdrCodec.ItemsSource=new[]{"H.265 (HEVC)","H.264 (AVC)"};
+            sdrCodec.SelectedIndex=Field(saved,"directSdrCodec")=="h264" ? 1 : 0;
             var directRate=UI<ComboBox>("DirectBitrate");
             directRate.ItemsSource=directRates.Select(rate=>rate+" Mbps").ToArray();
             directRate.SelectedIndex=SavedChoiceIndex(saved,"directMbps",directRates,100);
@@ -671,6 +674,7 @@ namespace Cadrivect
                     discordGame=UI<CheckBox>("ShareGame").IsChecked==true,discordProject=UI<CheckBox>("ShareProject").IsChecked==true,stopChoices=stopChoices,directMbps=DirectKbps()/1000, relayMbps=networkRates[UI<ComboBox>("NetworkBitrate").SelectedIndex],audioLayout=UI<ComboBox>("NetworkAudio").SelectedIndex,pictureDefaults=1, mode=mode, multiplier=factor-1, frameGenerationProvider=meter.FrameGenerationProvider,
                     fpsDialMaximum=meter.DialMaximum,streamVolume=volumeLevel,streamMuted=volumeMuted,setupVersion=setupVersion,consoleMac=pendingSetupConsole ?? (console==null?"":console.Mac),consoleAddresses=consoleAddresses,directStreamHeight=DirectStreamHeight(),directFps=UI<ComboBox>("DirectFps").SelectedIndex,
                     display=SelectedDisplayName(), uiScale=PreferredScalePercent,theme=themeId, resolution=UI<ComboBox>("RenderResolution").SelectedIndex,hdr=preferredHdr,renderer=SelectedRenderer,
+                    directSdrCodec=UI<ComboBox>("DirectSdrCodec").SelectedIndex==1?"h264":"hevc",
                     useOpenNr=meter.UseOpenNr,openNrModelDirectory=openNrModelDirectory,
                     maximized=(fullscreen?previousWindowState:window.WindowState)==WindowState.Maximized,
                     clientHdr=UI<CheckBox>("ClientHdr").IsChecked==true,hostDisplay=hostTarget==null ? "" : hostTarget.DeviceName,

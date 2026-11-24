@@ -148,7 +148,7 @@ internal sealed partial class Renderer : IDisposable
             blend.RenderTarget[0]=targetBlend;
             handleBlend=new BlendState(Device,blend);
             vertex=new VertexShader(Device,Shader("Fullscreen"));
-            foreach(string name in new [] {"Original","Sharp","Easu","Rcas","Motion","Interpolate","OpticalField","NgxVectors","PreserveNgxStrokes","FitNgxFrame","WipeDivider","WipeHandle","InspectionLoupe"})
+            foreach(string name in new [] {"Original","Sharp","Easu","Rcas","Motion","Interpolate","OpticalField","NgxVectors","PreserveNgxStrokes","FitNgxFrame","FrucNrMidpoint","WipeDivider","WipeHandle","InspectionLoupe"})
                 shaders.Add(name,new PixelShader(Device,Shader(name)));
             InitHdrShaders();
             context.InputAssembler.PrimitiveTopology=PrimitiveTopology.TriangleList;
@@ -543,7 +543,9 @@ internal sealed partial class Renderer : IDisposable
         bool holdOriginal=(finishPrevious || (phase<1 && HasPrevious)) && (!vendor || havePriorEnhanced);
         if(!originalViewport.IsEmpty) DrawOriginal(originalViewport,holdOriginal);
         if(sdkIntermediate && vendor) {
-            Draw(HdrEnabled?"HdrToPq":"Original",display,viewport,source,1);
+            if(FrameGenerationProvider=="fruc" && PictureLabels.IsNeuralRendering(mode))
+                Draw("FrucNrMidpoint",display,viewport,source,1,neuralPrevious.Read,strokeMask.Read);
+            else Draw(HdrEnabled?"HdrToPq":"Original",display,viewport,source,1);
             return Present(samplePixel,holdOriginal);
         }
         if(HdrEnabled && !vendor)

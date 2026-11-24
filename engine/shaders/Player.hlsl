@@ -170,14 +170,23 @@ float3 PreserveSourceWhite(float3 enhanced,float3 reference,bool hdr) {
     // Keep small model differences within half a percent of the source white.
     return lerp(enhanced,reference,strength*saturate(1-0.005*white/max(loss,0.000001)));
 }
-float4 PreserveNgxStrokes(Vertex v) : SV_Target {
-    float3 enhanced=image.Load(int3(int2(v.pos.xy),0)).rgb;
+float StrokeFootprint(float2 uv) {
     // Include the neighboring source texels that contribute antialiased coverage
     // and the small dark gaps around them, without altering the rest of the scene.
     float2 halfTexel=0.5/sourceSize;
-    float ink=max(max4(flow.GatherRed(linearClamp,v.uv-halfTexel)),max4(flow.GatherRed(linearClamp,v.uv+halfTexel)));
-    ink=max(ink,max(max4(flow.GatherRed(linearClamp,v.uv+float2(halfTexel.x,-halfTexel.y))),
-                    max4(flow.GatherRed(linearClamp,v.uv+float2(-halfTexel.x,halfTexel.y)))));
+    float ink=max(max4(flow.GatherRed(linearClamp,uv-halfTexel)),max4(flow.GatherRed(linearClamp,uv+halfTexel)));
+    return max(ink,max(max4(flow.GatherRed(linearClamp,uv+float2(halfTexel.x,-halfTexel.y))),
+                       max4(flow.GatherRed(linearClamp,uv+float2(-halfTexel.x,halfTexel.y)))));
+}
+float4 FrucNrMidpoint(Vertex v) : SV_Target {
+    // A subtitle changes on a real frame boundary. Hold its last enhanced coverage
+    // through the midpoint, including strokes that appear or disappear in the pair.
+    float ink=smoothstep(0.35,0.85,StrokeFootprint(v.uv));
+    return float4(lerp(SamplePicture(v),SamplePictureTexture(previous,v),ink),1);
+}
+float4 PreserveNgxStrokes(Vertex v) : SV_Target {
+    float3 enhanced=image.Load(int3(int2(v.pos.xy),0)).rgb;
+    float ink=StrokeFootprint(v.uv);
     float3 reference=previous.SampleLevel(linearClamp,v.uv,0).rgb;
     float floorValue=phase>0 ? 0.00001 : 1.0/255.0;
     float3 error=abs(enhanced-reference)/max(floorValue,0.025*abs(reference));

@@ -46,6 +46,11 @@ namespace Cadrivect
             return PrepareComponent(preparingConnection.Token,script,args);
         }
         bool Active { get {return rendering!=null || network!=null;} }
+        int DirectCodec(bool hdr)
+        {
+            if(hdr) return 3; // HEVC Main 10 for the direct console protocol.
+            return UI<ComboBox>("DirectSdrCodec").SelectedIndex==1 ? 1 : 2;
+        }
         void MoveDashboard()
         {
             var target=UI<ComboBox>("PlaybackDisplay").SelectedItem as DisplayTarget;
@@ -252,7 +257,8 @@ namespace Cadrivect
                     if(string.IsNullOrEmpty(runtime)) throw new IOException("The video decoder runtime is unavailable.");
                     int fps=UI<ComboBox>("DirectFps").SelectedIndex==1?30:60;
                     var display=DisplayTarget.Select("source",surface.Handle); int hdr=UI<ComboBox>("HdrOutput").SelectedIndex;
-                    int codec=hdr==2 || (hdr==0 && display.AdvancedColorEnabled)?3:2;
+                    bool hdrStream=hdr==2 || (hdr==0 && display.AdvancedColorEnabled);
+                    int codec=DirectCodec(hdrStream);
                     string pipe="Cadrivect-Video-"+Guid.NewGuid().ToString("N");
                     args.AddRange(new[]{"--direct-pipe",pipe,"--direct-runtime",runtime,"--target-fps",fps.ToString()});
                     sessionVideoKbps=DirectKbps();

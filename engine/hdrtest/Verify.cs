@@ -47,8 +47,16 @@ partial class VerifyHdr
         public void Dispose() { write.Dispose(); read.Dispose(); texture.Dispose(); }
     }
     static int Main(string[] args) {
-        try { Run(Assembly.LoadFrom(Path.GetFullPath(args[0])),Array.IndexOf(args,"--nvidia")>=0,
-            Array.IndexOf(args,"--fruc")>=0,Array.IndexOf(args,"--d3d12")>=0); return 0; }
+        try {
+            var compiled=Assembly.LoadFrom(Path.GetFullPath(args[0]));
+            bool d3d12=Array.IndexOf(args,"--d3d12")>=0;
+            if(Array.IndexOf(args,"--fruc-subtitles")>=0) {
+                CheckFrucSubtitles(compiled,d3d12,new System.Drawing.Size(640,360));
+                CheckFrucSubtitles(compiled,d3d12,new System.Drawing.Size(960,540));
+            }
+            Run(compiled,Array.IndexOf(args,"--nvidia")>=0,Array.IndexOf(args,"--fruc")>=0,d3d12);
+            return 0;
+        }
         catch(Exception e) { Console.Error.WriteLine(e); return 1; }
     }
     static byte[] Shader(Assembly a,string name) {

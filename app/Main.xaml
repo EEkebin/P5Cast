@@ -424,6 +424,7 @@
                     <StackPanel Margin="0,0,10,6"><Label Content="PS5 stream resolution" Target="{Binding ElementName=DirectStreamSize}" Foreground="{DynamicResource Theme.Text}" Padding="0,0,0,5"/><ComboBox Name="DirectStreamSize" AutomationProperties.Name="PS5 stream resolution" ToolTip="Resolution requested from the console on your next Direct connection."/></StackPanel>
                     <StackPanel Margin="0,0,10,6"><TextBlock Text="Requested video bitrate" Margin="0,0,0,5"/><ComboBox Name="DirectBitrate" ToolTip="Requested at connection time. The console adjusts the actual bitrate."/></StackPanel>
                     <StackPanel Margin="0,0,10,6"><TextBlock Text="Frame rate" Margin="0,0,0,5"/><ComboBox Name="DirectFps"/></StackPanel>
+                    <StackPanel Margin="0,0,10,6"><Label Content="SDR video codec" Target="{Binding ElementName=DirectSdrCodec}" Foreground="{DynamicResource Theme.Text}" Padding="0,0,0,5"/><ComboBox Name="DirectSdrCodec" ToolTip="Codec requested for SDR playback. Direct PS5 HDR10 always uses HEVC."/></StackPanel>
                   </UniformGrid>
                   <TextBlock Style="{StaticResource Detail}" Margin="0,6,0,0" Text="Changes apply on your next connection. The PS5 sets the Opus audio bitrate."/>
                 </StackPanel>

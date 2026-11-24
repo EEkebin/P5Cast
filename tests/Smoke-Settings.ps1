@@ -27,6 +27,12 @@ try {
     function Require($test,$message){if(!$test){throw $message}}
     $traceType=$asm.GetType('Cadrivect.DirectDiagnostics',$true)
     $flags=[Reflection.BindingFlags]'Instance,NonPublic'
+    $codec=$type.GetMethod('DirectCodec',$flags)
+    $sdrCodec=Widget 'DirectSdrCodec'
+    Require ($codec.Invoke($dash,@($false)) -eq 2) 'Default SDR codec must remain HEVC.'
+    $sdrCodec.SelectedIndex=1
+    Require ($codec.Invoke($dash,@($false)) -eq 1 -and $codec.Invoke($dash,@($true)) -eq 3) 'H.264 selection must apply only to SDR.'
+    $sdrCodec.SelectedIndex=0
     $traceDir=Join-Path $tmp 'direct-stats'
     [void][IO.Directory]::CreateDirectory($traceDir)
     foreach($day in 1..4) {

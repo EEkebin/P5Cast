@@ -26,6 +26,12 @@ try {
     Manifest '1.2.3'
     $first=Install-Payload $src $app $menu
     if((ShortcutTarget) -ne $first -or (Install-Payload $src $app $menu) -ne $first){throw 'Fresh install or same-version retry failed.'}
+    $busy=[IO.File]::Open((Join-Path (Split-Path $first) $files[-1]),'Open','Read','None')
+    try {
+        $replacement=Install-Payload $src $app $menu
+        if($replacement -eq $first -or (ShortcutTarget) -ne $replacement){throw 'An unreadable installed DLL blocked side-by-side repair.'}
+    } finally {$busy.Dispose()}
+    $first=$replacement
     Manifest '1.2.4'
     $dll=Join-Path $src $files[-1]
     [IO.File]::WriteAllText($dll,'changed')

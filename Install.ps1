@@ -40,11 +40,11 @@ function Install-Payload([string]$Source,[string]$App,[string]$Group) {
             $candidates = @(Get-Item -LiteralPath $dest) + @(Get-ChildItem -Directory -LiteralPath $versions -Filter "$version-repair-*")
             foreach ($candidate in $candidates) {
                 $candidateManifest = Join-Path $candidate.FullName 'payload.json'
-                if (![IO.File]::Exists($candidateManifest) -or (Get-FileHash -LiteralPath $candidateManifest).Hash -ne $manifestHash) { continue }
+                if (![IO.File]::Exists($candidateManifest) -or (Get-FileHash -LiteralPath $candidateManifest -ErrorAction SilentlyContinue).Hash -ne $manifestHash) { continue }
                 $identical = $true
                 foreach ($path in $files.Keys) {
                     $file = Join-Path $candidate.FullName $path
-                    if (![IO.File]::Exists($file) -or (Get-FileHash -LiteralPath $file).Hash -ne $files[$path]) { $identical=$false; break }
+                    if (![IO.File]::Exists($file) -or (Get-FileHash -LiteralPath $file -ErrorAction SilentlyContinue).Hash -ne $files[$path]) { $identical=$false; break }
                 }
                 if ($identical) { $match=$candidate.FullName; break }
             }

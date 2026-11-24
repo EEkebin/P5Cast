@@ -147,7 +147,7 @@ namespace Cadrivect
             pictureAspect=sourceAspect>0 && !double.IsInfinity(sourceAspect) ? sourceAspect : 0;
             if(inspecting && (pictureAspect==0 || sideBySide!=(view=="side-by-side"))) EndGesture(Handle);
             sideBySide=view=="side-by-side";
-            wipeActive=view=="wipe" && pictureAspect>0;
+            wipeActive=WipeLayout.IsSplit(view) && pictureAspect>0;
             if(dragging && (!wipeActive || horizontalWipe!=horizontal)) EndGesture(Handle);
             if(!wipeActive || horizontalWipe!=horizontal) SetGrip(0);
             if(wipeActive && !wasActive && WipeGripChanged!=null) WipeGripChanged(gripState,gripScale);

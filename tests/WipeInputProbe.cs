@@ -17,17 +17,18 @@ internal static partial class WindowChromeProbe
     [DllImport("user32.dll")] static extern IntPtr ChildWindowFromPointEx(IntPtr parent,NativePoint point,uint skip);
     [DllImport("user32.dll",CharSet=CharSet.Unicode)]
     static extern IntPtr FindWindowEx(IntPtr parent,IntPtr after,string cls,string title);
-    static async Task CheckWipeInput(MethodInfo snapshot,string backend)
+    static async Task CheckWipeInput(MethodInfo snapshot,string backend,bool hdr)
     {
         var json=new JavaScriptSerializer();
         Func<Dictionary<string,object>> sample=()=>json.Deserialize<Dictionary<string,object>>((string)snapshot.Invoke(null,null));
         var original=PictureButton("original");
         bool startedOriginal=original.IsChecked==true;
         if(startedOriginal) SelectPlaybackMode(PictureButton("sharp"));
-        var button=ViewButton("ViewWipe");
+        string comparison=hdr ? "hdr-sdr" : "wipe";
+        var button=ViewButton(hdr ? "ViewHdrSdr" : "ViewWipe");
         Require(button!=null && button.IsEnabled,"Wipe view is missing.");
         SelectPlaybackMode(button);
-        await Until(()=>Equals(sample()["comparisonView"],"wipe"),"Wipe view did not start.");
+        await Until(()=>Equals(sample()["comparisonView"],comparison),comparison+" did not start.");
         bool fullscreen=backend=="d3d12";
         if(fullscreen) {
             Click("Fullscreen");
@@ -113,8 +114,11 @@ internal static partial class WindowChromeProbe
         Action<uint,int,int> mouse=delegate(uint msg,int axis,int cross) {
             var p=point(axis,cross); SendMessage(video,msg,new IntPtr(msg==0x202 ? 0 : 1),Packed(p.X,p.Y));
         };
-        if(backend!="d3d11") Require(FindWindowEx(video,IntPtr.Zero,"P5Cast.SDL.Video",null)!=IntPtr.Zero,
-                                      "Portable renderer has no native child.");
+        // D3D11 and Vulkan present directly to the video HWND.
+        if(backend=="d3d12" || backend=="opengl") {
+            string childClass=backend=="d3d12" ? "STATIC" : "P5Cast.SDL.Video";
+            Require(FindWindowEx(video,IntPtr.Zero,childClass,null)!=IntPtr.Zero,backend+" has no native presentation child.");
+        }
         Require(ChildWindowFromPointEx(video,point(layout.Center,crossQuarter),1|2|4)==video,"Renderer child intercepted client mouse input.");
         mouse(0x201,layout.Center,crossMin-2);
         Require(GetCapture()!=video,"A click outside the picture grabbed the divider.");

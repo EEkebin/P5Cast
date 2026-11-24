@@ -14,10 +14,10 @@ try {
         "/r:$path"
     }
     $compile=Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-    & $compile /nologo /optimize+ /platform:x64 /r:System.Drawing.dll /r:System.Windows.Forms.dll "/out:$testDir\HdrTest.exe" $refs "$PSScriptRoot\Verify.cs" "$PSScriptRoot\VerifyFruc.cs" "$PSScriptRoot\VerifySubtitles.cs" "$PSScriptRoot\VerifyOpenNrHdr.cs"
+    & $compile /nologo /optimize+ /platform:x64 /r:System.Drawing.dll /r:System.Windows.Forms.dll "/out:$testDir\HdrTest.exe" $refs "$PSScriptRoot\Verify.cs" "$PSScriptRoot\VerifyFruc.cs" "$PSScriptRoot\VerifySubtitles.cs" "$PSScriptRoot\VerifyOpenNrHdr.cs" "$PSScriptRoot\VerifyNrPhoto.cs"
     if ($LASTEXITCODE) { throw 'HDR verification did not compile.' }
     $options=@((Join-Path $bin 'CadrivectPlayer.exe'))
-    if($OpenNrHdrDisplay){$options+=@('--open-nr-hdr',$OpenNrHdrDisplay)}
+    if($OpenNrHdrDisplay){$options+=@('--open-nr-hdr',$OpenNrHdrDisplay,(Join-Path $PSScriptRoot '..\..\app\assets\aurora.jpg'))}
     if($Fruc){$options+='--fruc'}
     if($FrucSubtitles){$options+='--fruc-subtitles'}
     if($VulkanSubtitles){$options+='--vulkan-subtitles'}

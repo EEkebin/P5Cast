@@ -7,10 +7,12 @@ internal sealed partial class Renderer
 {
     const Format HdrFloatFormat = Format.R16G16B16A16_Float;
     GpuImage hdrGuideCurrent, hdrGuidePrevious, hdrMixed, hdrFsrInput, hdrFsrScaled, hdrProcessed;
+    GpuImage sdrPreviewPixels;
     int hdrGuideFrame = -1;
 
     void InitHdrShaders()
     {
+        shaders.Add("SdrPreview",new PixelShader(Device,Shader("SdrPreview")));
         foreach (string name in new[] {"HdrToPq", "HdrToLinear2020", "HdrLinear2020ToPq", "HdrLinear2020ToScRgb", "HdrSharpToPq", "HdrMotionGuide", "HdrVsrReconstruct", "FrucHdrMidpoint","HdrNrGuide","HdrNrReconstruct","FitNrHdrIntermediate"})
             shaders.Add(name, new PixelShader(Device, Shader(name)));
     }
@@ -25,10 +27,25 @@ internal sealed partial class Renderer
 
     void ReleaseHdr()
     {
+        if(sdrPreviewPixels!=null) {sdrPreviewPixels.Dispose(); sdrPreviewPixels=null;}
         foreach (GpuImage image in new[] {hdrGuideCurrent,hdrGuidePrevious,hdrMixed,hdrFsrInput,hdrFsrScaled,hdrProcessed})
             if (image != null) image.Dispose();
         hdrGuideCurrent=hdrGuidePrevious=hdrMixed=hdrFsrInput=hdrFsrScaled=hdrProcessed=null;
         hdrGuideFrame=-1;
+    }
+    void DrawSdrPreview(Rectangle area)
+    {
+        // Take the finished picture before the divider and loupe. Only the
+        // preview rectangle crosses this GPU copy, even while dragging it.
+        if(sdrPreviewPixels==null || sdrPreviewPixels.Texture.Description.Width!=viewport.Width ||
+            sdrPreviewPixels.Texture.Description.Height!=viewport.Height) {
+            var resized=new GpuImage(Device,viewport.Width,viewport.Height,backBuffer.Description.Format,false);
+            if(sdrPreviewPixels!=null) sdrPreviewPixels.Dispose();
+            sdrPreviewPixels=resized;
+        }
+        var copy=new ResourceRegion(area.Left,area.Top,0,area.Right,area.Bottom,1);
+        context.CopySubresourceRegion(backBuffer,0,copy,sdrPreviewPixels.Texture,0);
+        Draw("SdrPreview",display,area,sdrPreviewPixels.Read,DirectWhiteNits);
     }
 
     void PrepareHdrMotion()

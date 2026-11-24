@@ -4,6 +4,7 @@ using System.Drawing;
 // Native presentation and mouse input use the same physical image rectangle.
 internal struct WipeLayout
 {
+    public static bool IsSplit(string view) {return view=="wipe" || view=="hdr-sdr";}
     public readonly int Center;
     public readonly Rectangle Rail,Handle,Original;
     readonly int minimum,maximum;

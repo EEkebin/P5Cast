@@ -160,6 +160,13 @@ try {
     $toggleOriginal=$meter.GetType().GetMethod('ToggleOriginal')
     $null=$toggleOriginal.Invoke($meter,@())
     Require (@($viewButtons | Where-Object {$_.IsEnabled}).Count -eq 1 -and [Windows.Automation.AutomationProperties]::GetAutomationId(($viewButtons | Where-Object {$_.IsChecked})) -eq 'ViewOriginal') 'The comparison shortcut retains Original while every effect is off'
+    (Widget HdrOutput).SelectedItem='HDR10'
+    Require ($viewButtons[4].IsEnabled -and $viewButtons[1].IsEnabled -and !$viewButtons[3].IsEnabled) 'HDR comparison works with all effects off'
+    $viewButtons[4].IsChecked=$true
+    $orientation=$meter.GetType().GetField('horizontalSplit','Instance,NonPublic').GetValue($meter)
+    Require ($meter.ComparisonView -eq 'hdr-sdr' -and $orientation.Visibility -eq 'Visible') 'The HDR wipe has a draggable horizontal option'
+    (Widget HdrOutput).SelectedItem='SDR'
+    Require (!$viewButtons[4].IsEnabled -and $viewButtons[1].IsChecked) 'SDR output restores Original when all effects are off'
     $fruc=$meter.GetType().GetField('frucGeneration','Instance,NonPublic').GetValue($meter)
     $amd=$meter.GetType().GetField('amdGeneration','Instance,NonPublic').GetValue($meter)
     $frucSetup=$meter.GetType().GetField('frucSetup','Instance,NonPublic').GetValue($meter)

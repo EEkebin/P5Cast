@@ -50,7 +50,10 @@ partial class VerifyHdr
         try {
             var compiled=Assembly.LoadFrom(Path.GetFullPath(args[0]));
             int display=Array.IndexOf(args,"--open-nr-hdr");
-            if(display>=0) {CheckOpenNrHdr(compiled,args[display+1]);return 0;}
+            if(display>=0) {
+                CheckNrPhoto(compiled,args[display+1],args[display+2]);
+                CheckOpenNrHdr(compiled,args[display+1]);return 0;
+            }
             bool d3d12=Array.IndexOf(args,"--d3d12")>=0;
             bool vulkanSubtitles=Array.IndexOf(args,"--vulkan-subtitles")>=0;
             if(vulkanSubtitles || Array.IndexOf(args,"--fruc-subtitles")>=0) {

@@ -283,6 +283,17 @@ internal static partial class EmbeddedProbe
                 throw new Exception("Expected "+mode+" (HDR "+hdr+") on "+screen.DeviceName+". "+api.GetProperty("Error").GetValue(null,null)+" "+api.GetMethod("Snapshot").Invoke(null,null));
             };
             verify(hdrScreen,"hdr10",true);
+            api.GetMethod("SetComparison").Invoke(null,new object[]{"hdr-sdr"});
+            foreach(bool horizontal in new[]{false,true}) {
+                float position=horizontal ? .75f : .25f;
+                api.GetMethod("SetWipeHorizontal").Invoke(null,new object[]{horizontal});
+                api.GetMethod("SetWipePosition").Invoke(null,new object[]{position});
+                WaitSnapshot(api,s=>Equals(s["comparisonView"],"hdr-sdr") && (bool)s["presenterHdr10"] &&
+                    Equals(s["wipeHorizontal"],horizontal) && Math.Abs(Convert.ToDouble(s["wipePosition"])-position)<.001 &&
+                    Convert.ToInt32(s["presented"])>lastPresented,"HDR/SDR wipe on decoded HEVC");
+            }
+            api.GetMethod("SetWipeHorizontal").Invoke(null,new object[]{false});
+            api.GetMethod("SetComparison").Invoke(null,new object[]{"enhanced"});
             if(args[3]=="open-nr") {
                 api.GetMethod("Configure").Invoke(null,new object[]{9,1});
                 var sample=WaitSnapshot(api,s=>Equals(s["effectivePictureMode"],"open-nr") &&

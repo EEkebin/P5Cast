@@ -22,7 +22,7 @@ namespace Cadrivect
             new KeyValuePair<string,string[]>("mode",PictureLabels.Ids),
             new KeyValuePair<string,string[]>("effectivePictureMode",PictureLabels.Ids),
             new KeyValuePair<string,string[]>("renderer",new[]{"d3d11","d3d12","vulkan","opengl","metal"}),
-            new KeyValuePair<string,string[]>("comparisonView",new[]{"original","enhanced","side-by-side","wipe"}),
+            new KeyValuePair<string,string[]>("comparisonView",new[]{"original","enhanced","side-by-side","wipe","hdr-sdr"}),
             new KeyValuePair<string,string[]>("frameGenerationProvider",providers),
             new KeyValuePair<string,string[]>("activeFrameGenerationProvider",providers)
         };

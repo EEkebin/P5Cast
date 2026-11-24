@@ -25,7 +25,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.27.0.0")]
+[assembly: AssemblyVersion("0.28.0.0")]
 
 namespace Cadrivect
 {

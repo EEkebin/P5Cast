@@ -64,6 +64,7 @@ internal sealed partial class Renderer : IDisposable
     long resizeStartedAt,sizeChangedAt;
     Rectangle viewport,originalViewport;
     bool sideBySide,wipe,wipeHorizontal;
+    internal bool SdrPreview;
     float wipePosition=.5f;
     int wipeGripState;
     float wipeGripScale=1;
@@ -323,6 +324,7 @@ internal sealed partial class Renderer : IDisposable
     }
     public void SetWipe(bool enabled,float position,bool horizontal,int gripState,float gripScale)
     {
+        if((!enabled || !SdrPreview) && sdrPreviewPixels!=null) {sdrPreviewPixels.Dispose(); sdrPreviewPixels=null;}
         wipeGripState=gripState;
         wipeGripScale=gripScale;
         wipeHorizontal=horizontal;
@@ -581,7 +583,9 @@ internal sealed partial class Renderer : IDisposable
             }
             DrawFinal("Rcas",source,phase,viewport);
         }
-        else if((mode=="dlss" || mode=="dlaa" || PictureLabels.IsNeuralRendering(mode) || mode=="fsr-temporal") && neuralSize!=viewport.Size)
+        // HDR OpenDLSS-NR reconstructs at source size with protected strokes.
+        // Fit its real endpoint exactly as the frame-generation compositor does.
+        else if((mode=="dlss" || mode=="dlaa" || mode=="dlss-nr" || (mode=="open-nr" && !HdrEnabled) || mode=="fsr-temporal") && neuralSize!=viewport.Size)
             Draw("FitNgxFrame",display,viewport,source,HdrEnabled ? 1 : 0,finishPrevious && havePriorEnhanced ? prev.Read : curr.Read);
         else DrawFinal(mode=="sharp" ? "Sharp":"Original",source,phase,viewport,null,null,HdrEnabled && vendor);
         return Present(samplePixel,holdOriginal);
@@ -618,7 +622,10 @@ internal sealed partial class Renderer : IDisposable
         {
             var layout=new WipeLayout(viewport,wipeHorizontal,wipePosition,wipeGripScale);
             // Keep both image layers at full scale and clip only the original layer.
-            if(layout.Original.Width>0 && layout.Original.Height>0) DrawOriginal(viewport,holdOriginal,layout.Original);
+            if(layout.Original.Width>0 && layout.Original.Height>0) {
+                if(SdrPreview && HdrEnabled) DrawSdrPreview(layout.Original);
+                else if(!SdrPreview) DrawOriginal(viewport,holdOriginal,layout.Original);
+            }
             // Grab the two picture layers before drawing the handle under the pointer.
             if(inspectingDivider) lensArea=CaptureLoupe();
             float hdrUi=HdrEnabled ? 1 : 0;

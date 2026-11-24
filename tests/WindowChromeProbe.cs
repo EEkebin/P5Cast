@@ -237,8 +237,8 @@ internal static partial class WindowChromeProbe
         }
         SelectPlaybackMode(ViewButton("ViewOriginal"));
         SelectPlaybackMode(PictureButton("fsr"));
-        await Until(()=>Equals(sample()["comparisonView"],"original") && Equals(sample()["mode"],"fsr"),
-            "Choosing another effect overrode the manually selected Original view.");
+        await Until(()=>Equals(sample()["comparisonView"],"enhanced") && Equals(sample()["effectivePictureMode"],"fsr"),
+            "Choosing a new picture effect from Original did not preview the selected effect.");
         SelectPlaybackMode(ViewButton("ViewWipe"));
         SelectPlaybackMode(PictureButton("original"));
         CheckOriginalOnly();
@@ -497,7 +497,7 @@ internal static partial class WindowChromeProbe
                     Require(frame.Contains("\"renderer\":\""+keys[i]+"\"") && !choice.IsEnabled && Video()==video,
                             "Selected renderer was not presenting on the embedded surface: "+frame);
                     if(Environment.GetEnvironmentVariable("P5CAST_PROBE_WIPE_INPUT")=="1")
-                        await CheckWipeInput(snapshot,keys[i]);
+                        await CheckWipeInput(snapshot,keys[i],expectHdr);
                     if(renderCheck=="hdr") {
                         Require(frame.Contains("\"hdrEnabled\":"+(expectHdr?"true":"false")),"Unexpected output color mode: "+frame);
                         var meter=Find<Border>("MeterHost");
@@ -682,8 +682,10 @@ internal static partial class WindowChromeProbe
                 throw new Win32Exception(Marshal.GetLastWin32Error());
             CloseHandle(pi.Thread);
             try {
-                // The HDR suite starts four backends and exercises NVIDIA fullscreen in addition to the base UI checks.
-                uint timeoutMs=Environment.GetEnvironmentVariable("P5CAST_PROBE_RENDERERS")=="hdr" ? 120000u :
+                // These suites exercise four backends in sequence. Each gesture has its own deadline.
+                bool multiBackend=Environment.GetEnvironmentVariable("P5CAST_PROBE_RENDERERS")=="hdr" ||
+                    Environment.GetEnvironmentVariable("P5CAST_PROBE_WIPE_INPUT")=="1";
+                uint timeoutMs=multiBackend ? 120000u :
                     CheckTransportOption || Environment.GetEnvironmentVariable("P5CAST_WIZARD_CASE")=="pair" ? 90000u : 30000u;
                 if(WaitForSingleObject(pi.Process,timeoutMs)!=0) {
                     TerminateProcess(pi.Process,2); WaitForSingleObject(pi.Process,3000);

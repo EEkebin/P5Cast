@@ -353,18 +353,23 @@ internal static class Player
                                 if(host!=null) host.TakeChanges(hostedChange);
                                 if((window!=null && window.Ended) || (seconds>0 && clock.Elapsed.TotalSeconds>=seconds)) break;
                                 comparisonView=host==null ? window.ComparisonView:host.ComparisonView;
+                                if(comparisonView=="hdr-sdr" && !renderer.HdrEnabled) comparisonView="enhanced";
                                 compare=comparisonView=="original";
                                 double now=clock.Elapsed.TotalMilliseconds;
                                 float requestedPosition=host!=null ? host.WipePosition : initialPosition;
                                 bool horizontal=host!=null ? host.WipeHorizontal : initialHorizontal;
                                 int requestedGrip=host!=null ? host.WipeGripState : 0;
                                 float requestedScale=host!=null ? host.WipeGripScale : 1;
-                                bool redraw=comparisonView=="wipe" && (requestedPosition!=wipePosition || horizontal!=wipeHorizontal ||
+                                bool split=WipeLayout.IsSplit(comparisonView);
+                                bool redraw=split && (requestedPosition!=wipePosition || horizontal!=wipeHorizontal ||
                                                                       requestedGrip!=gripState || requestedScale!=gripScale);
                                 gripState=requestedGrip; gripScale=requestedScale;
                                 wipeHorizontal=horizontal;
                                 wipePosition=requestedPosition;
-                                if(redraw || previousView!=comparisonView) renderer.SetWipe(comparisonView=="wipe",wipePosition,wipeHorizontal,gripState,gripScale);
+                                if(redraw || previousView!=comparisonView) {
+                                    renderer.SdrPreview=comparisonView=="hdr-sdr";
+                                    renderer.SetWipe(split,wipePosition,wipeHorizontal,gripState,gripScale);
+                                }
                                 var requestedLoupe=host==null ? null : host.Loupe;
                                 if(requestedLoupe!=loupe) {
                                     loupe=requestedLoupe;

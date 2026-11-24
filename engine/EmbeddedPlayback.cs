@@ -88,8 +88,8 @@ namespace Cadrivect.Engine
         }
         internal static string ValidateComparison(string view)
         {
-            if(view!="enhanced" && view!="original" && view!="side-by-side" && view!="wipe")
-                throw new ArgumentException("Choose enhanced, original, side-by-side, or wipe.","view");
+            if(view!="enhanced" && view!="original" && view!="side-by-side" && !WipeLayout.IsSplit(view))
+                throw new ArgumentException("Choose enhanced, original, side-by-side, wipe, or hdr-sdr.","view");
             return view;
         }
         public static void SetComparison(string view)

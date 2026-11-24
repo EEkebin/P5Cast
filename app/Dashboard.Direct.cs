@@ -174,7 +174,7 @@ namespace Cadrivect
                     engine.SetDlssQuality(meter.DlssQuality);
                 if(!firstFrame && Field(snapshot,"comparisonView")!=meter.ComparisonView)
                     engine.SetComparison(meter.ComparisonView);
-                if(!firstFrame && meter.ComparisonView=="wipe") {
+                if(!firstFrame && WipeLayout.IsSplit(meter.ComparisonView)) {
                     engine.SetWipeHorizontal(meter.WipeHorizontal);
                     engine.SetWipePosition((float)meter.WipePosition);
                 }

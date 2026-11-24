@@ -24,44 +24,59 @@ float4 HdrToPq(Vertex v) : SV_Target {
 float4 HdrToLinear2020(Vertex v) : SV_Target {
     return float4(max(0,LinearScRgbTo2020(SamplePicture(v))),1);
 }
-float4 HdrLinear2020ToScRgb(Vertex v) : SV_Target {
+float3 Linear2020ToScRgb(float3 rgb) {
     const float3x3 inverseGamut=float3x3(
          1.660491,-0.587641,-0.072850,
         -0.124550, 1.132900,-0.008349,
         -0.018151,-0.100579, 1.118730);
-    return float4(mul(inverseGamut,SamplePicture(v)),1);
+    return mul(inverseGamut,rgb);
+}
+float4 HdrLinear2020ToScRgb(Vertex v) : SV_Target {
+    return float4(Linear2020ToScRgb(SamplePicture(v)),1);
 }
 float4 HdrLinear2020ToPq(Vertex v) : SV_Target {
     return float4(EncodePq80(SamplePicture(v)),1);
 }
 // The model consumes a bounded, display-referred RGB image. Compress source
 // luminance for inference only; the original FP16 picture feeds reconstruction.
+static const float NrDiffuseWhite=203.0/80.0;
 float3 NrGuideRgb(float3 scRgb) {
     float3 rgb=max(scRgb,0);
     float peak=max(rgb.r,max(rgb.g,rgb.b));
-    float3 mapped=rgb/(2.5375+peak); // 203 nit diffuse white in 80-nit scRGB units
+    float3 mapped=rgb/(NrDiffuseWhite+peak);
     return lerp(12.92*mapped,1.055*pow(mapped,1.0/2.4)-0.055,step(0.0031308,mapped));
 }
 float4 HdrNrGuide(Vertex v) : SV_Target {
     return float4(NrGuideRgb(SamplePicture(v)),1);
 }
+float NrPeak(float3 rgb) { return max(rgb.r,max(rgb.g,rgb.b)); }
+float3 NrLinearGuide(float3 srgb) {
+    return lerp(srgb/12.92,pow((srgb+0.055)/1.055,2.4),step(0.04045,srgb));
+}
 float4 HdrNrReconstruct(Vertex v) : SV_Target {
     float3 original=SamplePicture(v);
     float3 color=max(0,LinearScRgbTo2020(original));
-    float guide=luma(NrGuideRgb(original));
-    float residual=luma(previous.SampleLevel(linearClamp,v.uv,0).rgb)-guide;
-    // Apply local luminance detail only. A flat patch, saturated highlight or
-    // protected subtitle keeps the source luminance and chromaticity.
-    float2 dx=float2(1.0/sourceSize.x,0),dy=float2(0,1.0/sourceSize.y);
-    float4 neighbors=float4(luma(image.SampleLevel(linearClamp,v.uv-dx,0).rgb),
-        luma(image.SampleLevel(linearClamp,v.uv+dx,0).rgb),
-        luma(image.SampleLevel(linearClamp,v.uv-dy,0).rgb),
-        luma(image.SampleLevel(linearClamp,v.uv+dy,0).rgb));
-    float y=max(0,luma(original));
-    float localContrast=max4(abs(neighbors-y))/max(y,0.05);
-    float strength=saturate(localContrast)*(1-StrokeFootprint(v.uv));
-    float gain=exp2(clamp(3*residual,-0.4,0.4)*strength);
-    return float4(color*min(gain,125/max(0.00001,max(color.r,max(color.g,color.b)))),1);
+    float3 positive=max(original,0);
+    float peak=NrPeak(positive);
+    float exposure=NrDiffuseWhite+peak;
+    float3 guide=positive/exposure;
+    float3 prediction=NrLinearGuide(saturate(previous.SampleLevel(linearClamp,v.uv,0).rgb));
+    // Invert the guide's peak compression for the predicted RGB. Limit the
+    // inverse exposure near display white, where the inverse is ill-conditioned.
+    float exposureRatio=clamp((1-NrPeak(guide))/max(0.0001,1-NrPeak(prediction)),0.5,2.0);
+    float3 delta=LinearScRgbTo2020((prediction*exposureRatio-guide)*exposure);
+    // Anchor to the uncompressed source, retaining wide-gamut information that
+    // was outside the guide. Bound all three residual channels with one scale.
+    float limit=0.55*NrPeak(color);
+    delta*=saturate(limit/max(0.00001,NrPeak(abs(delta))));
+    float2 dx=float2(4.0/sourceSize.x,0),dy=float2(0,4.0/sourceSize.y);
+    float3 variation=max(abs(image.SampleLevel(linearClamp,v.uv+dx,0).rgb-original),
+                         abs(image.SampleLevel(linearClamp,v.uv-dx,0).rgb-original));
+    variation=max(variation,max(abs(image.SampleLevel(linearClamp,v.uv+dy,0).rgb-original),
+                                abs(image.SampleLevel(linearClamp,v.uv-dy,0).rgb-original)));
+    float scene=smoothstep(0.001,0.015,NrPeak(variation)/max(peak,0.05));
+    float strength=scene*(1-StrokeFootprint(v.uv))*(1-smoothstep(12.5,125,NrPeak(color)));
+    return float4(clamp(color+strength*delta,0,125),1);
 }
 float4 FitNrHdrIntermediate(Vertex v) : SV_Target {
     // The SDK midpoint is scRGB; built-in interpolation and the real neural

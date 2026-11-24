@@ -28,7 +28,8 @@ namespace Cadrivect
         static readonly ControlTemplate PictureTemplate=MakeChipTemplate(true);
         static readonly ControlTemplate GroupTemplate=MakeGroupTemplate();
         readonly Action<int,int> change;
-        static readonly string[] ViewIds={"enhanced","original","side-by-side","wipe"};
+        static readonly string[] ViewIds={"enhanced","original","side-by-side","wipe","hdr-sdr"};
+        const int HdrSdrView=4;
         readonly Action<string> compare;
         readonly RadioButton[] views=new RadioButton[ViewIds.Length];
         static readonly string[] QualityIds={"auto","quality","balanced","performance","ultra-performance"};
@@ -54,7 +55,11 @@ namespace Cadrivect
         internal void SetIdleHdr(bool enabled)
         {
             idleHdr=enabled;
-            if(hdr!=enabled) {hdr=enabled;RefreshAvailability();}
+            if(hdr!=enabled) {
+                int before=selectedView;
+                hdr=enabled; RefreshAvailability(); RefreshComparison();
+                if(before!=selectedView && compare!=null) compare(ComparisonView);
+            }
             if(hdr && selectedMode==NeuralMode)
                 modes[0].IsChecked=true;
         }
@@ -88,7 +93,7 @@ namespace Cadrivect
             openNrDownload.IsEnabled=!openNrChecking;
             openNrDownload.Visibility=Flag(gpu,"openNrModelImportAvailable")==true ? Visibility.Visible : Visibility.Collapsed;
             openNrStatus.Text=Flag(gpu,"open-nr")==true
-                  ? (hdr ? "OpenDLSS-NR · HDR10 detail enhancement" : "OpenDLSS-NR · Model ready · Native resolution")
+                  ? (hdr ? "OpenDLSS-NR · HDR10 color and detail" : "OpenDLSS-NR · Model ready · Native resolution")
                 : Text(gpu,"open-nrReason") ?? Text(gpu,"probeFailure") ?? "Checking OpenDLSS-NR support.";
         }
         readonly StackPanel qualityGroup;
@@ -118,7 +123,7 @@ namespace Cadrivect
         internal event Action<double> WipePositionChanged;
         internal double WipePosition {get {return divider.Value/100;} set {divider.Value=value*100;}}
         int selectedView,previousView;
-        bool comparisonsAvailable=true;
+        bool comparisonsAvailable=true,hdrComparisonAvailable;
         readonly TextBlock comparisonGuide;
         public string ComparisonView {get {return ViewIds[selectedView];}}
         // The two neural providers share one visible picture choice.
@@ -219,7 +224,7 @@ namespace Cadrivect
             AddPictureRow(modeGroup,"Video & temporal upscaling","rtxvideo","fsr-temporal");
             AddPictureRow(modeGroup,"NVIDIA DLSS","dlss","dlaa","dlss-nr");
             useOpenNr=new CheckBox {Content="Use open source",Margin=new Thickness(4,5,0,2),
-                ToolTip="Use OpenDLSS-NR with SDR or HDR10 on Direct3D 11, Direct3D 12 or Vulkan. In HDR, the model guides detail while the stream supplies color and brightness."};
+                ToolTip="Use OpenDLSS-NR with SDR or HDR10 on Direct3D 11, Direct3D 12 or Vulkan. HDR playback applies the model’s color and shading changes to the original HDR picture."};
             AutomationProperties.SetAutomationId(useOpenNr,"UseOpenNr");
             useOpenNr.Checked+=ChangeNeuralProvider; useOpenNr.Unchecked+=ChangeNeuralProvider;
             modeGroup.Children.Add(useOpenNr);
@@ -329,15 +334,16 @@ namespace Cadrivect
             frucSetup.Children.Add(import);picture.Children.Add(frucSetup);
             var viewLabel=Label("Comparison view",Muted,11,FontWeights.Normal);
             viewLabel.Margin=new Thickness(0,9,0,2); picture.Children.Add(viewLabel);
-            var viewGrid=new UniformGrid {Rows=2,Columns=2,Margin=new Thickness(-2,0,-2,0)};
+            var viewGrid=new UniformGrid {Columns=2,Margin=new Thickness(-2,0,-2,0)};
             picture.Children.Add(viewGrid);
-            string[] viewLabels={"Enhanced","Original","Side by side","Draggable split"};
-            string[] viewControlIds={"ViewEnhanced","ViewOriginal","ViewSideBySide","ViewWipe"};
+            string[] viewLabels={"Enhanced","Original","Side by side","Draggable split","HDR / SDR split"};
+            string[] viewControlIds={"ViewEnhanced","ViewOriginal","ViewSideBySide","ViewWipe","ViewHdrSdr"};
             string[] viewTips={"Show your selected picture and interpolation settings.",
                 "Show the source picture at its original frame rate.","Show the full original on the left and the enhanced picture on the right.",
-                "Drag the divider across one full-size picture to reveal the original or enhanced image."};
+                "Drag the divider across one full-size picture to reveal the original or enhanced image.",
+                "On an HDR output, compare an SDR preview with HDR10 using the same frame and picture settings."};
             horizontalSplit=new ToggleButton {Content="Horizontal split",Template=ChipTemplate,
-                ToolTip="Place the original above the divider and the enhanced picture below it."};
+                ToolTip="Drag the divider up and down."};
             StyleChip(horizontalSplit);
             horizontalSplit.Margin=new Thickness(0,5,0,0);
             AutomationProperties.SetAutomationId(horizontalSplit,"WipeHorizontal");
@@ -360,6 +366,7 @@ namespace Cadrivect
             for(int i=0;i<views.Length;i++) {
                 int index=i;
                 var button=new RadioButton {GroupName="View"+group,Content=viewLabels[i],Template=ChipTemplate,ToolTip=viewTips[i]};
+                if(index==HdrSdrView) {button.IsEnabled=false; ToolTipService.SetShowOnDisabled(button,true);}
                 StyleChip(button); views[i]=button;
                 AutomationProperties.SetName(button,viewLabels[i]+" view");
                 AutomationProperties.SetAutomationId(button,viewControlIds[i]);
@@ -623,20 +630,23 @@ namespace Cadrivect
         void RefreshComparison(int? requested=null)
         {
             bool available=selectedMode!=0 || selectedFactor>1;
-            if(available==comparisonsAvailable && !requested.HasValue) return;
-            int index=available ? requested ?? (comparisonsAvailable ? selectedView : 0) : 1;
+            if(available==comparisonsAvailable && hdr==hdrComparisonAvailable && !requested.HasValue) return;
+            int index=requested ?? (!comparisonsAvailable && available && selectedView==1 ? 0 : selectedView);
+            if(index==HdrSdrView && !hdr) index=available ? 0 : 1;
+            if(!available && index!=HdrSdrView) index=1;
             comparisonsAvailable=available;
+            hdrComparisonAvailable=hdr;
             for(int i=0;i<views.Length;i++)
-                views[i].IsEnabled=i==1 || available;
+                views[i].IsEnabled=i==HdrSdrView ? hdr : i==1 || available;
             if(index==1 && selectedView!=1) previousView=selectedView;
             selectedView=index;
             bool wasSyncing=syncing; syncing=true;
             try {views[index].IsChecked=true;}
             finally {syncing=wasSyncing;}
-            horizontalSplit.Visibility=index==3 ? Visibility.Visible : Visibility.Collapsed;
+            horizontalSplit.Visibility=WipeLayout.IsSplit(ComparisonView) ? Visibility.Visible : Visibility.Collapsed;
             UpdateComparisonGuide();
             comparisonGuide.Visibility=index==0 ? Visibility.Collapsed : Visibility.Visible;
-            divider.Visibility=index==3 ? Visibility.Visible : Visibility.Collapsed;
+            divider.Visibility=horizontalSplit.Visibility;
         }
         internal void RestorePlaybackControls(int picture,int multiplier,string provider,string view)
         {
@@ -652,21 +662,25 @@ namespace Cadrivect
         internal Dictionary<string,object> Capabilities { get {return gpu;} }
         void UpdateComparisonGuide()
         {
-            comparisonGuide.Text=!comparisonsAvailable ? "Choose a picture effect or enable frame generation to compare." :
+            comparisonGuide.Text=selectedView==HdrSdrView ? (WipeHorizontal ? "Top · SDR preview     Bottom · HDR10" : "Left · SDR preview     Right · HDR10") :
+                !comparisonsAvailable ? (hdr ? "Choose HDR / SDR split to compare color output." : "Choose a picture effect or enable frame generation to compare.") :
                 selectedView==1 ? "Original shows the source picture at its incoming frame rate. Select Enhanced to resume your effects." :
                 selectedView==3 && WipeHorizontal ? "Top: Original    ·    Bottom: Enhanced" : "Left: Original    ·    Right: Enhanced";
         }
         public void ToggleOriginal()
         {
-            if(comparisonsAvailable) views[selectedView==1 ? previousView : 1].IsChecked=true;
+            int next=selectedView==1 ? previousView : 1;
+            if(!views[next].IsEnabled && views[0].IsEnabled) next=0;
+            if(views[next].IsEnabled) views[next].IsChecked=true;
         }
         public void Reset(int modeIndex,int multiplier)
         {
+            hdr=idleHdr;
             selectedFactor=Math.Max(1,Math.Min(4,multiplier));
             syncing=true;
             try {SyncPictureChoice(Math.Max(0,Math.Min(ModeIds.Length-1,modeIndex))); SyncGenerationChoice(); RefreshComparison();}
             finally {syncing=false;}
-            liveFsrVersion=null; hdr=idleHdr; lastSample=-1; pendingSettings=DateTime.MinValue; dial.SetRates(double.NaN,double.NaN,double.NaN,double.NaN);
+            liveFsrVersion=null; lastSample=-1; pendingSettings=DateTime.MinValue; dial.SetRates(double.NaN,double.NaN,double.NaN,double.NaN);
             sourceValue.Text=generatedValue.Text="—"; targetValue.Text="Target —";
             pictureSize.Text="Waiting for video"; pictureScale.Text=""; activeQuality.Text="";
             displayedSize.Visibility=Visibility.Collapsed;

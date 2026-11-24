@@ -31,7 +31,12 @@ namespace Cadrivect
             if(failed || !(id>lastId)) return;
             lastId=id;
             var fields=new string[columns.Length+1];
-            fields[0]=DateTime.UtcNow.ToString("o",CultureInfo.InvariantCulture);
+            object rawUtc;
+            DateTime sampleUtc;
+            if(!snapshot.TryGetValue("sampleUtc",out rawUtc) ||
+                !DateTime.TryParseExact(rawUtc as string,"o",CultureInfo.InvariantCulture,DateTimeStyles.RoundtripKind,out sampleUtc) ||
+                sampleUtc.Kind!=DateTimeKind.Utc) sampleUtc=DateTime.UtcNow;
+            fields[0]=sampleUtc.ToString("o",CultureInfo.InvariantCulture);
             for(int i=0;i<columns.Length;i++) {
                 double value=PlaybackMeter.Number(snapshot,columns[i]);
                 if(!double.IsNaN(value)) fields[i+1]=value.ToString("R",CultureInfo.InvariantCulture);
@@ -40,6 +45,16 @@ namespace Cadrivect
         }
 
         internal void Finish() {samples.CompleteAdding();}
+
+        static bool IsTraceFile(string path)
+        {
+            string[] parts=Path.GetFileNameWithoutExtension(path).Split('-');
+            Guid id;
+            DateTime created;
+            return parts.Length==3 && parts[0]=="direct" &&
+                DateTime.TryParseExact(parts[1],"yyyyMMdd'T'HHmmssfff",CultureInfo.InvariantCulture,DateTimeStyles.None,out created) &&
+                Guid.TryParseExact(parts[2],"N",out id);
+        }
 
         void Write()
         {
@@ -55,7 +70,7 @@ namespace Cadrivect
                         file.AutoFlush=true;
                         file.WriteLine("utc,"+string.Join(",",columns));
                         foreach(string old in Directory.GetFiles(directory,"direct-????????T?????????-????????????????????????????????.csv")
-                            .OrderByDescending(p=>p,StringComparer.Ordinal).Skip(4)) {
+                            .Where(IsTraceFile).OrderByDescending(p=>p,StringComparer.Ordinal).Skip(4)) {
                             try {File.Delete(old);} catch(IOException) {} catch(UnauthorizedAccessException) {}
                         }
                     }

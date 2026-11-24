@@ -136,9 +136,9 @@ namespace Cadrivect
             if(HistoryOpen) SetStatusHistory(false);
             if(OperationOpen && !closing) {
                 e.Cancel=true;
-                // A close during committed teardown should finish closing the window
-                // as soon as the player and its owned process have actually exited.
+                if(pendingStop!=null || requestingRest) {closeAfterStop=true; return;}
                 if(stopping && stopRequested) {SaveSettings(); closing=true; return;}
+                closeAfterOperation=true;
                 CancelCurrentOperation();
                 return;
             }

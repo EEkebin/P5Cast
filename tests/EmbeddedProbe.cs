@@ -97,7 +97,7 @@ internal static partial class EmbeddedProbe
         Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background,(Action)delegate {frame.Continue=false;});
         Dispatcher.PushFrame(frame); Thread.Sleep(4);
     }
-    static void SendFixture(string name,byte[][] packets,ManualResetEvent pause,ManualResetEvent end,int codec=1,bool lossStats=false)
+    static void SendFixture(string name,byte[][] packets,ManualResetEvent pause,ManualResetEvent end,int codec=1,bool lossStats=false,ManualResetEvent repeatFirst=null)
     {
         try {
             using(var pipe=new NamedPipeClientStream(".",name,PipeDirection.Out)) {
@@ -110,7 +110,8 @@ internal static partial class EmbeddedProbe
                             if(!unavailable) { WriteAudio(writer,-1,-1,-1,lossStats); writer.Flush(); unavailable=true; }
                             continue;
                         }
-                        var packet=packets[frame++%packets.Length]; writer.Write(packet.Length); writer.Write(packet); writer.Flush();
+                        var packet=packets[repeatFirst!=null && repeatFirst.WaitOne(0) ? 0 : frame++%packets.Length];
+                        writer.Write(packet.Length); writer.Write(packet); writer.Flush();
                     }
                 }
             }
@@ -120,6 +121,29 @@ internal static partial class EmbeddedProbe
         writer.Write(0); writer.Write(17000); writer.Write(0); writer.Write(4100); writer.Write(20000);
         writer.Write(bitrate); writer.Write(rate); writer.Write(channels);
         if(lossStats) {writer.Write(4); writer.Write(7); writer.Write(1); writer.Write(2); writer.Write(27500); writer.Write(6000);}
+    }
+    static void CheckDirectEndings(Assembly player,string runtime) {
+        var video=player.GetType("DirectVideo",true);
+        // A clean boundary, a partial length, a partial picture, and a partial telemetry record.
+        foreach(var tail in new[]{new byte[0],new byte[]{5,0},new byte[]{5,0,0,0,1},new byte[]{0,0,0,0,1}}) {
+            var name="P5CastEof"+Guid.NewGuid().ToString("N");
+            using(var source=(IDisposable)Activator.CreateInstance(video,new object[]{name,runtime})) {
+                using(var pipe=new NamedPipeClientStream(".",name,PipeDirection.Out))
+                using(var writer=new BinaryWriter(pipe)) {
+                    pipe.Connect(2000);
+                    writer.Write(0x33564443); writer.Write(1); WriteAudio(writer,192750,48000,2,true); writer.Flush();
+                    var opened=Stopwatch.StartNew();
+                    while((double)video.GetProperty("AudioQueueMs").GetValue(source,null)<0 && opened.ElapsedMilliseconds<3000) Thread.Sleep(5);
+                    Check((double)video.GetProperty("AudioQueueMs").GetValue(source,null)==17,"Direct source did not read the initial telemetry.");
+                    writer.Write(tail);
+                }
+                var wait=Stopwatch.StartNew();
+                while(!(bool)video.GetProperty("Closed").GetValue(source,null) && wait.ElapsedMilliseconds<3000) Thread.Sleep(5);
+                Check((bool)video.GetProperty("Closed").GetValue(source,null),"Direct source failed to close after EOF.");
+                string error=(string)video.GetProperty("Error").GetValue(source,null);
+                Check(tail.Length==0 ? error=="" : error.Contains("middle of a record"),"Unexpected Direct terminal status: "+error);
+            }
+        }
     }
     static Thread Start(Type api,string[] options,Action<int> completed) {
         var thread=new Thread(delegate() { completed((int)api.GetMethod("Run").Invoke(null,new object[]{options})); });
@@ -377,6 +401,7 @@ internal static partial class EmbeddedProbe
         Exception failure=null; int result=-1,exitCode=1;
         var api=Assembly.LoadFrom(Path.GetFullPath(args[0])).GetType("Cadrivect.Engine.EmbeddedPlayback",true);
         if(args[6]=="--offscreen-capture") return CheckCapture(api,args[4],renderer);
+        CheckDirectEndings(api.Assembly,args[1]);
         var host=new VideoHost(); var window=new Window { Title="WPF host test",Width=700,Height=420,Content=host };
         var end=new ManualResetEvent(false); var pause=new ManualResetEvent(false); Thread worker=null;
         try {
@@ -392,7 +417,8 @@ internal static partial class EmbeddedProbe
             });
             worker.IsBackground=true; worker.SetApartmentState(ApartmentState.STA); worker.Start();
             byte[][] frames={File.ReadAllBytes(args[2]),File.ReadAllBytes(args[3])};
-            new Thread(delegate() { SendFixture(id,frames,pause,end); }) {IsBackground=true}.Start();
+            var repeatFirst=new ManualResetEvent(false);
+            new Thread(delegate() { SendFixture(id,frames,pause,end,1,false,repeatFirst); }) {IsBackground=true}.Start();
             int stage=0,width=0,start=0,beforeRepaint=0; long pauseStart=0; var clock=Stopwatch.StartNew();
             while(worker.IsAlive && clock.ElapsedMilliseconds<15000 && stage<6) {
                 Pump(); var data=serializer.Deserialize<Dictionary<string,object>>((string)api.GetMethod("Snapshot").Invoke(null,null));
@@ -408,9 +434,12 @@ internal static partial class EmbeddedProbe
                     Check(Convert.ToInt32(data["surfaceWidth"])>width,"Surface did not resize.");
                     Check(Convert.ToInt32(data["pictureWidth"])>128 && Convert.ToInt32(data["pictureHeight"])>64,"FSR fixture did not upscale.");
                     CheckVideoSize(data,Convert.ToInt32(data["pictureWidth"]),Convert.ToInt32(data["pictureHeight"]));
+                    repeatFirst.Set(); start=captured;
                     api.GetMethod("Compare").Invoke(null,new object[]{true}); stage=2;
-                } else if(stage==2 && (bool)data["compare"] && (string)data["effectivePictureMode"]=="original") {
+                } else if(stage==2 && (bool)data["compare"] && (string)data["effectivePictureMode"]=="original" && captured>start+16) {
+                    // Original must present a still scene at source cadence even with 2x generation selected.
                     CheckVideoSize(data,128,64);
+                    repeatFirst.Reset();
                     api.GetMethod("Compare").Invoke(null,new object[]{false}); start=captured; stage=3;
                 } else if(stage==3 && !(bool)data["compare"] && captured>start+8 && elapsed>2300) {
                     Check(Convert.ToInt32(data["targetPresentedFps"])==60 && Convert.ToInt32(data["audioQueueMs"])==17 &&
@@ -460,14 +489,14 @@ internal static partial class EmbeddedProbe
                     api.GetMethod("Configure").Invoke(null,new object[]{2,2}); stage=2;
                 } else if(stage==2 && (string)data["mode"]=="fsr" && Convert.ToInt32(data["surfaceWidth"])<960 &&
                           Convert.ToInt32(data["surfaceHeight"])<540 && Convert.ToInt32(data["generated"])>2) {
-                    CheckVideoSize(data,960,540);
+                    CheckVideoSize(data,1280,720);
                     api.GetMethod("Stop").Invoke(null,null); stage=3;
                 }
             }
             Check(stage==3 && result==0,"Embedded demo/live output change failed. "+api.GetProperty("Error").GetValue(null,null));
             var measured=serializer.Deserialize<Dictionary<string,object>>(File.ReadAllText(demoReport));
             CheckRenderer(measured,renderer);
-            CheckVideoSize(measured,960,540);
+            CheckVideoSize(measured,1280,720);
             Check(Convert.ToInt32(measured["sampledFrames"])>=2 && Convert.ToInt32(measured["sampleMaxLuma"])>Convert.ToInt32(measured["sampleMinLuma"]),
                   "Offline motion scene did not produce measurable changing samples.");
             Console.WriteLine("Passed offline GPU scene and live output settings. "+demoReport);

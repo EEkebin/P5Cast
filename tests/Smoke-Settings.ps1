@@ -27,21 +27,31 @@ try {
     $traceType=$asm.GetType('Cadrivect.DirectDiagnostics',$true)
     $flags=[Reflection.BindingFlags]'Instance,NonPublic'
     $traceDir=Join-Path $tmp 'direct-stats'
+    [void][IO.Directory]::CreateDirectory($traceDir)
+    foreach($day in 1..4) {
+        $name='direct-2000010{0}T000000000-{1}.csv' -f $day,([guid]::NewGuid().ToString('N'))
+        [IO.File]::WriteAllText((Join-Path $traceDir $name),'seed')
+    }
+    $unrelated=Join-Path $traceDir ('direct-00000000T000000000-'+('x'*32)+'.csv')
+    [IO.File]::WriteAllText($unrelated,'preserve')
     $trace=$traceType.GetConstructor($flags,$null,@([string]),$null).Invoke(@([string]$traceDir))
     $sample=New-Object 'Collections.Generic.Dictionary[string,object]'
     $sample.Add('sampleId',1); $sample.Add('videoFramesLost',0); $sample.Add('address','private-fixture')
+    $sample.Add('sampleUtc','2020-02-03T04:05:06.1234567Z')
     $record=$traceType.GetMethod('Record',$flags)
     $record.Invoke($trace,@($sample.psobject.BaseObject)); $record.Invoke($trace,@($sample.psobject.BaseObject))
-    $sample['sampleId']=2; $sample['audioUnderruns']=3
+    $sample['sampleId']=2; $sample['audioUnderruns']=3; [void]$sample.Remove('sampleUtc')
     $record.Invoke($trace,@($sample.psobject.BaseObject)); $traceType.GetMethod('Finish',$flags).Invoke($trace,$null)
     $wait=[Diagnostics.Stopwatch]::StartNew()
     do {
         Start-Sleep -Milliseconds 20
-        $file=Get-ChildItem $traceDir -Filter '*.csv' -ErrorAction SilentlyContinue | Select-Object -First 1
+        $file=Get-ChildItem $traceDir -Filter '*.csv' | Where-Object {$_.Name -notmatch '^direct-(200001|00000000)'} | Select-Object -First 1
         $rows=if($file){@(Import-Csv $file.FullName)}
     } while(@($rows).Count -ne 2 -and $wait.ElapsedMilliseconds -lt 3000)
     Require (@($rows).Count -eq 2 -and $rows[0].videoFramesLost -eq '0' -and $rows[0].audioUnderruns -eq '' -and
         $rows[1].audioUnderruns -eq '3' -and !((Get-Content $file.FullName -Raw).Contains('private-fixture'))) 'Direct diagnostics retain unique numeric samples, distinguish missing counters, and omit identifiers'
+    Require ($rows[0].utc -eq '2020-02-03T04:05:06.1234567Z' -and $rows[1].utc -match 'Z$') 'Preserve measurement time and support older snapshots'
+    Require ((Test-Path -LiteralPath $unrelated) -and @(Get-ChildItem $traceDir -Filter '*.csv').Count -eq 5) 'Rotate only the four owned trace files'
     function State($name,$value){$type.GetField($name,'Instance,NonPublic').SetValue($dash,$value)}
     function Call($name){$type.GetMethod($name,[Reflection.BindingFlags]'Instance,NonPublic').Invoke($dash,@())}
     function TryClose {
@@ -346,6 +356,55 @@ if($Action -eq 'InstallHost'){Start-Sleep -Milliseconds 200}
         Require (@($calls -eq 'StartHost').Count -eq 1 -and @($calls -eq 'StopHost').Count -eq 1) 'Only confirmed sharing requests reached the relay'
     } finally {$rootField.SetValue($null,$AppRoot)}
 
+    # A startup worker ignores commands until its session has been installed.
+    # Return a first-frame snapshot from a ready worker on the following UI tick.
+    $stream=[IO.File]::OpenRead((Join-Path $AppRoot 'app\Main.xaml'))
+    try {$startupWindow=[Windows.Markup.XamlReader]::Load($stream)} finally {$stream.Dispose()}
+    $startupDash=[Activator]::CreateInstance($type,$flags,$null,@($startupWindow,$false),$null)
+    $startupWindow.FindName('SourceChoice').SelectedIndex=2
+    $engineType=$asm.GetType('Cadrivect.EngineSession',$true)
+    $mockEngine=[Runtime.Serialization.FormatterServices]::GetUninitializedObject($engineType)
+    $startup=@{ready=$false;applied='';count=0}
+    $apply=[Action[string,string]]{param($size,$color) if($startup.ready){$startup.applied="$size/$color";$startup.count++}}
+    $engineType.GetField('ConfigureOutput',$flags).SetValue($mockEngine,$apply)
+    $engineType.GetField('MarkSettings',$flags).SetValue($mockEngine,[Func[int]]{1})
+    $startupMeter=$type.GetField('meter',$flags).GetValue($startupDash)
+    $report=@{presented=1;captured=1;sampleId=1;resolution='native';hdrMode='auto';sourceKind='demo'
+        mode=$type.GetField('modeIds','Static,NonPublic').GetValue($null)[$type.GetField('mode',$flags).GetValue($startupDash)]
+        multiplier=$type.GetField('factor',$flags).GetValue($startupDash)
+        frameGenerationProvider=$startupMeter.GetType().GetProperty('FrameGenerationProvider',$flags).GetValue($startupMeter)
+        dlssModelHint=$startupMeter.GetType().GetProperty('DlssModelHint',$flags).GetValue($startupMeter)
+        dlssQuality=$startupMeter.GetType().GetProperty('DlssQuality',$flags).GetValue($startupMeter)
+        comparisonView=$startupMeter.ComparisonView} | ConvertTo-Json -Compress
+    $engineType.GetField('Snapshot',$flags).SetValue($mockEngine,[Func[string]]{$report})
+    $type.GetField('engine',$flags).SetValue($startupDash,$mockEngine)
+    $type.GetField('rendering',$flags).SetValue($startupDash,[Threading.Tasks.Task]::FromResult(0))
+    $startupWindow.FindName('RenderResolution').SelectedIndex=1
+    $startupWindow.FindName('RenderResolution').SelectedIndex=3
+    $startup.ready=$true
+    $type.GetMethod('Tick',$flags).Invoke($startupDash,$null)
+    $type.GetMethod('Tick',$flags).Invoke($startupDash,$null)
+    Require ($startup.count -eq 1 -and $startup.applied -like '1440/*') 'The first frame applies the latest output size chosen during startup exactly once'
+
+    # Closing during an operation must survive both cancellation and committed work.
+    foreach($committed in @($false,$true)) {
+        $stream=[IO.File]::OpenRead((Join-Path $AppRoot 'app\Main.xaml'))
+        try {$otherWindow=[Windows.Markup.XamlReader]::Load($stream)} finally {$stream.Dispose()}
+        $otherDash=[Activator]::CreateInstance($type,$flags,$null,@($otherWindow,$false),$null)
+        $observed=@{closed=$false;cancelled=$false}
+        $otherWindow.add_Closed({$observed.closed=$true})
+        $cancel=[Action]{$observed.cancelled=$true}
+        $operation=$type.GetMethod('BeginOperation',$flags).Invoke($otherDash,@('Checking','Checking',$cancel))
+        if($committed){$type.GetMethod('CommitOperation',$flags).Invoke($otherDash,@($operation,'Finishing'))}
+        $otherWindow.Close()
+        Require (!$observed.closed -and ($observed.cancelled -eq !$committed)) 'Close waits for the current operation and only cancels work that is cancellable'
+        $type.GetMethod('EndOperation',$flags).Invoke($otherDash,@($operation))
+        $frame=[Windows.Threading.DispatcherFrame]::new()
+        [void]$window.Dispatcher.BeginInvoke([Windows.Threading.DispatcherPriority]::Background,[Action]{$frame.Continue=$false})
+        [Windows.Threading.Dispatcher]::PushFrame($frame)
+        Require $observed.closed 'Completing an operation honors the original window close request'
+    }
+
     $null=(Call UserStop).GetAwaiter().GetResult()
     Require ((IsShown StopPanel) -and !(IsShown SettingsDrawer) -and !(Widget ShowSettings).IsChecked -and (Widget RestOnStop).IsChecked -and !(Widget RememberStop).IsChecked) 'Stop opens in its own overlay and preserves the closed drawer, with rest selected and remember unchecked'
     (Widget RestOnStop).IsChecked=$false
@@ -357,8 +416,11 @@ if($Action -eq 'InstallHost'){Start-Sleep -Milliseconds 200}
     $null=(Call UserStop).GetAwaiter().GetResult()
     Require ((Widget ConfirmStop).Content -eq 'Stop session') 'Canceling close leaves subsequent Stop actions in the dashboard'
     (Widget RememberStop).IsChecked=$true; Click ConfirmStop
+    Require ((TryClose) -and (IsShown OperationOverlay)) 'Closing during the disconnect countdown keeps the confirmed operation pending'
     WaitStopTransition
-    Require ((IsShown StopPanel) -and (Widget StopMessage).Text -like 'Could not send the rest request*' -and (Widget Status).Text -eq (Widget StopMessage).Text -and (Widget RememberStop).IsChecked -and (Widget StopBehavior).SelectedIndex -eq 0) 'Unacknowledged rest keeps its choices and exposes the error inside the modal'
+    Require ((IsShown StopPanel) -and (Widget ConfirmStop).Content -eq 'Disconnect and close' -and (Widget StopMessage).Text -like 'Could not send the rest request*' -and (Widget Status).Text -eq (Widget StopMessage).Text -and (Widget RememberStop).IsChecked -and (Widget StopBehavior).SelectedIndex -eq 0) 'Unacknowledged rest keeps its choices, close request, and error inside the modal'
+    Click CancelStop
+    $null=(Call UserStop).GetAwaiter().GetResult()
     (Widget RestOnStop).IsChecked=$false; (Widget RememberStop).IsChecked=$true; Click ConfirmStop
     WaitStopTransition
     Require ((Widget StopBehavior).SelectedIndex -eq 1 -and !(IsShown StopPanel)) 'Remember leave-on choice'

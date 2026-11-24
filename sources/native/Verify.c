@@ -73,8 +73,18 @@ static void verify_video(int codec, unsigned version)
     CHECK(video_sample(config, config_size, 0, false, &video));
     CHECK(!video_sample(inter, sizeof(inter), 0, false, &video));
     CHECK(video_sample(intra, sizeof(intra), 0, false, &video));
-    DirectMetrics metrics = {14000, 1, UINT32_MAX, DIRECT_AUDIO_TARGET_US, 128000, 48000, 2, 1, 4, 27500, 6000};
-    video_stats(&video, &metrics);
+    Audio audio = {0};
+    audio.underruns = 1; audio.rate = 48000; audio.channels = 2;
+    audio.compressed_bytes = 32000; audio.concealments = 1; audio.queue_trims = 4;
+    audio.frequency.QuadPart = 1000000;
+    audio.max_input_ticks = 27500; audio.max_callback_ticks = 6000;
+    AcquireSRWLockExclusive(&video.writer);
+    video_stats(&video, &audio, 1000, UINT32_MAX);
+    ReleaseSRWLockExclusive(&video.writer);
+    CHECK(audio.max_input_ticks == 27500 && audio.max_callback_ticks == 6000 &&
+          audio.compressed_bytes == 32000 && audio.window_start_ms == 0);
+    video_stats(&video, &audio, 2000, UINT32_MAX);
+    CHECK(!audio.max_input_ticks && !audio.max_callback_ticks && !audio.compressed_bytes);
     DWORD count;
     uint8_t packet[200];
     CHECK(ReadFile(input, packet, sizeof(packet), &count, NULL));
@@ -86,7 +96,7 @@ static void verify_video(int codec, unsigned version)
     uint32_t inter_size = sizeof(inter), sentinel = 0;
     APPEND(&inter_size, 4); APPEND(inter, sizeof(inter));
     APPEND(&header[2], 4); APPEND(config, config_size); APPEND(intra, sizeof(intra));
-    uint32_t stats[] = {14000, 1, UINT32_MAX, DIRECT_AUDIO_TARGET_US, 128000, 48000, 2, 3, 1, 4, video.slow_handoffs, 27500, 6000};
+    uint32_t stats[] = {UINT32_MAX, 1, UINT32_MAX, UINT32_MAX, 128000, 48000, 2, 3, 1, 4, video.slow_handoffs, 27500, 6000};
     APPEND(&sentinel, 4); APPEND(stats, (version == 3 ? 13 : (version == 2 ? 7 : 4)) * sizeof(uint32_t));
     CHECK(count == off && !memcmp(expected, packet, off));
     if (codec == 1 && version == 3) {
@@ -251,6 +261,20 @@ static void verify_audio(void)
     sink.frame_cb(opus_silence, sizeof(opus_silence), sink.user);
     audio_stats(&received, start+2500, &metrics);
     CHECK(metrics.audio_bps == 96);
+
+    // Two 60 ms Opus silence frames in one valid constant-size packet (TOC config 3).
+    chiaki_audio_header_set(&header, 2, 16, 48000, 5760);
+    sink.header_cb(&header, sink.user);
+    CHECK(received.device && !received.failed);
+    SDL_PauseAudioDevice(received.device, 1);
+    uint8_t long_silence[] = {0x19, 0xff, 0xfe, 0xff, 0xfe};
+    sink.frame_cb(long_silence, sizeof(long_silence), sink.user);
+    CHECK(received.queued_frames == 5760);
+    header.rate = 44100;
+    sink.header_cb(&header, sink.user);
+    CHECK(received.failed == DIRECT_AUDIO_FORMAT_ERROR && decoder.audio_header.rate == 48000);
+    sink.frame_cb(opus_silence, sizeof(opus_silence), sink.user);
+    CHECK(received.queued_frames == 5760);
     chiaki_opus_decoder_fini(&decoder);
     SDL_CloseAudioDevice(received.device);
     SDL_AudioQuit();

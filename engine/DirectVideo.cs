@@ -85,6 +85,14 @@ internal sealed class DirectVideo : IDisposable
         worker=new Thread(Decode) {IsBackground=true,Name="PS5 video decoder"};
         worker.Start();
     }
+    static void ReadRemaining(BinaryReader reader,byte[] buffer,int offset,int length)
+    {
+        while(offset<length) {
+            int count=reader.Read(buffer,offset,length-offset);
+            if(count==0) throw new EndOfStreamException();
+            offset+=count;
+        }
+    }
     void Decode()
     {
         try {
@@ -99,18 +107,18 @@ internal sealed class DirectVideo : IDisposable
             if(decoder==IntPtr.Zero) throw new InvalidOperationException("The compatible FFmpeg decoder could not be loaded.");
             var buffer=new byte[65536]; var clock=Stopwatch.StartNew(); long bytes=0;
             while(!stopping) {
-                int length=reader.ReadInt32();
+                // Only EOF between records is a clean disconnect. Pipes may split a four-byte prefix.
+                int prefix=reader.Read(buffer,0,sizeof(int));
+                if(prefix==0) break;
+                ReadRemaining(reader,buffer,prefix,sizeof(int));
+                int length=BitConverter.ToInt32(buffer,0);
                 if(length==0) {
                     audio=new AudioTelemetry(reader,version);
                     continue;
                 }
                 if(length<0 || length>16*1024*1024) throw new InvalidDataException("Invalid console video packet size.");
                 if(length>buffer.Length) Array.Resize(ref buffer,length);
-                for(int pos=0;pos<length;) {
-                    int count=reader.Read(buffer,pos,length-pos);
-                    if(count==0) throw new EndOfStreamException();
-                    pos+=count;
-                }
+                ReadRemaining(reader,buffer,0,length);
                 long start=Stopwatch.GetTimestamp();
                 bytes+=length;
                 if(clock.ElapsedMilliseconds>=1000) {
@@ -134,7 +142,7 @@ internal sealed class DirectVideo : IDisposable
                     }
                 }
             }
-        } catch(EndOfStreamException) { }
+        } catch(EndOfStreamException) { if(!stopping) error="The Direct stream ended in the middle of a record."; }
         catch(Exception ex) { if(!stopping) error=ex.Message; }
         finally { closed=true; }
     }

@@ -78,12 +78,23 @@ static void apply_volume(Audio *audio, int16_t *pcm, size_t frames)
 static void opus_header(ChiakiAudioHeader *header, void *user)
 {
     Audio *audio = user;
+    // libopus accepts five output rates and up to 120 ms of PCM per packet.
+    uint32_t rate = header->rate;
+    if ((header->channels != 1 && header->channels != 2) ||
+        (rate != 8000 && rate != 12000 && rate != 16000 && rate != 24000 && rate != 48000) ||
+        !header->frame_size || header->frame_size > rate * DIRECT_OPUS_MAX_MS / 1000) {
+        InterlockedExchange(&audio->failed, DIRECT_AUDIO_FORMAT_ERROR);
+        return;
+    }
     audio->decoder_sink.header_cb(header, audio->decoder_sink.user);
+    ChiakiOpusDecoder *decoder = audio->decoder_sink.user;
+    if (!decoder->opus_decoder) InterlockedExchange(&audio->failed, DIRECT_AUDIO_FORMAT_ERROR);
 }
 
 static void opus_frame(uint8_t *packet, size_t bytes, void *user)
 {
     Audio *audio = user;
+    if (InterlockedCompareExchange(&audio->failed, 0, 0)) return;
     // libchiaki delivers deduplicated Opus frames and uses zero bytes for concealment.
     AcquireSRWLockExclusive(&audio->lock);
     audio->compressed_bytes += bytes;
@@ -132,7 +143,7 @@ void audio_settings(uint32_t channels, uint32_t rate, void *user)
         audio->device = SDL_OpenAudioDevice(NULL, 0, &spec, NULL, 0);
     }
     if (audio->device) SDL_PauseAudioDevice(audio->device, 0);
-    else InterlockedExchange(&audio->failed, 1);
+    else InterlockedExchange(&audio->failed, DIRECT_AUDIO_DEVICE_ERROR);
     ReleaseSRWLockExclusive(&audio->lock);
 }
 
@@ -164,7 +175,7 @@ void audio_frame(int16_t *pcm, size_t samples, void *user)
 {
     Audio *audio = user;
     AcquireSRWLockExclusive(&audio->lock);
-    if (audio->device && samples && samples <= audio->rate / 10) {
+    if (audio->device && samples && samples <= audio->rate * DIRECT_OPUS_MAX_MS / 1000) {
         SDL_LockAudioDevice(audio->device);
         measure_gap(&audio->last_input_tick, &audio->max_input_ticks);
         size_t limit = (size_t)audio->rate * (uint64_t)(audio->target_us + 45000u) / 1000000;

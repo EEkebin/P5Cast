@@ -85,9 +85,34 @@ function Get-LocalAddresses {
 }
 function Get-Session {
     if (!(Test-Path -LiteralPath $sessionFile)) { return }
-    $session = Get-Content -LiteralPath $sessionFile -Raw | ConvertFrom-Json
-    $proc = Get-Process -Id $session.processId -ErrorAction SilentlyContinue
-    if ($proc -and $proc.Path -eq (Get-BinaryPath sunshine) -and $proc.StartTime.ToUniversalTime().Ticks.ToString() -eq $session.startTicks) { return $session }
+    $stream = [IO.File]::Open($sessionFile,'Open','Read',([IO.FileShare]::Read -bor [IO.FileShare]::Delete))
+    try {
+        $reader = New-Object IO.StreamReader($stream)
+        try { $text = $reader.ReadToEnd() } finally { $reader.Dispose() }
+    } finally { $stream.Dispose() }
+    try { $session = $text | ConvertFrom-Json -ErrorAction Stop } catch { $session = $null }
+    $binary = Get-BinaryPath sunshine
+    $processId = 0
+    if (![int]::TryParse([string]$session.processId,[ref]$processId) -or $processId -le 0 -or !$session.startTicks) {
+        if (Get-Process -Name sunshine -ErrorAction SilentlyContinue | Where-Object Path -eq $binary) {
+            throw 'The P5Cast host is still running and its saved session is unreadable. Close that Sunshine process before restarting the host.'
+        }
+        return
+    }
+    $proc = Get-Process -Id $processId -ErrorAction SilentlyContinue
+    if (!$proc) { return }
+    $owned = $false
+    try {
+        # Hold the same OS process handle through identity verification and StopHost.
+        if ($proc.Path -ne $binary) { return }
+        $null = $proc.Handle
+        if (!$proc.HasExited -and $proc.Path -eq $binary -and $proc.StartTime.ToUniversalTime().Ticks.ToString() -eq $session.startTicks) {
+            $session | Add-Member -NotePropertyName OwnedProcess -NotePropertyValue $proc -Force
+            $owned = $true
+            return $session
+        }
+    } catch [InvalidOperationException] { if (!$proc.HasExited) { throw } }
+    finally { if (!$owned) { $proc.Dispose() } }
 }
 function New-HostCredential {
     $random = [Security.Cryptography.RandomNumberGenerator]::Create()
@@ -187,7 +212,12 @@ function Start-RelayHost {
             catch { $lastFailure = $_.Exception.GetBaseException().Message }
             if ($ready) {
                 if ($displayId) { Confirm-HostDisplay $log $DisplayDevice $displayId }
-                Write-Text $sessionFile ($session | ConvertTo-Json -Compress)
+                $tempSession = Join-Path $private ([guid]::NewGuid().ToString('N')+'.tmp')
+                try {
+                    Write-Text $tempSession ($session | ConvertTo-Json -Compress)
+                    if ([IO.File]::Exists($sessionFile)) { [IO.File]::Replace($tempSession,$sessionFile,[System.Management.Automation.Language.NullString]::Value) }
+                    else { [IO.File]::Move($tempSession,$sessionFile) }
+                } finally { [IO.File]::Delete($tempSession) }
                 return @{ok=$true; message="Hosting on $chosen. Pair a client, then open your game on the shared display."; address=$chosen; log=$log; displayDevice=$DisplayDevice; displayId=$displayId}
             }
             Start-Sleep -Milliseconds 250
@@ -340,8 +370,8 @@ try {
         'StopHost' {
             $session = Get-Session
             if ($session) {
-                $proc = Get-Process -Id $session.processId
-                Stop-OwnedHost $proc
+                try { if (!$session.OwnedProcess.HasExited) { Stop-OwnedHost $session.OwnedProcess } }
+                finally { $session.OwnedProcess.Dispose() }
             }
             @{ok=$true; message='Host stopped.'}
         }

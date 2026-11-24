@@ -9,7 +9,9 @@
 #define DIRECT_MAX_AU (16u * 1024u * 1024u)
 #define DIRECT_AUDIO_TARGET_US 15000u
 #define DIRECT_AUDIO_MAX_TARGET_US 55000u
-#define DIRECT_AUDIO_CAPACITY 8192u /* frames; holds a 100 ms Opus block at 48 kHz */
+#define DIRECT_OPUS_MAX_MS 120u
+enum { DIRECT_AUDIO_DEVICE_ERROR = 26, DIRECT_AUDIO_FORMAT_ERROR = 29 };
+#define DIRECT_AUDIO_CAPACITY 8192u /* frames; holds a 120 ms Opus packet at 48 kHz */
 typedef struct {
     HANDLE pipe, stop;
     SRWLOCK writer;
@@ -50,7 +52,7 @@ typedef struct {
 } Gamepad;
 
 typedef struct {
-    uint32_t queued_us, underruns, rtt_us, target_us;
+    uint32_t queued_us, underruns, target_us;
     uint32_t audio_bps, sample_rate, channels, concealments, queue_trims;
     uint32_t input_gap_us, callback_gap_us;
 } DirectMetrics;
@@ -67,7 +69,7 @@ int register_console(const char *host);
 bool video_profile(ChiakiConnectVideoProfile *profile, int codec, const char *fps, const char *kbps, const char *height);
 bool video_header(Video *video);
 bool video_sample(uint8_t *data, size_t size, int32_t lost, bool recovered, void *user);
-void video_stats(Video *video, const DirectMetrics *stats);
+void video_stats(Video *video, Audio *audio, uint64_t now_ms, uint32_t rtt_us);
 bool audio_open_volume(Audio *audio, const char *pipe_name);
 void audio_close_volume(Audio *audio);
 void audio_decoder_sink(Audio *audio, ChiakiOpusDecoder *decoder, ChiakiAudioSink *sink);

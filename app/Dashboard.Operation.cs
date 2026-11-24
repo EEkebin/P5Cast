@@ -13,6 +13,7 @@ namespace Cadrivect
     internal partial class Dashboard
     {
         long nextOperation,activeOperation;
+        bool closeAfterOperation;
         Action operationCancel;
         UIElement operationReturnFocus;
         bool OperationOpen { get { return activeOperation!=0; } }
@@ -106,6 +107,11 @@ namespace Cadrivect
             UpdateTransport();
             var previous=operationReturnFocus;
             operationReturnFocus=null;
+            if(closeAfterOperation) {
+                closeAfterOperation=false;
+                if(!closing) QueueWindowClose();
+                return;
+            }
             if(!hadFocus || closing || !window.IsVisible || HistoryOpen || StopPromptOpen || SetupOpen) return;
             if(previous!=null && previous.IsVisible && previous.IsEnabled && previous.Focus()) return;
             if(!SetupOpen) UI<Button>("OpenSource").Focus();

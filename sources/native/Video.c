@@ -57,14 +57,17 @@ bool video_header(Video *video)
     return write_all(video, header, sizeof(header));
 }
 
-void video_stats(Video *video, const DirectMetrics *stats)
+void video_stats(Video *video, Audio *audio, uint64_t now_ms, uint32_t rtt_us)
 {
+    // Sampling consumes gap maxima and compressed bytes. Leave them intact if a picture owns the pipe.
     if (!TryAcquireSRWLockExclusive(&video->writer)) return;
-    const uint32_t packet[] = {0, stats->queued_us, stats->underruns, stats->rtt_us, stats->target_us,
-                               stats->audio_bps, stats->sample_rate, stats->channels,
+    DirectMetrics stats = {0};
+    audio_stats(audio, now_ms, &stats);
+    const uint32_t packet[] = {0, stats.queued_us, stats.underruns, rtt_us, stats.target_us,
+                               stats.audio_bps, stats.sample_rate, stats.channels,
                                (uint32_t)InterlockedCompareExchange(&video->lost_frames, 0, 0),
-                               stats->concealments, stats->queue_trims, video->slow_handoffs,
-                               stats->input_gap_us, stats->callback_gap_us};
+                               stats.concealments, stats.queue_trims, video->slow_handoffs,
+                               stats.input_gap_us, stats.callback_gap_us};
     DWORD words = video->stats_version == 3 ? 14 : (video->stats_version == 2 ? 8 : 5);
     write_all(video, packet, words * sizeof(uint32_t));
     ReleaseSRWLockExclusive(&video->writer);

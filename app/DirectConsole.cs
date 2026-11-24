@@ -170,19 +170,19 @@ namespace Cadrivect
             }
             return ids.Count==1 ? ids.First() : "";
         }
-        static List<DirectConsole> Registrations()
+        static List<DirectConsole> Registrations(string registryRoot=@"Software\Chiaki")
         {
             var result=new List<DirectConsole>();
             if(Directory.Exists(DirectoryPath)) foreach(var path in Directory.GetFiles(DirectoryPath,"*.json")) {
                 try {
                     var row=new JavaScriptSerializer().Deserialize<DirectConsole>(File.ReadAllText(path));
                     if(row!=null && row.Mac!=null && row.Mac.Length==12 && !string.IsNullOrEmpty(row.ProtectedKeys)) result.Add(row);
-                } catch(ArgumentException) {} catch(IOException) {} catch(InvalidOperationException) {}
+                } catch(ArgumentException) {} catch(IOException) {} catch(InvalidOperationException) {} catch(UnauthorizedAccessException) {}
             }
             // Import existing pairing metadata on demand. Read keys only when starting that console.
-            using(var org=Registry.CurrentUser.OpenSubKey(@"Software\Chiaki")) {
+            using(var org=Registry.CurrentUser.OpenSubKey(registryRoot)) {
                 if(org!=null) foreach(string profile in org.GetSubKeyNames().OrderBy(n=>n=="Chiaki"?0:1)) {
-                    string prefix=@"Software\Chiaki\"+profile;
+                    string prefix=registryRoot+"\\"+profile;
                     using(var registered=Registry.CurrentUser.OpenSubKey(prefix+@"\registered_hosts"))
                     using(var settings=Registry.CurrentUser.OpenSubKey(prefix+@"\settings"))
                     using(var manual=Registry.CurrentUser.OpenSubKey(prefix+@"\manual_hosts")) {
@@ -193,7 +193,9 @@ namespace Cadrivect
                             if(r!=null) addresses[Hex(QtBytes(r.GetValue("registered_mac")))]=Convert.ToString(r.GetValue("host"));
                         }
                         foreach(string id in registered.GetSubKeyNames()) using(var r=registered.OpenSubKey(id)) {
-                            if(r==null || Convert.ToInt32(r.GetValue("target",0))<1000000) continue;
+                            int target;
+                            if(r==null || !int.TryParse(Convert.ToString(r.GetValue("target"),System.Globalization.CultureInfo.InvariantCulture),
+                                System.Globalization.NumberStyles.Integer,System.Globalization.CultureInfo.InvariantCulture,out target) || target<1000000) continue;
                             string mac=Hex(QtBytes(r.GetValue("server_mac")));
                             if(mac.Length!=12) continue;
                             string host; addresses.TryGetValue(mac,out host);

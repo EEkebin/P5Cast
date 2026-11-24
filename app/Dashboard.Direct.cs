@@ -19,6 +19,7 @@ namespace Cadrivect
         NetworkPlayer network;
         DirectDiagnostics directDiagnostics;
         bool firstFrame;
+        bool outputChangedBeforeFirstFrame;
         bool stopRequested;
         long transportOperation;
         CancellationTokenSource preparingConnection;
@@ -120,6 +121,8 @@ namespace Cadrivect
         void UpdateOutput()
         {
             if(rendering!=null && !restoringSwitch) {
+                // The worker may not have installed the session when the user changes output.
+                if(!firstFrame) {outputChangedBeforeFirstFrame=true; return;}
                 engine.ConfigureOutput(resolutionIds[UI<ComboBox>("RenderResolution").SelectedIndex],hdrIds[UI<ComboBox>("HdrOutput").SelectedIndex]);
                 TrackSwitch(SwitchControl.Output);
             }
@@ -168,7 +171,9 @@ namespace Cadrivect
                 TrackPresentedSwitch(snapshot);
                 if(!firstFrame && Field(snapshot,"presented")!="0" && Field(snapshot,"presented")!="") {
                     string label=source=="Demo"?"Offline demo":source=="Direct"?"PS5 connected":"Sony Remote Play";
-                    firstFrame=true; surface.HasPresentedVideo=true; EndTransportOperation(); UpdateTransport(); Show(label);
+                    firstFrame=true; surface.HasPresentedVideo=true;
+                    if(outputChangedBeforeFirstFrame) {outputChangedBeforeFirstFrame=false; UpdateOutput();}
+                    EndTransportOperation(); UpdateTransport(); Show(label);
                 }
             }
         }
@@ -204,7 +209,7 @@ namespace Cadrivect
             if(!requestingRest) EndTransportOperation();
             if(preparingConnection!=null) {preparingConnection.Dispose(); preparingConnection=null;}
             ReleaseStreamAudio();
-            preparing=stopping=false;
+            preparing=stopping=outputChangedBeforeFirstFrame=false;
             sourceAspect=0; UpdateWipeInput();
             playingMac=playingPipe=null; EndDiscordSession();
             if(!requestingRest) closeAfterStop=false;
@@ -325,6 +330,7 @@ namespace Cadrivect
         }
         static string CoreError(int code)
         {
+            if(code==29) return "The console audio format could not be decoded. Reconnect to negotiate the stream again.";
             if(code==24 || code==25) return "The PS5 requires its user login PIN. Unlock the active console profile and reconnect.";
             if(code==28) return "The Direct audio volume control could not open. Reconnect to start the session.";
             if(code==26) return "The audio output could not start. Select an available Windows playback device and reconnect.";

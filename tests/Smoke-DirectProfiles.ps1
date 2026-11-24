@@ -79,6 +79,19 @@ namespace Cadrivect {
             Require(select(new string[]{null,"invalid"})=="","Invalid IDs");
             Require(select(new string[]{a," "+a+" "})==a,"Repeated ID");
             Require(select(new string[]{a,Convert.ToBase64String(new byte[8])})=="","Ambiguous IDs");
+            string registryRoot=@"Software\P5Cast.ProfileTest."+Guid.NewGuid().ToString("N");
+            using(var org=Microsoft.Win32.Registry.CurrentUser.CreateSubKey(registryRoot)) {
+                try {
+                    using(var bad=org.CreateSubKey(@"Chiaki\registered_hosts\1")) bad.SetValue("target","damaged");
+                    using(var good=org.CreateSubKey(@"Chiaki\registered_hosts\2")) {
+                        good.SetValue("target",1000000);
+                        good.SetValue("server_mac",new byte[]{1,2,3,4,5,6});
+                    }
+                    var import=typeof(DirectConsole).GetMethod("Registrations",BindingFlags.NonPublic|BindingFlags.Static);
+                    var items=(System.Collections.Generic.List<DirectConsole>)import.Invoke(null,new object[]{registryRoot});
+                    Require(items.Count==1 && items[0].Mac=="010203040506","A damaged import must not hide a usable console");
+                } finally {Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(registryRoot);}
+            }
             foreach(string host in new string[]{"failed.invalid","truncated.invalid"}) {
                 bool failed=false;
                 try {DirectConsole.Pair(host,a,"0123 4567").GetAwaiter().GetResult();} catch(InvalidOperationException){failed=true;}

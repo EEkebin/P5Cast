@@ -428,6 +428,7 @@ internal static class Player
                                         +",\"loupeScale\":"+Number(loupe==null ? 1 : loupe.Scale)
                                         +",\"effectNotice\":"+JsonString(settingsNotice ?? (!string.IsNullOrEmpty(renderer.FrameGenerationNotice) ? renderer.FrameGenerationNotice : string.IsNullOrEmpty(renderer.EffectNotice) ? renderer.OutputNotice : renderer.EffectNotice))+",\"compare\":"+(compare ? "true":"false")
                                         +",\"wipeGripState\":"+gripState+",\"wipeGripScale\":"+Number(gripScale)+",\"wipeHorizontal\":"+(wipeHorizontal ? "true" : "false")+",\"wipePosition\":"+wipePosition.ToString("R",CultureInfo.InvariantCulture)+",\"comparisonView\":"+JsonString(comparisonView)+",\"sampleId\":"+(++sampleId)+",\"elapsedMs\":"+Number(now)+",\"display\":"+JsonString(renderer.DisplayName)
+                                        +",\"sampleUtc\":"+JsonString(DateTime.UtcNow.ToString("o",CultureInfo.InvariantCulture))
                                         +",\"hdrEnabled\":"+(renderer.HdrEnabled ? "true":"false")
                                         +",\"frameGenerationProvider\":"+JsonString(generation)+",\"resolution\":"+JsonString(resolution)+",\"hdrMode\":"+JsonString(hdr)
                                         +Telemetry(renderer,decoded,targetFps,compare ? 1:multiplier,lastRealAge,demo)+"}";
@@ -452,7 +453,7 @@ internal static class Player
                                 Size surfaceSize=host==null ? window.ClientSize:host.ClientSize;
                                 if(renderer.UpdateWindowSize(surfaceSize,true)) redraw=true;
                                 double timestamp;
-                                bool deduplicate=multiplier>1 || testing || vendor;
+                                bool deduplicate=testing || (!compare && (multiplier>1 || vendor));
                                 bool fresh=demo ? offline.Read(renderer,out timestamp) : direct ? decoded.Read(renderer,deduplicate,out timestamp) : capture.Read(renderer,deduplicate,out timestamp);
                                 repaintPending|=redraw || presentedSettingsRevision!=settingsRevision;
                                 if(fresh)

@@ -137,12 +137,11 @@ static int run(Direct *core, const char *pipe_name, ChiakiConnectInfo *info)
             if (gamepad_tick(&core->gamepad)) chiaki_session_set_controller_state(&core->session, &core->gamepad.current);
             LONG rumble = InterlockedExchange(&core->rumble, 0);
             if (rumble && core->gamepad.pad) SDL_GameControllerRumble(core->gamepad.pad, ((rumble >> 8) & 255) * 257, (rumble & 255) * 257, 500);
-            if (InterlockedCompareExchange(&core->audio.failed, 0, 0)) { finish(core, 26); break; }
+            LONG audio_error = InterlockedCompareExchange(&core->audio.failed, 0, 0);
+            if (audio_error) { finish(core, audio_error); break; }
             if (GetTickCount64() >= next_stats) {
-                DirectMetrics stats = {0};
-                audio_stats(&core->audio, GetTickCount64(), &stats);
-                stats.rtt_us = (uint32_t)InterlockedCompareExchange(&core->rtt_us, 0, 0);
-                video_stats(&core->video, &stats);
+                uint32_t rtt_us = (uint32_t)InterlockedCompareExchange(&core->rtt_us, 0, 0);
+                video_stats(&core->video, &core->audio, GetTickCount64(), rtt_us);
                 next_stats = GetTickCount64() + 1000;
             }
         }

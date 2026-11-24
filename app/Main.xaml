@@ -303,6 +303,12 @@
         </Grid>
         <DockPanel Name="TransportBar" Grid.Row="1" LastChildFill="False" VerticalAlignment="Center">
           <Button DockPanel.Dock="Left" Name="OpenSource" Width="46" Height="34" Padding="0" ToolTipService.ShowOnDisabled="True" Style="{StaticResource Primary}"/>
+          <Button DockPanel.Dock="Left" Name="RestartStream" Width="34" MinWidth="34" Height="34" Padding="0"
+                  Margin="0,0,6,0" IsEnabled="False" AutomationProperties.Name="Restart stream"
+                  ToolTip="Restart stream with current settings" ToolTipService.ShowOnDisabled="True">
+            <Path Data="M14,6 A6,6 0 1 0 14,11 M14,1.5 V6 H9.5" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                  StrokeThickness="1.6" StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Stretch="None"/>
+          </Button>
           <ComboBox DockPanel.Dock="Left" Name="SourceChoice" Padding="6,4" VerticalContentAlignment="Center" Width="142" Margin="0,0,10,0"/>
           <Grid DockPanel.Dock="Left" Margin="0,0,6,0">
             <Button Name="OpenVolume" Style="{StaticResource TitleAction}" Padding="6,0" MinWidth="32"
@@ -425,6 +431,10 @@
                     <WrapPanel Margin="0,0,0,9"><Button Name="AddConsole" Content="Add console"/><Button Name="WakeConsole" Content="Wake PS5" ToolTip="Wake the paired PS5 from rest mode without starting a stream."/></WrapPanel>
                     <WrapPanel><TextBlock Text="When I disconnect" VerticalAlignment="Center" Margin="0,0,10,0"/><ComboBox Name="StopBehavior" Width="182" ToolTip="Applies when stopping a Direct session or closing P5Cast. Remembered separately for each paired console."/></WrapPanel>
                     <CheckBox Name="DualSenseFeedback" Content="DualSense feedback" Margin="0,10,0,0" ToolTip="Enable game-controlled adaptive triggers and supported haptics on your next Direct to PS5 connection."/>
+                    <WrapPanel Margin="0,8,0,0">
+                      <Label Content="Touchpad" Target="{Binding ElementName=DirectTouchpad}" VerticalAlignment="Center" Padding="0,0,10,0" Foreground="{DynamicResource Theme.Text}"/>
+                      <ComboBox Name="DirectTouchpad" Width="192" ToolTip="Applies on your next Direct connection. Choose gestures for games that use swipes."/>
+                    </WrapPanel>
                   </StackPanel>
                 </Grid>
                 <StackPanel Name="StreamSettings" Visibility="Collapsed">

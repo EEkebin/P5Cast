@@ -48,6 +48,7 @@ typedef struct {
     SDL_GameController *pad;
     ChiakiControllerState current;
     int8_t touches[2];
+    bool forward_contacts;
     uint64_t next_scan;
     SRWLOCK feedback_lock;
     ChiakiTriggerEffectsEvent triggers;
@@ -85,6 +86,7 @@ void audio_frame(int16_t *pcm, size_t samples, void *user);
 void SDLCALL audio_render(void *user, Uint8 *stream, int length);
 void audio_stats(Audio *audio, uint64_t now_ms, DirectMetrics *metrics);
 void gamepad_init(Gamepad *gamepad);
+void gamepad_contact(Gamepad *pad, ChiakiControllerState *state, int finger, bool down, float x, float y);
 bool gamepad_tick(Gamepad *gamepad);
 bool gamepad_is_dualsense(SDL_GameController *pad);
 void gamepad_feedback_event(Gamepad *pad, const ChiakiEvent *event);

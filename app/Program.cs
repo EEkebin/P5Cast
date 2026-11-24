@@ -25,7 +25,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.30.1.0")]
+[assembly: AssemblyVersion("0.30.2.0")]
 
 namespace Cadrivect
 {
@@ -246,6 +246,10 @@ namespace Cadrivect
             var dualSenseFeedback=UI<CheckBox>("DualSenseFeedback");
             dualSenseFeedback.IsChecked=!Field(saved,"dualSenseFeedback").Equals("False",StringComparison.OrdinalIgnoreCase);
             dualSenseFeedback.Click+=delegate {SaveSettings();};
+            var touchpad=UI<ComboBox>("DirectTouchpad");
+            touchpad.ItemsSource=new[]{"Physical click only","Clicks and touch gestures"};
+            touchpad.SelectedIndex=Field(saved,"touchpadGestures").Equals("True",StringComparison.OrdinalIgnoreCase)?1:0;
+            touchpad.SelectionChanged+=delegate {if(window.IsLoaded) SaveSettings();};
             var directRate=UI<ComboBox>("DirectBitrate");
             directRate.ItemsSource=directRates.Select(rate=>rate+" Mbps").ToArray();
             directRate.SelectedIndex=SavedChoiceIndex(saved,"directMbps",directRates,100);
@@ -289,6 +293,7 @@ namespace Cadrivect
                 if(Active || preparing) await UserStop(); else await StartPlayback();
             };
             UI<Button>("Fullscreen").Click+=delegate {ToggleFullscreen();};
+            UI<Button>("RestartStream").Click+=async delegate {await RestartStream();};
             playbackKey=async delegate(object sender,KeyEventArgs e) {
                 bool chord=(Keyboard.Modifiers & (ModifierKeys.Control|ModifierKeys.Alt))==(ModifierKeys.Control|ModifierKeys.Alt);
                 var key=e.Key==Key.System?e.SystemKey:e.Key;
@@ -679,6 +684,7 @@ namespace Cadrivect
                     display=SelectedDisplayName(), uiScale=PreferredScalePercent,theme=themeId, resolution=UI<ComboBox>("RenderResolution").SelectedIndex,hdr=preferredHdr,renderer=SelectedRenderer,
                     directSdrCodec=UI<ComboBox>("DirectSdrCodec").SelectedIndex==1?"h264":"hevc",
                     dualSenseFeedback=UI<CheckBox>("DualSenseFeedback").IsChecked==true,
+                    touchpadGestures=UI<ComboBox>("DirectTouchpad").SelectedIndex==1,
                     useOpenNr=meter.UseOpenNr,openNrModelDirectory=openNrModelDirectory,
                     maximized=(fullscreen?previousWindowState:window.WindowState)==WindowState.Maximized,
                     clientHdr=UI<CheckBox>("ClientHdr").IsChecked==true,hostDisplay=hostTarget==null ? "" : hostTarget.DeviceName,

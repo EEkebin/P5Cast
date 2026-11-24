@@ -85,6 +85,21 @@ static uint8_t trigger(SDL_GameController *pad, SDL_GameControllerAxis axis)
     return value <= 0 ? 0 : (uint8_t)((value * 255 + 16383) / 32767);
 }
 
+// Some games interpret a Remote Play contact as a click. In click-only mode
+// leave the contact slots idle; the physical button is mapped independently.
+void gamepad_contact(Gamepad *pad, ChiakiControllerState *state, int finger, bool down, float x, float y)
+{
+    if (!pad->forward_contacts) return;
+    if (down) {
+        uint16_t px = (uint16_t)(x * 1919), py = (uint16_t)(y * 1079);
+        if (pad->touches[finger] < 0) pad->touches[finger] = chiaki_controller_state_start_touch(state, px, py);
+        else chiaki_controller_state_set_touch_pos(state, (uint8_t)pad->touches[finger], px, py);
+    } else if (pad->touches[finger] >= 0) {
+        chiaki_controller_state_stop_touch(state, (uint8_t)pad->touches[finger]);
+        pad->touches[finger] = -1;
+    }
+}
+
 bool gamepad_tick(Gamepad *pad)
 {
     SDL_Event event;
@@ -123,14 +138,7 @@ bool gamepad_tick(Gamepad *pad)
         Uint8 down = 0;
         float x = 0, y = 0;
         if (SDL_GameControllerGetTouchpadFinger(pad->pad, 0, finger, &down, &x, &y, NULL) < 0) continue;
-        if (down) {
-            uint16_t px = (uint16_t)(x * 1919), py = (uint16_t)(y * 1079);
-            if (pad->touches[finger] < 0) pad->touches[finger] = chiaki_controller_state_start_touch(&state, px, py);
-            else chiaki_controller_state_set_touch_pos(&state, (uint8_t)pad->touches[finger], px, py);
-        } else if (pad->touches[finger] >= 0) {
-            chiaki_controller_state_stop_touch(&state, (uint8_t)pad->touches[finger]);
-            pad->touches[finger] = -1;
-        }
+        gamepad_contact(pad, &state, finger, down, x, y);
     }
     if (!chiaki_controller_state_equals(&state, &pad->current)) {
         pad->current = state;

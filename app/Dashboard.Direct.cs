@@ -21,6 +21,7 @@ namespace Cadrivect
         bool firstFrame;
         bool outputChangedBeforeFirstFrame;
         bool stopRequested;
+        TaskCompletionSource<bool> restartDisconnect;
         long transportOperation;
         CancellationTokenSource preparingConnection;
 
@@ -103,7 +104,8 @@ namespace Cadrivect
             AutomationProperties.SetName(button,action);
             AutomationProperties.SetItemStatus(button,state);
             glyph.SetState(ending || connecting ? TransportGlyph.Shape.Spinner : Active ? TransportGlyph.Shape.Stop : TransportGlyph.Shape.Play);
-            bool canSelect=!preparing && !Active && !OperationOpen;
+            UI<Button>("RestartStream").IsEnabled=CanRestartStream;
+            bool canSelect=!preparing && !Active && !OperationOpen && restartDisconnect==null;
             UI<ComboBox>("VideoRenderer").IsEnabled=canSelect;
             UI<ComboBox>("ConsolePicker").IsEnabled=canSelect;
             UI<TextBox>("ConsoleAddress").IsEnabled=canSelect;
@@ -192,6 +194,33 @@ namespace Cadrivect
                 }
             }
         }
+        bool CanRestartStream {
+            get {return restartDisconnect==null && !closing && !preparing && !stopping && !requestingRest &&
+                pendingStop==null && !OperationOpen && !StopPromptOpen && firstFrame &&
+                (rendering!=null || (network!=null && network.HasVideo));}
+        }
+
+        async Task RestartStream()
+        {
+            if(!CanRestartStream) return;
+            bool reconnectHost=network!=null;
+            var disconnected=new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            restartDisconnect=disconnected;
+            try {
+                transportOperation=BeginOperation("Restarting stream","Disconnecting before reconnecting…",null);
+                // Restart never requests rest or changes the remembered Stop choice.
+                StopPlayback();
+                if(!await disconnected.Task || closing) return;
+                restartDisconnect=null;
+                if(reconnectHost) await StartNetwork(false);
+                else await StartPlayback();
+            } catch(Exception error) {Show(error.GetBaseException().Message,true);}
+            finally {
+                if(restartDisconnect==disconnected) restartDisconnect=null;
+                UpdateTransport();
+            }
+        }
+
         void StopPlayback()
         {
             if(stopRequested && stopping) return;
@@ -210,11 +239,12 @@ namespace Cadrivect
         async void EndNetwork(NetworkPlayer owned)
         {
             UpdateTransport();
-            try {await owned.StopAsync(); Show("Disconnected");}
+            bool clean=false;
+            try {await owned.StopAsync(); clean=true; Show("Disconnected");}
             catch(Exception error) {Show(error.GetBaseException().Message,true);}
-            finally {if(network==owned) {network=null; Finish();}}
+            finally {if(network==owned) {network=null; Finish(clean);}}
         }
-        void Finish()
+        void Finish(bool clean=true)
         {
             if(directDiagnostics!=null) {directDiagnostics.Finish(); directDiagnostics=null;}
             EndSwitchTracking();
@@ -234,6 +264,7 @@ namespace Cadrivect
             SyncIdleColor();
             meter.SetRequestedVideoKbps(source=="Direct"?DirectKbps():0); surface.Clear(); UpdateTransport();
             if(closing) QueueWindowClose();
+            if(restartDisconnect!=null) restartDisconnect.TrySetResult(clean && !closing);
         }
         async Task StartPlayback()
         {
@@ -265,7 +296,7 @@ namespace Cadrivect
                     args.AddRange(new[]{"--direct-pipe",pipe,"--direct-runtime",runtime,"--target-fps",fps.ToString()});
                     sessionVideoKbps=DirectKbps();
                     directCore=console.Connect(pipe,address,codec,fps,sessionVideoKbps,DirectStreamHeight(),EffectiveStreamVolume,
-                        UI<CheckBox>("DualSenseFeedback").IsChecked==true);
+                        UI<CheckBox>("DualSenseFeedback").IsChecked==true,UI<ComboBox>("DirectTouchpad").SelectedIndex==1);
                     playingMac=console.Mac; playingPipe=pipe; titleAddress=address;
                     TransportProgress("Connecting to "+console.Name+"…");
                 } else if(source=="Demo") {
@@ -303,7 +334,7 @@ namespace Cadrivect
                 }
             } catch(Exception e) {failure=e.GetBaseException().Message;}
             finally {
-                rendering=null; Finish();
+                rendering=null; Finish(failure.Length==0);
                 Show(failure.Length>0?failure:"Disconnected",failure.Length>0);
             }
         }

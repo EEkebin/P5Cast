@@ -125,6 +125,8 @@ static int run(Direct *core, const char *pipe_name, ChiakiConnectInfo *info)
     if (SDL_Init(SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) < 0) return 22;
     if (chiaki_lib_init() != CHIAKI_ERR_SUCCESS) return 22;
     gamepad_init(&core->gamepad);
+    const char *gestures = getenv("P5CAST_TOUCHPAD_GESTURES");
+    core->gamepad.forward_contacts = gestures && !strcmp(gestures, "1");
     gamepad_tick(&core->gamepad);
     info->enable_dualsense = feedback && (!core->gamepad.pad || gamepad_is_dualsense(core->gamepad.pad));
     ChiakiLog log;

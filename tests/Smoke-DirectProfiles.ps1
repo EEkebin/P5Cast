@@ -27,6 +27,7 @@ namespace Cadrivect {
                 Console.OpenStandardInput().CopyTo(buffer); var request=buffer.ToArray();
                 if(args[0]!="--register") {
                     if(Environment.GetEnvironmentVariable("P5CAST_DUALSENSE_FEEDBACK")!=(args[0]=="AudioVolume"?"0":"1")) return 43;
+                    if(Environment.GetEnvironmentVariable("P5CAST_TOUCHPAD_GESTURES")!=(args[0]=="AudioVolume"?"1":"0")) return 44;
                     string expected=args[0]=="Cadrivect-BitrateFixture" ? "100000" : "0";
                     string height=args[0]=="Cadrivect-BitrateFixture" ? "720" : "1080";
                     if(args.Length!=7 || args[3]!="60" || args[4]!=expected || args[5]!=height || args[6]!=(args[0]=="AudioVolume"?"--session-control":"--rest-control") || !request.SequenceEqual(dummyKeys)) return 41;
@@ -128,7 +129,7 @@ namespace Cadrivect {
             using(var child=row.Connect("Cadrivect-BitrateFixture","fixture.invalid",2,60,100000,720)) {
                 Require(child.WaitForExit(4000) && child.ExitCode==0,"Explicit bitrate did not reach the helper");
             }
-            using(var child=row.Connect("AudioVolume","fixture.invalid",2,60,0,1080,0,false)) {
+            using(var child=row.Connect("AudioVolume","fixture.invalid",2,60,0,1080,0,false,true)) {
                 using(var ready=new EventWaitHandle(false,EventResetMode.ManualReset,"Local\\P5Cast.VolumeFixture."+child.Id))
                     Require(ready.WaitOne(4000),"Saved mute available before the first audio frame");
                 DirectConsole.SetVolume(child,35);

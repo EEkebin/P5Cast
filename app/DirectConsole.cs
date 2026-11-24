@@ -243,7 +243,7 @@ namespace Cadrivect
                 throw new ArgumentException("Enter the PS5’s LAN address or DNS name.");
             return s;
         }
-        static Process Begin(string args,bool captureOutput,bool? dualSenseFeedback=null)
+        static Process Begin(string args,bool captureOutput,bool? dualSenseFeedback=null,bool touchpadGestures=false)
         {
             if(!File.Exists(CorePath)) throw new FileNotFoundException("The direct streaming engine is missing. Extract the complete P5Cast release.");
             var info=new ProcessStartInfo(CorePath,args) {WorkingDirectory=Path.GetDirectoryName(CorePath),UseShellExecute=false,
@@ -251,6 +251,7 @@ namespace Cadrivect
             if(dualSenseFeedback.HasValue) {
                 info.EnvironmentVariables["P5CAST_DIRECT_STATS_VERSION"]="3";
                 info.EnvironmentVariables["P5CAST_DUALSENSE_FEEDBACK"]=dualSenseFeedback.Value ? "1" : "0";
+                info.EnvironmentVariables["P5CAST_TOUCHPAD_GESTURES"]=touchpadGestures ? "1" : "0";
             }
             return Process.Start(info);
         }
@@ -270,7 +271,7 @@ namespace Cadrivect
             return Connect(pipe,host,codec,fps,videoKbps,streamHeight,null);
         }
 
-        internal Process Connect(string pipe,string host,int codec,int fps,int videoKbps,int streamHeight,int? volume,bool dualSenseFeedback=true)
+        internal Process Connect(string pipe,string host,int codec,int fps,int videoKbps,int streamHeight,int? volume,bool dualSenseFeedback=true,bool touchpadGestures=false)
         {
             if(Array.IndexOf(StreamHeights,streamHeight)<0)
                 throw new ArgumentOutOfRangeException("streamHeight","Choose a supported PS5 stream resolution.");
@@ -283,7 +284,7 @@ namespace Cadrivect
             byte[] secret=Keys(); Process p=null;
             try {
                 if(secret.Length!=32 && secret.Length!=36) throw new InvalidDataException("This registration needs to be paired again.");
-                p=Begin(arguments,true,dualSenseFeedback);
+                p=Begin(arguments,true,dualSenseFeedback,touchpadGestures);
                 var control=new RestControl(pipe,p.Id,volume);
                 try {
                     restControls.Add(p,control);

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-AGPL-3.0-only-OpenSSL
 #include "Direct.h"
+#include <chiaki/feedback.h>
 #include "Haptics.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -427,6 +428,45 @@ static void verify_triggers(Gamepad *pad)
     }
 }
 
+static void verify_touchpad(Gamepad *pad, SDL_Joystick *joy)
+{
+    ChiakiControllerState idle = pad->current, touched = idle;
+    ChiakiFeedbackHistoryBuffer history;
+    CHECK(chiaki_feedback_history_buffer_init(&history, 16) == CHIAKI_ERR_SUCCESS);
+    // Resting, swiping, two fingers, and lifting must all be silent on the wire.
+    gamepad_contact(pad, &touched, 0, true, .1f, .5f);
+    gamepad_contact(pad, &touched, 1, true, .5f, .5f);
+    gamepad_contact(pad, &touched, 0, true, .9f, .5f);
+    CHECK(!chiaki_feedback_history_buffer_record_state(&history, NULL, &idle, &touched, NULL, NULL));
+    gamepad_contact(pad, &touched, 0, false, 0, 0);
+    gamepad_contact(pad, &touched, 1, false, 0, 0);
+    CHECK(chiaki_controller_state_equals(&idle, &touched) && !history.len);
+    SDL_GameControllerButtonBind binding = SDL_GameControllerGetBindForButton(pad->pad, SDL_CONTROLLER_BUTTON_TOUCHPAD);
+    CHECK(binding.bindType == SDL_CONTROLLER_BINDTYPE_BUTTON);
+    CHECK(SDL_JoystickSetVirtualButton(joy, binding.value.button, SDL_PRESSED) == 0 && gamepad_tick(pad));
+    CHECK(pad->current.buttons == CHIAKI_CONTROLLER_BUTTON_TOUCHPAD);
+    CHECK(chiaki_feedback_history_buffer_record_state(&history, NULL, &idle, &pad->current, NULL, NULL));
+    CHECK(history.len == 1 && history.events[history.begin].buf[1] == 0xb1);
+    ChiakiControllerState pressed = pad->current;
+    CHECK(SDL_JoystickSetVirtualButton(joy, binding.value.button, SDL_RELEASED) == 0 && gamepad_tick(pad));
+    CHECK(chiaki_feedback_history_buffer_record_state(&history, NULL, &pressed, &pad->current, NULL, NULL));
+    CHECK(history.len == 2 && history.events[history.begin].buf[1] == 0x91);
+    pad->forward_contacts = true;
+    gamepad_contact(pad, &touched, 0, true, .1f, .5f);
+    CHECK(chiaki_feedback_history_buffer_record_state(&history, NULL, &idle, &touched, NULL, NULL));
+    CHECK(!touched.buttons && history.len == 3 && history.events[history.begin].buf[0] == 0xd0);
+    ChiakiControllerState previous = touched;
+    gamepad_contact(pad, &touched, 0, true, .9f, .5f);
+    CHECK(chiaki_feedback_history_buffer_record_state(&history, NULL, &previous, &touched, NULL, NULL));
+    CHECK(history.len == 4 && history.events[history.begin].buf[0] == 0xd0);
+    previous = touched;
+    gamepad_contact(pad, &touched, 0, false, 0, 0);
+    CHECK(chiaki_feedback_history_buffer_record_state(&history, NULL, &previous, &touched, NULL, NULL));
+    CHECK(history.len == 5 && history.events[history.begin].buf[0] == 0xc0);
+    chiaki_feedback_history_buffer_fini(&history);
+    puts("Verified touch-only silence, physical touchpad press/release, and optional gesture packets.");
+}
+
 static void verify_virtual_pad(void)
 {
     SDL_SetHintWithPriority(SDL_HINT_JOYSTICK_HIDAPI, "0", SDL_HINT_OVERRIDE);
@@ -435,8 +475,20 @@ static void verify_virtual_pad(void)
     SDL_SetHintWithPriority(SDL_HINT_XINPUT_ENABLED, "0", SDL_HINT_OVERRIDE);
     SDL_SetHintWithPriority(SDL_HINT_DIRECTINPUT_ENABLED, "0", SDL_HINT_OVERRIDE);
     CHECK(SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) == 0);
-    int index = SDL_JoystickAttachVirtual(SDL_JOYSTICK_TYPE_GAMECONTROLLER, SDL_CONTROLLER_AXIS_MAX, SDL_CONTROLLER_BUTTON_MAX, 0);
+    SDL_VirtualJoystickDesc desc = {0};
+    desc.version = SDL_VIRTUAL_JOYSTICK_DESC_VERSION;
+    desc.type = SDL_JOYSTICK_TYPE_GAMECONTROLLER;
+    desc.naxes = SDL_CONTROLLER_AXIS_MAX;
+    desc.nbuttons = SDL_CONTROLLER_BUTTON_MAX;
+    desc.button_mask = (1u << SDL_CONTROLLER_BUTTON_MAX) - 1;
+    desc.axis_mask = (1u << SDL_CONTROLLER_AXIS_MAX) - 1;
+    int index = SDL_JoystickAttachVirtualEx(&desc);
     CHECK(index >= 0 && SDL_JoystickIsVirtual(index));
+    // SDL's generic virtual mapping omits the optional physical touchpad switch.
+    char guid[33], mapping[256];
+    SDL_JoystickGetGUIDString(SDL_JoystickGetDeviceGUID(index), guid, sizeof(guid));
+    snprintf(mapping, sizeof(mapping), "%s,Touchpad fixture,a:b0,start:b6,touchpad:b20,leftx:a0,righttrigger:a5,platform:Windows,", guid);
+    CHECK(SDL_GameControllerAddMapping(mapping) >= 0);
     Gamepad pad = {0};
     gamepad_init(&pad);
     pad.pad = SDL_GameControllerOpen(index);
@@ -445,6 +497,7 @@ static void verify_virtual_pad(void)
     gamepad_apply_feedback(&pad);
     CHECK(!pad.feedback_sent);
     SDL_Joystick *joy = SDL_GameControllerGetJoystick(pad.pad);
+    verify_touchpad(&pad, joy);
     CHECK(SDL_JoystickSetVirtualButton(joy, SDL_CONTROLLER_BUTTON_A, SDL_PRESSED) == 0);
     CHECK(SDL_JoystickSetVirtualButton(joy, SDL_CONTROLLER_BUTTON_START, SDL_PRESSED) == 0);
     CHECK(SDL_JoystickSetVirtualAxis(joy, SDL_CONTROLLER_AXIS_LEFTX, 14500) == 0);

@@ -30,6 +30,7 @@ try {
     $codec=$type.GetMethod('DirectCodec',$flags)
     $sdrCodec=Widget 'DirectSdrCodec'
     Require ((Widget DualSenseFeedback).IsChecked) 'DualSense feedback defaults on for profiles without a saved choice'
+    Require ((Widget DirectTouchpad).SelectedItem -eq 'Physical click only') 'Touchpad contacts are off by default'
     Require ($codec.Invoke($dash,@($false)) -eq 2) 'Default SDR codec must remain HEVC.'
     $sdrCodec.SelectedIndex=1
     Require ($codec.Invoke($dash,@($false)) -eq 1 -and $codec.Invoke($dash,@($true)) -eq 3) 'H.264 selection must apply only to SDR.'
@@ -348,6 +349,7 @@ try {
     Require (!$orientation.GetValue($meter)) 'Existing preferences open with a vertical divider'
     $orientation.SetValue($meter,$true)
     (Widget DualSenseFeedback).IsChecked=$false
+    (Widget DirectTouchpad).SelectedIndex=1
     Call SaveSettings
     $settingsFile=Join-Path $tmp 'LumaRelay\dashboard.json'
     $prior=[IO.File]::ReadAllText($settingsFile)
@@ -361,6 +363,7 @@ try {
     $restoredMeter=$type.GetField('meter','Instance,NonPublic').GetValue($reopened)
     Require ($orientation.GetValue($restoredMeter)) 'Horizontal divider survives reopening'
     Require (!$second.FindName('DualSenseFeedback').IsChecked) 'DualSense feedback opt-out survives reopening'
+    Require ($second.FindName('DirectTouchpad').SelectedIndex -eq 1) 'Touch gesture preference survives reopening'
     Require ($quality.GetValue($restoredMeter) -eq 'balanced') 'DLSS quality survives reopening'
     Require ($model.GetValue($restoredMeter) -eq 'm') 'DLSS model preference survives reopening'
     $model.SetValue($restoredMeter,'invalid')

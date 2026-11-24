@@ -92,9 +92,11 @@ internal static partial class WindowChromeProbe
     static void BeginDemoWithSpinner() {
         Require(Find<ComboBox>("SourceChoice").SelectedItem.ToString()=="Offline demo","Refusing to open a network source.");
         TransportState("Ready","Play",true);
+        Require(!Find<Button>("RestartStream").IsEnabled,"Restart must be unavailable before a stream connects.");
         PressTransport();
         CheckCancelableOperation("Starting offline playback");
         TransportState("Connecting","Spinner",true);
+        Require(!Find<Button>("RestartStream").IsEnabled,"Restart became available before the first frame.");
         var button=Find<Button>("OpenSource");
         Require(Peer(button).GetName().IndexOf("cancel",StringComparison.OrdinalIgnoreCase)>=0,"Connecting action must offer cancellation.");
         if(SystemParameters.ClientAreaAnimation) {
@@ -169,6 +171,52 @@ internal static partial class WindowChromeProbe
             "Cancelling Stop did not preserve the running stream.");
         Note("Cancelling a pending Stop kept the existing demo running.");
     }
+    static async Task CheckRestartStream(MethodInfo snapshot) {
+        Require(Equals(Find<ComboBox>("SourceChoice").SelectedItem,"Offline demo"),"Restart test requires the offline player.");
+        var restart=Find<Button>("RestartStream");
+        Require(restart.IsEnabled && !string.IsNullOrWhiteSpace(Peer(restart).GetName()),"Connected playback needs an accessible Restart action.");
+        var json=new System.Web.Script.Serialization.JavaScriptSerializer();
+        Func<System.Collections.Generic.Dictionary<string,object>> sample=()=>
+            json.Deserialize<System.Collections.Generic.Dictionary<string,object>>((string)snapshot.Invoke(null,null));
+        var active=snapshot.DeclaringType.GetField("current",BindingFlags.Static|BindingFlags.NonPublic);
+        var originalSession=active.GetValue(null);
+        Require(originalSession!=null,"The restart fixture needs a live renderer.");
+        var resolution=Find<ComboBox>("RenderResolution");
+        int prior=resolution.SelectedIndex;
+        resolution.SelectedIndex=prior==1 ? 2 : 1;
+        string requested=prior==1 ? "1080" : "720";
+        var history=Find<ListBox>("StatusHistoryList");
+        Func<int> starts=()=>history.Items.Cast<object>().Count(e=>
+            Equals(e.GetType().GetProperty("Message").GetValue(e,null),"Starting offline demo…"));
+        int initialStarts=starts();
+        var prompt=Find<FrameworkElement>("StopPanel");
+        bool prompted=prompt.IsVisible;
+        DependencyPropertyChangedEventHandler watchPrompt=delegate {prompted|=prompt.IsVisible;};
+        prompt.IsVisibleChanged+=watchPrompt;
+        try {
+            restart.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Require(!restart.IsEnabled,"Restart accepted input during session teardown.");
+            // Exercise the command guard in addition to the disabled control.
+            restart.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await Until(()=>restart.IsEnabled && Peer(Find<Button>("OpenSource")).GetItemStatus()=="Playing" &&
+                active.GetValue(null)!=null && !ReferenceEquals(active.GetValue(null),originalSession),
+                "Restart did not establish a new session and present a frame.",15000);
+            var replacement=active.GetValue(null);
+            var first=sample();
+            int presented=Convert.ToInt32(first["presented"]);
+            await Until(delegate {
+                var state=sample();
+                return state.ContainsKey("presented") && Convert.ToInt32(state["presented"])>presented &&
+                    Equals(state["resolution"],requested);
+            },"Restarted player did not present using the latest requested resolution.");
+            Require(!prompted && Video()==video && starts()==initialStarts+1 && ReferenceEquals(active.GetValue(null),replacement),
+                "Restart opened a Stop prompt, replaced the video HWND, or started more than one replacement.");
+        } finally {
+            prompt.IsVisibleChanged-=watchPrompt;
+            resolution.SelectedIndex=prior;
+        }
+        Note("Restart reused the video HWND, opened no Stop prompt, and applied the changed output target in one replacement session despite a duplicate click.");
+    }
     static async Task CheckCompletedStop() {
         var cancel=Find<Button>("CancelOperation");
         bool committed=false;
@@ -212,6 +260,7 @@ internal static partial class WindowChromeProbe
         TransportState("Playing","Stop",true);
         Note("Play morphed through a cancellable spinner to Stop. History showed real startup events, retained playback, and restored keyboard focus.");
         await CheckLiveSwitches(snapshot);
+        await CheckRestartStream(snapshot);
         await CheckCancelPendingStop(snapshot);
     }
 }

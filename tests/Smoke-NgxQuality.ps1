@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param([string]$PlayerExe,
-      [string]$Display,[switch]$MeasureOnly,[string]$OutputDirectory,[switch]$CheckNis)
+      [string]$Display,[switch]$MeasureOnly,[string]$OutputDirectory,[switch]$CheckNis,[switch]$CheckInterpolation)
 $ErrorActionPreference='Stop'
 if(!$PlayerExe){$PlayerExe=Join-Path (Split-Path $PSScriptRoot) 'engine\bin\CadrivectPlayer.exe'}
 $PlayerExe=(Resolve-Path -LiteralPath $PlayerExe).Path
@@ -20,10 +20,10 @@ try {
     }
     $exe=Join-Path $stage 'NgxQualityProbe.exe'
     $entry=if($CheckNis){'NisQualityRunner'}else{'NgxQualityRunner'}
-    & "$fx\csc.exe" /nologo /optimize+ /platform:x64 "/main:$entry" @refs "/out:$exe" "$PSScriptRoot\EmbeddedProbe.cs" "$PSScriptRoot\ComparisonProbe.cs" "$PSScriptRoot\NgxQualityProbe.cs" "$PSScriptRoot\NisQualityProbe.cs"
+    & "$fx\csc.exe" /nologo /optimize+ /platform:x64 "/main:$entry" @refs "/out:$exe" "$PSScriptRoot\EmbeddedProbe.cs" "$PSScriptRoot\ComparisonProbe.cs" "$PSScriptRoot\NgxQualityProbe.cs" "$PSScriptRoot\NisQualityProbe.cs" "$PSScriptRoot\InterpolationQualityProbe.cs"
     if($LASTEXITCODE){throw "Could not compile $entry."}
     if(!$Display){$Display='auto'}
-    $mode=if($MeasureOnly){'measure'}else{'verify'}
+    $mode=if($CheckInterpolation){'interpolation'}elseif($MeasureOnly){'measure'}else{'verify'}
     $crops=if($OutputDirectory){[IO.Path]::GetFullPath($OutputDirectory)}else{'-'}
     & $exe $PlayerExe $Display $mode $crops
     if($LASTEXITCODE){throw "$entry failed."}

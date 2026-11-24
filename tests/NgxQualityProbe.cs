@@ -465,13 +465,17 @@ internal static partial class EmbeddedProbe {
             bool hdrAvailable=advanced.Contains(name,StringComparer.OrdinalIgnoreCase);
             if(!hdrAvailable) Console.WriteLine("SDR only. Windows HDR is off on "+name+".");
             bool pass=true;
-            var capsType=assembly.GetType("GpuCapabilities",true);
-            var caps=capsType.GetMethod("ProbeForBackend").Invoke(null,new object[]{"d3d12"});
-            bool videoSr=(bool)capsType.GetMethod("Supports").Invoke(caps,new object[]{"rtxvideo"});
             using(var host=new VideoHost()) {
                 var window=new Window{WindowStyle=WindowStyle.None,ResizeMode=ResizeMode.NoResize,Left=screen.Bounds.Left+12,Top=screen.Bounds.Top+12,
                     Width=OutputW,Height=OutputH,ShowInTaskbar=false,Content=host};
                 window.Show(); Pump();
+                if(args[2]=="interpolation") {
+                    CheckInterpolation(type,host.Handle);
+                    window.Close();return 0;
+                }
+                var capsType=assembly.GetType("GpuCapabilities",true);
+                var caps=capsType.GetMethod("ProbeForBackend").Invoke(null,new object[]{"d3d12"});
+                bool videoSr=(bool)capsType.GetMethod("Supports").Invoke(caps,new object[]{"rtxvideo"});
                 foreach(bool hdr in hdrAvailable?new[]{false,true}:new[]{false})
                 using(var renderer=(IDisposable)Activator.CreateInstance(type,new object[]{host.Handle,new Size(OutputW,OutputH),Size.Empty,hdr?"hdr10":"off","original",true,"d3d12"})) {
                     Check((bool)type.GetProperty("PresenterHdr10").GetValue(renderer,null)==hdr,"Unexpected presentation format.");

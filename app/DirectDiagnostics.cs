@@ -13,7 +13,19 @@ namespace Cadrivect
     {
         static readonly string[] columns=("sampleId elapsedMs targetFps captured presented generated decodedFrames replacedFrames decoderCorruptUnits " +
             "sourceFps submittedFps decodeMs lastPcSubmitMs requestedVideoKbps bitrateMbps videoFramesLost slowVideoHandoffs " +
-            "audioQueueMs audioTargetMs audioUnderruns audioConcealments audioQueueTrims audioFrameGapMaxMs audioCallbackGapMaxMs").Split(' ');
+            "audioQueueMs audioTargetMs audioUnderruns audioConcealments audioQueueTrims audioFrameGapMaxMs audioCallbackGapMaxMs " +
+            "multiplier targetPresentedFps generatedFps displayRefreshHz inputWidth inputHeight outputWidth outputHeight " +
+            "displayedWidth displayedHeight nvidiaEvaluations nisEvaluations fsrEvaluations frucEvaluations frucMidpoints").Split(' ');
+        // Only renderer identifiers belong in a trace. Unknown values and free-form messages stay out.
+        static readonly string[] providers={"p5cast","amd","fruc"};
+        static readonly KeyValuePair<string,string[]>[] identifiers={
+            new KeyValuePair<string,string[]>("mode",PictureLabels.Ids),
+            new KeyValuePair<string,string[]>("effectivePictureMode",PictureLabels.Ids),
+            new KeyValuePair<string,string[]>("renderer",new[]{"d3d11","d3d12","vulkan","opengl","metal"}),
+            new KeyValuePair<string,string[]>("comparisonView",new[]{"original","enhanced","side-by-side","wipe"}),
+            new KeyValuePair<string,string[]>("frameGenerationProvider",providers),
+            new KeyValuePair<string,string[]>("activeFrameGenerationProvider",providers)
+        };
         readonly BlockingCollection<string> samples=new BlockingCollection<string>(32);
         readonly string directory;
         double lastId=-1;
@@ -30,7 +42,7 @@ namespace Cadrivect
             double id=PlaybackMeter.Number(snapshot,"sampleId");
             if(failed || !(id>lastId)) return;
             lastId=id;
-            var fields=new string[columns.Length+1];
+            var fields=new string[2+columns.Length+identifiers.Length];
             object rawUtc;
             DateTime sampleUtc;
             if(!snapshot.TryGetValue("sampleUtc",out rawUtc) ||
@@ -41,6 +53,15 @@ namespace Cadrivect
                 double value=PlaybackMeter.Number(snapshot,columns[i]);
                 if(!double.IsNaN(value)) fields[i+1]=value.ToString("R",CultureInfo.InvariantCulture);
             }
+            for(int i=0;i<identifiers.Length;i++) {
+                var field=identifiers[i];
+                object raw;
+                if(snapshot.TryGetValue(field.Key,out raw) && Array.IndexOf(field.Value,raw as string)>=0)
+                    fields[columns.Length+1+i]=(string)raw;
+            }
+            object hdr;
+            if(snapshot.TryGetValue("hdrEnabled",out hdr) && hdr is bool)
+                fields[fields.Length-1]=(bool)hdr ? "1" : "0";
             samples.TryAdd(string.Join(",",fields));
         }
 
@@ -68,7 +89,7 @@ namespace Cadrivect
                         var name="direct-"+DateTime.UtcNow.ToString("yyyyMMddTHHmmssfff",CultureInfo.InvariantCulture)+"-"+Guid.NewGuid().ToString("N")+".csv";
                         file=new StreamWriter(new FileStream(Path.Combine(directory,name),FileMode.CreateNew,FileAccess.Write,FileShare.Read));
                         file.AutoFlush=true;
-                        file.WriteLine("utc,"+string.Join(",",columns));
+                        file.WriteLine("utc,"+string.Join(",",columns.Concat(identifiers.Select(field=>field.Key)))+",hdrEnabled");
                         foreach(string old in Directory.GetFiles(directory,"direct-????????T?????????-????????????????????????????????.csv")
                             .Where(IsTraceFile).OrderByDescending(p=>p,StringComparer.Ordinal).Skip(4)) {
                             try {File.Delete(old);} catch(IOException) {} catch(UnauthorizedAccessException) {}

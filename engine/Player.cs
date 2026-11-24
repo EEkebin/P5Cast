@@ -330,12 +330,13 @@ internal static class Player
                             if(Array.IndexOf(args,"--controls")>=0) controls.Open();
                         }
                         var clock=Stopwatch.StartNew();
-                        double nextSample=0, previousTime=0, period=16.667, due=0, pairStart=0, lastSubmit=-1000;
+                        double nextSample=0, previousTime=0, period=16.667, lastDrawStart=-1000, lastSubmit=-1000;
                         bool repaintPending=false;
                         double lastRepaint=-1000;
                         bool verifyOutput=Array.IndexOf(args,"--verify-output")>=0;
                         double nextOutputSample=0;
-                        int step=0, count=1, drawTick=0;
+                        var pacing=new FramePacing();
+                        int drawTick=0;
                         double firstInput=0,lastInput=0,lastRealAge=-1;
                         double lastSnapshot=0,lastFile=0; int sampleId=0,snapshotInput=0,snapshotPresented=0,snapshotGenerated=0;
                         int presentedSettingsRevision=0;
@@ -374,19 +375,19 @@ internal static class Player
                                 string newModel=host==null ? null : Interlocked.Exchange(ref host.PendingDlssModel,null);
                                 if(newModel!=null && newModel!=renderer.DlssModelHint) {
                                     renderer.SetDlssModel(newModel);
-                                    if(mode=="dlss" || mode=="dlaa") {step=0; previousTime=0; redraw=true;}
+                                    if(mode=="dlss" || mode=="dlaa") {pacing.Reset(); previousTime=0; redraw=true;}
                                 }
                                 string newQuality=host==null ? null : Interlocked.Exchange(ref host.PendingDlssQuality,null);
                                 if(newQuality!=null && newQuality!=renderer.DlssQuality) {
                                     renderer.SetDlssQuality(newQuality);
-                                    if(mode=="dlss") {step=0; previousTime=0; redraw=true;}
+                                    if(mode=="dlss") {pacing.Reset(); previousTime=0; redraw=true;}
                                 }
                                 string newSize,newHdr;
                                 if(host!=null && host.TakeOutput(out newSize,out newHdr)) {
                                     try {
                                         renderer.SetOutput(DisplayTarget.ResolutionLimit(newSize ?? resolution),newHdr ?? hdr);
                                         resolution=newSize ?? resolution; hdr=newHdr ?? hdr; settingsNotice=null;
-                                        step=0; previousTime=0; redraw=true;
+                                        pacing.Reset(); previousTime=0; redraw=true;
                                     } catch(InvalidOperationException ex) { settingsNotice=ex.Message; }
                                 }
                                 if(direct && decoded.RecoveryTimedOut) throw new InvalidDataException(DirectVideo.RecoveryError);
@@ -405,7 +406,7 @@ internal static class Player
                                     multiplier=requestedMultiplier; vendor=Renderer.IsVendor(mode);
                                     renderer.ResetFrameHistory(); if(controls!=null) controls.Sync(mode,multiplier);
                                     renderer.SetSideBySide(comparisonView=="side-by-side");
-                                    step=0; previousTime=0; previousView=comparisonView;
+                                    pacing.Reset(); previousTime=0; previousView=comparisonView;
                                     redraw=true;
                                     requestedMode=null; changeRequested=false;
                                 }
@@ -448,7 +449,7 @@ internal static class Player
                                 }
                                 if((host==null ? window.WindowState==FormWindowState.Minimized:host.Hidden) || (captureWindow && WindowsApi.IsIconic(source)))
                                 {
-                                    Thread.Sleep(30); step=0; previousTime=0; continue;
+                                    Thread.Sleep(30); pacing.Reset(); previousTime=0; continue;
                                 }
                                 if(host==null ? window.ConsumeDisplayChange():host.ConsumeDisplayChange()) { renderer.InvalidateDisplay(); redraw=true; }
                                 Size surfaceSize=host==null ? window.ClientSize:host.ClientSize;
@@ -463,8 +464,9 @@ internal static class Player
                                     bool continuous=renderer.HasPrevious && elapsed>0 && elapsed<120;
                                     renderer.SetFrameTiming(elapsed,continuous);
                                     // Real images always take priority if the next capture arrived early.
-                                    if(step>0 && renderer.HasPrevious)
+                                    if(pacing.Pending && renderer.HasPrevious)
                                     {
+                                        lastDrawStart=clock.Elapsed.TotalMilliseconds;
                                         int pixel=renderer.Show(compare ? "original":mode,1,testing,true);
                                         if(testing) samples.Add(pixel & 0x00ffffff);
                                         lastSubmit=clock.Elapsed.TotalMilliseconds;
@@ -474,27 +476,24 @@ internal static class Player
                                     previousTime=timestamp;
                                     if(firstInput==0) firstInput=timestamp;
                                     lastInput=timestamp;
-                                    count=continuous && !compare && string.IsNullOrEmpty(renderer.FrameGenerationNotice) ? multiplier:1;
-                                    step=1; pairStart=now;
-                                    due=count==1 ? now:Math.Max(now,lastSubmit+period/count);
+                                    int count=continuous && !compare && string.IsNullOrEmpty(renderer.FrameGenerationNotice) ? multiplier:1;
+                                    pacing.Begin(now,lastDrawStart,period,count);
                                 }
-                                if(step>0 && now>=due)
+                                now=clock.Elapsed.TotalMilliseconds;
+                                float phase;
+                                if(pacing.TryTake(now,out phase))
                                 {
-                                    // When the GPU misses a deadline skip obsolete intermediates.
-                                    step=Math.Min(count,Math.Max(step,1+(int)((now-pairStart)/(period/count))));
-                                    int color=renderer.Show(compare ? "original":mode,(float)step/count,testing);
+                                    lastDrawStart=now;
+                                    int color=renderer.Show(compare ? "original":mode,phase,testing);
                                     presentedSettingsRevision=settingsRevision;
                                     if(testing) samples.Add(color & 0x00ffffff);
-                                    if(step==count) lastRealAge=RecordAge(liveFrameAges,previousTime,testing || filename!=null);
-                                    step++;
-                                    if(step>count) step=0;
+                                    if(phase==1) lastRealAge=RecordAge(liveFrameAges,previousTime,testing || filename!=null);
                                     lastSubmit=clock.Elapsed.TotalMilliseconds;
                                     repaintPending=false;
-                                    due=pairStart+(step-1)*period/count;
                                 }
                                 // Moving video picks up the latest divider on its next submission. A stalled
                                 // source still responds to dragging, with at most 60 UI-only repaints per second.
-                                if(repaintPending && step==0 && renderer.Captured>0 &&
+                                if(repaintPending && !pacing.Pending && renderer.Captured>0 &&
                                    now-lastSubmit>=period*1.25 && now-lastRepaint>=1000.0/60)
                                 {
                                     renderer.Repaint(compare ? "original":mode);
@@ -505,7 +504,7 @@ internal static class Player
                                 if(renderer.Captured==0 && now>(direct ? 30000:15000))
                                     throw new InvalidOperationException(direct ? "No video frames arrived from the Direct backend within 30 seconds. Check the console connection and retry."
                                                                               : "No frames arrived from the selected window. Restore it, start playback, and retry.");
-                                Thread.Sleep(step>0 ? 1:2);
+                                Thread.Sleep(pacing.Pending ? 1:2);
                             }
                         }
                         finally { WindowsApi.timeEndPeriod(1); }

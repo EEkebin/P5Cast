@@ -38,6 +38,9 @@ try {
     $sample=New-Object 'Collections.Generic.Dictionary[string,object]'
     $sample.Add('sampleId',1); $sample.Add('videoFramesLost',0); $sample.Add('address','private-fixture')
     $sample.Add('sampleUtc','2020-02-03T04:05:06.1234567Z')
+    $sample.Add('mode','dlss'); $sample.Add('effectivePictureMode','original'); $sample.Add('comparisonView','original')
+    $sample.Add('frameGenerationProvider','private-fixture'); $sample.Add('generatedFps',0); $sample.Add('outputWidth',1920)
+    $sample.Add('hdrEnabled',$false); $sample.Add('renderer','d3d12')
     $record=$traceType.GetMethod('Record',$flags)
     $record.Invoke($trace,@($sample.psobject.BaseObject)); $record.Invoke($trace,@($sample.psobject.BaseObject))
     $sample['sampleId']=2; $sample['audioUnderruns']=3; [void]$sample.Remove('sampleUtc')
@@ -51,6 +54,10 @@ try {
     Require (@($rows).Count -eq 2 -and $rows[0].videoFramesLost -eq '0' -and $rows[0].audioUnderruns -eq '' -and
         $rows[1].audioUnderruns -eq '3' -and !((Get-Content $file.FullName -Raw).Contains('private-fixture'))) 'Direct diagnostics retain unique numeric samples, distinguish missing counters, and omit identifiers'
     Require ($rows[0].utc -eq '2020-02-03T04:05:06.1234567Z' -and $rows[1].utc -match 'Z$') 'Preserve measurement time and support older snapshots'
+    Require ($rows[0].mode -eq 'dlss' -and $rows[0].effectivePictureMode -eq 'original' -and
+        $rows[0].comparisonView -eq 'original' -and $rows[0].generatedFps -eq '0' -and
+        $rows[0].outputWidth -eq '1920' -and $rows[0].frameGenerationProvider -eq '' -and
+        $rows[0].hdrEnabled -eq '0' -and $rows[0].renderer -eq 'd3d12') 'Record renderer decisions and omit unknown identifiers'
     Require ((Test-Path -LiteralPath $unrelated) -and @(Get-ChildItem $traceDir -Filter '*.csv').Count -eq 5) 'Rotate only the four owned trace files'
     function State($name,$value){$type.GetField($name,'Instance,NonPublic').SetValue($dash,$value)}
     function Call($name){$type.GetMethod($name,[Reflection.BindingFlags]'Instance,NonPublic').Invoke($dash,@())}
@@ -129,10 +136,26 @@ try {
     $caps['amdFrameGeneration']=$true; $caps['frucFrameGeneration']=$true; $caps['frucRuntimeImportAvailable']=$false
     $meter.SetCapabilities($caps); $amd.IsChecked=$true; $fruc.IsChecked=$true
     Require ($fruc.IsEnabled -and !$amd.IsChecked -and $provider.GetValue($meter) -eq 'fruc' -and $frucSetup.Visibility -eq 'Collapsed') 'Selecting FRUC replaces AMD with NVIDIA at 2x'
+    $viewButtons[1].IsChecked=$true
+    $guide=$meter.GetType().GetField('comparisonGuide','Instance,NonPublic').GetValue($meter)
+    Require ($meter.ComparisonView -eq 'original' -and $guide.Visibility -eq 'Visible' -and $guide.Text -like '*incoming frame rate*') 'Original explains the bypass with only frame generation selected'
+    $amd.IsChecked=$true
+    Require ($meter.ComparisonView -eq 'enhanced') 'Choosing a frame generator from Original previews generated frames'
+    $viewButtons[3].IsChecked=$true
+    $fruc.IsChecked=$true
+    Require ($meter.ComparisonView -eq 'wipe') 'Switching frame generators preserves the draggable comparison'
+    $viewButtons[1].IsChecked=$true
     $saveProvider=$meter.GetType().GetMethod('SavedProvider',[Reflection.BindingFlags]'Static,NonPublic')
     Require ($saveProvider.Invoke($null,@('fruc',2)) -eq 'fruc' -and $saveProvider.Invoke($null,@('amd',2)) -eq 'amd' -and $saveProvider.Invoke($null,@('fruc',4)) -eq 'p5cast') 'FRUC and existing AMD selections round-trip at valid multipliers'
     $caps['rtxvideo']=$true
     $meter.SetCapabilities($caps); $pictureButtons[3].IsChecked=$true
+    Require ($meter.ComparisonView -eq 'enhanced') 'Choosing an upscaler from Original previews the new picture'
+    $viewButtons[1].IsChecked=$true
+    $pictureButtons[3].RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
+    Require ($meter.ComparisonView -eq 'enhanced') 'Clicking an already selected upscaler resumes its preview from Original'
+    $viewButtons[2].IsChecked=$true
+    $pictureButtons[2].IsChecked=$true; $pictureButtons[3].IsChecked=$true
+    Require ($meter.ComparisonView -eq 'side-by-side') 'Switching upscalers preserves a side-by-side comparison'
     (Widget HdrOutput).SelectedItem='HDR10'
     Require ($fruc.IsEnabled -and $fruc.IsChecked -and $provider.GetValue($meter) -eq 'fruc') 'Requesting HDR10 keeps the NVIDIA FRUC provider selected'
     Require ($pictureButtons[3].IsEnabled -and $pictureButtons[3].IsChecked) 'RTX Video SR stays selected alongside FRUC when HDR10 is requested'

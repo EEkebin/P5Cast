@@ -167,9 +167,10 @@ namespace Cadrivect
                 StyleChip(button); button.ClearValue(HeightProperty); button.MinHeight=28;
                 modes[i]=button; int index=i;
                 AutomationProperties.SetAutomationId(button,"Picture_"+ModeIds[i]);
+                if(index!=0) button.Click+=PreviewSelectedEffect;
                 button.Checked+=delegate {
                     if(syncing) return;
-                    selectedMode=index; RefreshQualityChoice(); SendSettings();
+                    selectedMode=index; RefreshQualityChoice(); SendSettings(index!=0);
                 };
             }
             var modeGroup=new StackPanel();
@@ -246,9 +247,10 @@ namespace Cadrivect
                 StyleChip(button); factors[i]=button;
                 AutomationProperties.SetName(button,i==0 ? "Frame generation off" : "P5Cast interpolation "+factor+"×");
                 button.ToolTip=i==0 ? "Present captured frames only." : "P5Cast uses motion estimated from the video to present up to "+factor+" frames per source frame.";
+                if(factor>1) button.Click+=PreviewSelectedEffect;
                 button.Checked+=delegate {
                     if(syncing) return;
-                    selectedFactor=factor; FrameGenerationProvider="p5cast"; SendSettings();
+                    selectedFactor=factor; FrameGenerationProvider="p5cast"; SendSettings(factor>1);
                 };
                 factorGrid.Children.Add(button);
             }
@@ -511,21 +513,27 @@ namespace Cadrivect
             chip.FontWeight=FontWeights.SemiBold; ToolTipService.SetShowOnDisabled(chip,true);
             AutomationProperties.SetName(chip,chip.Content.ToString());
         }
-        void SendSettings()
+        void SendSettings(bool previewEffect)
         {
             pendingSettings=DateTime.UtcNow.AddSeconds(2);
             int before=selectedView;
-            RefreshComparison();
+            RefreshComparison(previewEffect && selectedView==1 ? (int?)0 : null);
             if(change!=null) change(selectedMode,selectedFactor);
             if(before!=selectedView && compare!=null) compare(ComparisonView);
+        }
+        void PreviewSelectedEffect(object sender,RoutedEventArgs e)
+        {
+            // Clicking the already checked effect doesn't raise Checked.
+            if(!syncing && selectedView==1) views[0].IsChecked=true;
         }
         RadioButton AddGenerationProvider(Panel parent,string group,string provider,string label,string id)
         {
             var button=new RadioButton {GroupName="Rate"+group,Content=label,Template=ChipTemplate};
             StyleChip(button);AutomationProperties.SetAutomationId(button,id);
+            button.Click+=PreviewSelectedEffect;
             button.Checked+=delegate {
                 if(syncing) return;
-                FrameGenerationProvider=provider; selectedFactor=2; SendSettings();
+                FrameGenerationProvider=provider; selectedFactor=2; SendSettings(true);
             };
             parent.Children.Add(button); return button;
         }
@@ -550,7 +558,7 @@ namespace Cadrivect
             finally {syncing=wasSyncing;}
             horizontalSplit.Visibility=index==3 ? Visibility.Visible : Visibility.Collapsed;
             UpdateComparisonGuide();
-            comparisonGuide.Visibility=!available || index>=2 ? Visibility.Visible : Visibility.Collapsed;
+            comparisonGuide.Visibility=index==0 ? Visibility.Collapsed : Visibility.Visible;
             divider.Visibility=index==3 ? Visibility.Visible : Visibility.Collapsed;
         }
         internal void RestorePlaybackControls(int picture,int multiplier,string provider,string view)
@@ -568,6 +576,7 @@ namespace Cadrivect
         void UpdateComparisonGuide()
         {
             comparisonGuide.Text=!comparisonsAvailable ? "Choose a picture effect or enable frame generation to compare." :
+                selectedView==1 ? "Original shows the source picture at its incoming frame rate. Select Enhanced to resume your effects." :
                 selectedView==3 && WipeHorizontal ? "Top: Original    ·    Bottom: Enhanced" : "Left: Original    ·    Right: Enhanced";
         }
         public void ToggleOriginal()
@@ -756,12 +765,10 @@ namespace Cadrivect
             activeQuality.Text=requested=="dlss" && effective=="dlaa" ? "Native · DLAA" :
                 effective=="dlss" && quality>0 ? "Active · "+QualityLabels[quality] : "";
             string message=Text(snapshot,"effectNotice");
-            if(string.IsNullOrEmpty(message) && comparing==true && mode>0)
-                message="Viewing Original. Select Enhanced or Draggable split to see the picture effect.";
             string fgVersion=Text(snapshot,"activeFrameGenerationVersion");
             if(Text(snapshot,"activeFrameGenerationProvider")=="fruc" && comparing!=true && string.IsNullOrEmpty(message))
                 message="NVIDIA FRUC · 2×";
-            if(!string.IsNullOrEmpty(fgVersion) && string.IsNullOrEmpty(Text(snapshot,"effectNotice")))
+            if(comparing!=true && !string.IsNullOrEmpty(fgVersion) && string.IsNullOrEmpty(Text(snapshot,"effectNotice")))
                 message=(string.IsNullOrEmpty(message) ? "" : message+" · ")+"AMD frame generation "+fgVersion;
             int active=Array.IndexOf(ModeIds,effective);
             if(string.IsNullOrEmpty(message) && comparing!=true && active>=0 && mode>=0 && active!=mode && effective!="dlaa") message="Active picture · "+ModeLabels[active];

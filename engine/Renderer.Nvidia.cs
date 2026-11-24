@@ -85,7 +85,7 @@ internal sealed partial class Renderer
     {
         bool nr=PictureLabels.IsNeuralRendering(mode);
         if(nr && !HasVendorBridge(Backend,mode)) throw new InvalidOperationException(mode=="open-nr" ? NeuralRendering.OpenBackendReason : NeuralRendering.BackendReason);
-        if(nr && HdrEnabled) throw new InvalidOperationException(NeuralRendering.HdrReason);
+        if(mode=="dlss-nr" && HdrEnabled) throw new InvalidOperationException(NeuralRendering.HdrReason);
         if(!HasVendorBridge(Backend,mode))
             throw new InvalidOperationException("The selected graphics API has no native bridge for this effect.");
         // With no enlargement the NGX native-resolution feature is the appropriate configuration.
@@ -135,7 +135,8 @@ internal sealed partial class Renderer
             havePriorEnhanced=HasPrevious && evaluatedFrame==Captured-1 && !resetHistory;
             var temp=neuralPrevious; neuralPrevious=neuralCurrent; neuralCurrent=temp;
             var area=new Rectangle(Point.Empty,srcSize);
-            Draw(HdrEnabled ? (mode=="rtxvideo" ? "HdrMotionGuide" : "HdrToLinear2020") : "Original",rgba.Write,area,curr.Read,1);
+            string pack=mode=="open-nr" ? "HdrNrGuide" : mode=="rtxvideo" ? "HdrMotionGuide" : "HdrToLinear2020";
+            Draw(HdrEnabled ? pack : "Original",rgba.Write,area,curr.Read,1);
             if(ngx!=null || temporalFsr!=null || neuralRendering!=null)
             {
                 if(havePriorEnhanced)
@@ -156,7 +157,9 @@ internal sealed partial class Renderer
             RestoreDrawState();
             if(video!=null && HdrEnabled) Draw("HdrVsrReconstruct",neuralCurrent.Write,new Rectangle(Point.Empty,neuralSize),
                 curr.Read,1,ngxOutput.Read,rgba.Read);
-            if(ngx!=null || temporalFsr!=null || neuralRendering!=null) Draw("PreserveNgxStrokes",neuralCurrent.Write,new Rectangle(Point.Empty,neuralSize),
+            if(mode=="open-nr" && HdrEnabled)
+                Draw("HdrNrReconstruct",neuralCurrent.Write,area,curr.Read,1,ngxOutput.Read,strokeMask.Read);
+            else if(ngx!=null || temporalFsr!=null || neuralRendering!=null) Draw("PreserveNgxStrokes",neuralCurrent.Write,new Rectangle(Point.Empty,neuralSize),
                 ngxOutput.Read,HdrEnabled ? 1 : 0,rgba.Read,strokeMask.Read);
             if(mode=="open-nr") OpenNrEvaluations++;
             else if(temporalFsr==null) VendorEvaluations++; else FsrEvaluations++;

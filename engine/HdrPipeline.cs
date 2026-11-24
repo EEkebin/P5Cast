@@ -11,7 +11,7 @@ internal sealed partial class Renderer
 
     void InitHdrShaders()
     {
-        foreach (string name in new[] {"HdrToPq", "HdrToLinear2020", "HdrLinear2020ToPq", "HdrLinear2020ToScRgb", "HdrSharpToPq", "HdrMotionGuide", "HdrVsrReconstruct", "FrucHdrMidpoint"})
+        foreach (string name in new[] {"HdrToPq", "HdrToLinear2020", "HdrLinear2020ToPq", "HdrLinear2020ToScRgb", "HdrSharpToPq", "HdrMotionGuide", "HdrVsrReconstruct", "FrucHdrMidpoint","HdrNrGuide","HdrNrReconstruct","FitNrHdrIntermediate"})
             shaders.Add(name, new PixelShader(Device, Shader(name)));
     }
 

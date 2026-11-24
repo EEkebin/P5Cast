@@ -34,6 +34,43 @@ float4 HdrLinear2020ToScRgb(Vertex v) : SV_Target {
 float4 HdrLinear2020ToPq(Vertex v) : SV_Target {
     return float4(EncodePq80(SamplePicture(v)),1);
 }
+// The model consumes a bounded, display-referred RGB image. Compress source
+// luminance for inference only; the original FP16 picture feeds reconstruction.
+float3 NrGuideRgb(float3 scRgb) {
+    float3 rgb=max(scRgb,0);
+    float peak=max(rgb.r,max(rgb.g,rgb.b));
+    float3 mapped=rgb/(2.5375+peak); // 203 nit diffuse white in 80-nit scRGB units
+    return lerp(12.92*mapped,1.055*pow(mapped,1.0/2.4)-0.055,step(0.0031308,mapped));
+}
+float4 HdrNrGuide(Vertex v) : SV_Target {
+    return float4(NrGuideRgb(SamplePicture(v)),1);
+}
+float4 HdrNrReconstruct(Vertex v) : SV_Target {
+    float3 original=SamplePicture(v);
+    float3 color=max(0,LinearScRgbTo2020(original));
+    float guide=luma(NrGuideRgb(original));
+    float residual=luma(previous.SampleLevel(linearClamp,v.uv,0).rgb)-guide;
+    // Apply local luminance detail only. A flat patch, saturated highlight or
+    // protected subtitle keeps the source luminance and chromaticity.
+    float2 dx=float2(1.0/sourceSize.x,0),dy=float2(0,1.0/sourceSize.y);
+    float4 neighbors=float4(luma(image.SampleLevel(linearClamp,v.uv-dx,0).rgb),
+        luma(image.SampleLevel(linearClamp,v.uv+dx,0).rgb),
+        luma(image.SampleLevel(linearClamp,v.uv-dy,0).rgb),
+        luma(image.SampleLevel(linearClamp,v.uv+dy,0).rgb));
+    float y=max(0,luma(original));
+    float localContrast=max4(abs(neighbors-y))/max(y,0.05);
+    float strength=saturate(localContrast)*(1-StrokeFootprint(v.uv));
+    float gain=exp2(clamp(3*residual,-0.4,0.4)*strength);
+    return float4(color*min(gain,125/max(0.00001,max(color.r,max(color.g,color.b)))),1);
+}
+float4 FitNrHdrIntermediate(Vertex v) : SV_Target {
+    // The SDK midpoint is scRGB; built-in interpolation and the real neural
+    // endpoint are linear BT.2020. Blend in one space before encoding HDR10.
+    float3 current=SamplePicture(v);
+    if(phase>0) current=LinearScRgbTo2020(current);
+    float ink=smoothstep(0.35,0.85,StrokeFootprint(v.uv));
+    return float4(EncodePq80(lerp(current,SamplePictureTexture(previous,v),ink)),1);
+}
 float4 FitNgxFrame(Vertex v) : SV_Target {
     // Finishing the enhanced texture at a different size can filter a bright
     // stroke twice. Match Original's source footprint at this display pixel.

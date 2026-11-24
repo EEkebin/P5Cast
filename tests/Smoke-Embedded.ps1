@@ -4,7 +4,7 @@ param([string]$PlayerExe,[string]$DirectRuntime,[string]$OutputDirectory,
 $ErrorActionPreference='Stop'
 $repo=Split-Path $PSScriptRoot
 if (!$PlayerExe) { $PlayerExe=Join-Path $repo 'engine\bin\CadrivectPlayer.exe' }
-if (!$DirectRuntime -and !$CheckNeuralRendering -and !$CheckOpenNr -and (!$CheckFruc -or $HdrDisplay)) {
+if (!$DirectRuntime -and !$CheckNeuralRendering -and (!$CheckOpenNr -or $HdrDisplay) -and (!$CheckFruc -or $HdrDisplay)) {
     $runtime=& "$repo\sources\Prepare-Decoder.ps1" | ConvertFrom-Json
     if (!$runtime.ok) { throw $runtime.error }
     $DirectRuntime=$runtime.runtime
@@ -32,7 +32,7 @@ if ($CheckFruc -and !$HdrDisplay) {
     if($LASTEXITCODE){throw 'Embedded FRUC playback verification failed.'}
     return
 }
-if ($CheckNeuralRendering -or $CheckOpenNr) {
+if ($CheckNeuralRendering -or ($CheckOpenNr -and !$HdrDisplay)) {
     if($Renderer -eq 'auto'){$Renderer='vulkan'}
     $mode=if($CheckOpenNr){'open-nr'}else{'dlss-nr'}
     & $probe $PlayerExe $mode unused unused "$OutputDirectory\neural.json" $Renderer --neural
@@ -46,8 +46,8 @@ if ($CheckComparison) {
     return
 }
 if ($HdrDisplay) {
-    $fixture=if($CheckFruc){'motion-pq10.hevc'}else{'text-pq10.hevc'}
-    $effects=if($CheckFruc){'rtx-fruc'}else{'original'}
+    $fixture=if($CheckFruc -or $CheckOpenNr){'motion-pq10.hevc'}else{'text-pq10.hevc'}
+    $effects=if($CheckFruc){'rtx-fruc'}elseif($CheckOpenNr){'open-nr'}else{'original'}
     & $probe $PlayerExe $DirectRuntime "$PSScriptRoot\fixtures\$fixture" $effects "$OutputDirectory\hdr.json" $Renderer "--hdr-display=$HdrDisplay"
     if ($LASTEXITCODE) { throw "Embedded HDR test failed. Inspect $OutputDirectory" }
     return

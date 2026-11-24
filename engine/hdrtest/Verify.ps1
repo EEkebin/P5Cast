@@ -1,7 +1,7 @@
 # Run after building the player. This renders into an offscreen HDR10 texture on the active GPU.
 [CmdletBinding()]
 param([string]$PlayerDirectory=(Join-Path $PSScriptRoot '..\bin'), [switch]$Nvidia, [switch]$Fruc, [switch]$FrucSubtitles, [switch]$VulkanSubtitles,
-      [ValidateSet('d3d11','d3d12')][string]$Backend='d3d11')
+      [ValidateSet('d3d11','d3d12')][string]$Backend='d3d11',[string]$OpenNrHdrDisplay)
 $ErrorActionPreference='Stop'
 $bin=(Resolve-Path -LiteralPath $PlayerDirectory).Path
 $id=[Guid]::NewGuid().ToString('N')
@@ -14,9 +14,10 @@ try {
         "/r:$path"
     }
     $compile=Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-    & $compile /nologo /optimize+ /platform:x64 /r:System.Drawing.dll /r:System.Windows.Forms.dll "/out:$testDir\HdrTest.exe" $refs "$PSScriptRoot\Verify.cs" "$PSScriptRoot\VerifyFruc.cs" "$PSScriptRoot\VerifySubtitles.cs"
+    & $compile /nologo /optimize+ /platform:x64 /r:System.Drawing.dll /r:System.Windows.Forms.dll "/out:$testDir\HdrTest.exe" $refs "$PSScriptRoot\Verify.cs" "$PSScriptRoot\VerifyFruc.cs" "$PSScriptRoot\VerifySubtitles.cs" "$PSScriptRoot\VerifyOpenNrHdr.cs"
     if ($LASTEXITCODE) { throw 'HDR verification did not compile.' }
     $options=@((Join-Path $bin 'CadrivectPlayer.exe'))
+    if($OpenNrHdrDisplay){$options+=@('--open-nr-hdr',$OpenNrHdrDisplay)}
     if($Fruc){$options+='--fruc'}
     if($FrucSubtitles){$options+='--fruc-subtitles'}
     if($VulkanSubtitles){$options+='--vulkan-subtitles'}

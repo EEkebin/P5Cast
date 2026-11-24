@@ -259,7 +259,7 @@ internal static partial class EmbeddedProbe
                 "--renderer",renderer,"--hdr","hdr10","--verify-output","--report",args[4]},delegate(int value){ result=value; });
             bool testNvidia=args[3]=="rtx-fruc";
             var clip=File.ReadAllBytes(args[2]);
-            byte[][] frames=testNvidia ? HdrMotionPackets(clip) : new[]{clip};
+            byte[][] frames=testNvidia || args[3]=="open-nr" ? HdrMotionPackets(clip) : new[]{clip};
             new Thread(delegate(){SendFixture(pipe,frames,pause,end,3,true);}) {IsBackground=true}.Start();
             int lastPresented=0;
             Action<Forms.Screen,string,bool> verify=delegate(Forms.Screen screen,string mode,bool hdr) {
@@ -283,6 +283,16 @@ internal static partial class EmbeddedProbe
                 throw new Exception("Expected "+mode+" (HDR "+hdr+") on "+screen.DeviceName+". "+api.GetProperty("Error").GetValue(null,null)+" "+api.GetMethod("Snapshot").Invoke(null,null));
             };
             verify(hdrScreen,"hdr10",true);
+            if(args[3]=="open-nr") {
+                api.GetMethod("Configure").Invoke(null,new object[]{9,1});
+                var sample=WaitSnapshot(api,s=>Equals(s["effectivePictureMode"],"open-nr") &&
+                    Convert.ToInt32(s["openNrEvaluations"])>=4,"neural rendering of HDR10 video",45000);
+                Check(Equals(sample["codec"],"HEVC HDR") && Equals(sample["presentationColorSpace"],"BT.2020 PQ") &&
+                    Equals(sample["presenterHdrFormat"],"RGB10A2_UNORM") && Equals(sample["processingRenderer"],"vulkan"),
+                    "OpenDLSS-NR lost HDR10 input, HDR output, or GPU inference.");
+                Console.WriteLine(renderer+" decoded moving 10-bit HEVC and presented OpenDLSS-NR in HDR10.");
+                api.GetMethod("Configure").Invoke(null,new object[]{0,1});
+            }
             if(testNvidia) {
                 api.GetMethod("ConfigureWithGeneration").Invoke(null,new object[]{3,2,"fruc"});
                 var active=WaitSnapshot(api,s=>Equals(s["activeNvidiaEffect"],"rtxvideo") &&
@@ -379,10 +389,11 @@ internal static partial class EmbeddedProbe
             api.GetMethod("ConfigureOutput").Invoke(null,new object[]{null,"auto"});
             var display=WaitSnapshot(api,s=>(string)s["hdrMode"]=="auto" && Convert.ToInt32(s["presented"])>before+6,"output after selecting Auto HDR");
             if((bool)display["hdrEnabled"]) {
-                Check((bool)display["presenterHdr10"] && (string)display["effectivePictureMode"]=="original" &&
-                      ((string)display["effectNotice"]).Contains("SDR"),"Selecting Auto HDR lost the original HDR picture or the SDR restriction.");
+                Check((bool)display["presenterHdr10"] && (open && available ?
+                    (string)display["effectivePictureMode"]==mode && Convert.ToInt32(display["openNrEvaluations"])>Convert.ToInt32(state["openNrEvaluations"]) :
+                    (string)display["effectivePictureMode"]=="original"),"Selecting Auto HDR lost the expected picture mode.");
                 CheckVideoSize(display,960,540);
-                Console.WriteLine("HDR10 remained active with native-size Original playback.");
+                Console.WriteLine("HDR10 remained active with "+display["effectivePictureMode"]+" playback.");
                 if(open && available) {
                     int evaluations=Convert.ToInt32(display["openNrEvaluations"]);
                     api.GetMethod("ConfigureOutput").Invoke(null,new object[]{null,"off"});

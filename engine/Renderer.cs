@@ -467,7 +467,7 @@ internal sealed partial class Renderer : IDisposable
     {
         if(!IsVendor(mode) && mode!="original" && mode!="sharp" && mode!="fsr" && mode!="nis") throw new ArgumentException("Unknown picture mode.");
         if(mode=="nis" && !NisScaler.SupportsBackend(Backend)) throw new InvalidOperationException(NisScaler.BackendReason);
-        if(PictureLabels.IsNeuralRendering(mode) && HdrEnabled) throw new InvalidOperationException(NeuralRendering.HdrReason);
+        if(mode=="dlss-nr" && HdrEnabled) throw new InvalidOperationException(NeuralRendering.HdrReason);
         if(mode==pictureMode && failedMode==null && !(mode=="open-nr" && neuralRendering!=null && neuralRendering.OpenModelChanged)) return;
         // Verify NIS at the current stream and target dimensions before releasing a working effect.
         if(mode=="nis" && curr!=null) try { EvaluateNis(curr.Read,1,ProcessingSize(mode)); }
@@ -544,7 +544,7 @@ internal sealed partial class Renderer : IDisposable
         if(!originalViewport.IsEmpty) DrawOriginal(originalViewport,holdOriginal);
         if(sdkIntermediate && vendor) {
             if(PictureLabels.IsNeuralRendering(mode))
-                Draw("FitNrIntermediate",display,viewport,source,1,neuralPrevious.Read,strokeMask.Read);
+                Draw(HdrEnabled?"FitNrHdrIntermediate":"FitNrIntermediate",display,viewport,source,1,neuralPrevious.Read,strokeMask.Read);
             else Draw(HdrEnabled?"HdrToPq":"Original",display,viewport,source,1);
             return Present(samplePixel,holdOriginal);
         }
@@ -560,7 +560,7 @@ internal sealed partial class Renderer : IDisposable
             {
                 if(PictureLabels.IsNeuralRendering(mode)) {
                     var frame=InterpolateSource(neuralCurrent.Read,neuralPrevious.Read,phase);
-                    Draw("FitNrIntermediate",display,viewport,frame,1,neuralPrevious.Read,strokeMask.Read);
+                    Draw(HdrEnabled?"FitNrHdrIntermediate":"FitNrIntermediate",display,viewport,frame,0,neuralPrevious.Read,strokeMask.Read);
                 } else DrawFinal("Interpolate",neuralCurrent.Read,phase,viewport,neuralPrevious.Read,motion.Read,HdrEnabled);
                 Generated++;
                 return Present(samplePixel,holdOriginal);
@@ -588,7 +588,7 @@ internal sealed partial class Renderer : IDisposable
     }
     ShaderResourceView InterpolateSource(ShaderResourceView current,ShaderResourceView previous,float phase)
     {
-        if(mixed==null) mixed=new GpuImage(Device,srcSize.Width,srcSize.Height,Format.B8G8R8A8_UNorm,true);
+        if(mixed==null) mixed=new GpuImage(Device,srcSize.Width,srcSize.Height,HdrEnabled?HdrFloatFormat:Format.B8G8R8A8_UNorm,true);
         Draw("Interpolate",mixed.Write,new Rectangle(System.Drawing.Point.Empty,srcSize),current,phase,previous,motion.Read);
         return mixed.Read;
     }

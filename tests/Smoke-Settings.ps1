@@ -139,7 +139,10 @@ try {
     $openToggle.IsChecked=$true
     Require ((&$readMode) -eq 9 -and $pictureButtons[7].IsChecked) 'Changing provider sends the alternate mode when NR was active'
     (Widget HdrOutput).SelectedItem='HDR10'
-    Require ((&$readMode) -eq 0 -and !$pictureButtons[7].IsEnabled -and $openStatus.Text -like '*SDR*') 'HDR masks OpenDLSS-NR before connection and releases the active choice'
+    Require ((&$readMode) -eq 9 -and $pictureButtons[7].IsEnabled -and $openStatus.Text -like '*HDR10*') 'HDR keeps OpenDLSS-NR selected'
+    $openToggle.IsChecked=$false
+    Require ((&$readMode) -eq 0 -and !$pictureButtons[7].IsEnabled) 'The official NVIDIA NR provider still requires SDR'
+    $openToggle.IsChecked=$true
     (Widget HdrOutput).SelectedItem='SDR'
     $pictureButtons[7].IsChecked=$true
     $openToggle.IsChecked=$false

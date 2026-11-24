@@ -55,12 +55,12 @@ namespace Cadrivect
         {
             idleHdr=enabled;
             if(hdr!=enabled) {hdr=enabled;RefreshAvailability();}
-            if(hdr && (selectedMode==OpenNeuralMode || selectedMode==NeuralMode))
+            if(hdr && selectedMode==NeuralMode)
                 modes[0].IsChecked=true;
         }
         internal bool SupportsSelectedColor(int picture)
         {
-            return !hdr || (picture!=NeuralMode && picture!=OpenNeuralMode);
+            return !hdr || picture!=NeuralMode;
         }
         internal void SetOpenNrChecking(bool checking)
         {
@@ -88,7 +88,7 @@ namespace Cadrivect
             openNrDownload.IsEnabled=!openNrChecking;
             openNrDownload.Visibility=Flag(gpu,"openNrModelImportAvailable")==true ? Visibility.Visible : Visibility.Collapsed;
             openNrStatus.Text=Flag(gpu,"open-nr")==true
-                  ? (hdr ? "OpenDLSS-NR requires SDR output." : "OpenDLSS-NR · Model ready · Native resolution")
+                  ? (hdr ? "OpenDLSS-NR · HDR10 detail enhancement" : "OpenDLSS-NR · Model ready · Native resolution")
                 : Text(gpu,"open-nrReason") ?? Text(gpu,"probeFailure") ?? "Checking OpenDLSS-NR support.";
         }
         readonly StackPanel qualityGroup;
@@ -219,7 +219,7 @@ namespace Cadrivect
             AddPictureRow(modeGroup,"Video & temporal upscaling","rtxvideo","fsr-temporal");
             AddPictureRow(modeGroup,"NVIDIA DLSS","dlss","dlaa","dlss-nr");
             useOpenNr=new CheckBox {Content="Use open source",Margin=new Thickness(4,5,0,2),
-                ToolTip="Use OpenDLSS-NR for DLSS 5 NR. Supports SDR with Direct3D 11, Direct3D 12 or Vulkan on a compatible GPU."};
+                ToolTip="Use OpenDLSS-NR with SDR or HDR10 on Direct3D 11, Direct3D 12 or Vulkan. In HDR, the model guides detail while the stream supplies color and brightness."};
             AutomationProperties.SetAutomationId(useOpenNr,"UseOpenNr");
             useOpenNr.Checked+=ChangeNeuralProvider; useOpenNr.Unchecked+=ChangeNeuralProvider;
             modeGroup.Children.Add(useOpenNr);
@@ -690,8 +690,8 @@ namespace Cadrivect
                 bool available=i==0 || (!noAdapter && (!vendor || Flag(gpu,id)==true));
                 string reason=id=="open-nr" ? "OpenDLSS-NR at source resolution using the selected model." : Descriptions[i];
                 if(!available) reason=gpu==null ? "Checking GPU support." : Text(gpu,id+"Reason") ?? Text(gpu,"probeFailure") ?? "This mode is unavailable on the active GPU.";
-                if(hdr && i==NeuralMode && available) {
-                    available=false; reason=(UseOpenNr ? "OpenDLSS-NR" : ModeLabels[i])+" requires SDR output.";
+                if(hdr && id=="dlss-nr" && available) {
+                    available=false; reason=ModeLabels[i]+" requires SDR output.";
                 }
                 if(ModeIds[i]=="fsr-temporal" && available && !string.IsNullOrEmpty(Text(gpu,"fsrVersion")))
                     reason="AMD temporal upscaling · "+Text(gpu,"fsrVersion");

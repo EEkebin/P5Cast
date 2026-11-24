@@ -28,6 +28,8 @@ The dashboard launches the helper with `--session-control`. A current-user mappi
 
 Exit codes 20 through 27 indicate invalid input, unavailable player pipe, initialization failure, PS5 session failure, required console login PIN, incorrect console login PIN, audio-device failure, and registration failure respectively.
 
+Codes 28 and 29 indicate unavailable session volume control and unsupported audio format. The Direct helper preserves specific session results from libchiaki: 30 for Remote Play in use, 31 for a refused TCP connection, 32 for a remote stream disconnect, 33 for an incompatible Remote Play version, 34 for a console Remote Play service crash, and 35 for an explicit registration failure. A stopped session or remote console shutdown exits with 0. Unclassified errors keep code 23.
+
 ## Source and licenses
 
 The native core is distributed under the upstream Affero GPL v3 with its OpenSSL exception. Its full license, statically linked third-party notices, runtime package versions and available shared-library notices accompany the executable. The source archive includes the core and the libchiaki, nanopb, jerasure and gf-complete sources used in this build. To compile from the extracted archive with the MSYS2 UCRT64 dependencies listed in `packages.sha256`, run `cmake -S . -B out -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.10 -DCHIAKI_SOURCE="$PWD/upstream"` followed by `cmake --build out --target CadrivectDirect`.

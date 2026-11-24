@@ -22,6 +22,8 @@ namespace Cadrivect
         bool outputChangedBeforeFirstFrame;
         bool stopRequested;
         TaskCompletionSource<bool> restartDisconnect;
+        readonly Dictionary<string,long> lastDirectEnd=new Dictionary<string,long>(StringComparer.OrdinalIgnoreCase);
+        static readonly int[] directRetrySeconds={2,4,6,8,10};
         long transportOperation;
         CancellationTokenSource preparingConnection;
 
@@ -155,8 +157,7 @@ namespace Cadrivect
             if(rendering==null) return;
             if(stopping) {engine.Stop(); return;}
             if(directCore!=null && directCore.HasExited) {
-                if(directCore.ExitCode!=0) failure=CoreError(directCore.ExitCode);
-                stopping=true; UpdateTransport(); engine.Stop(); return;
+                engine.Stop(); return; // The attempt reads the helper's final exit code after the renderer exits.
             }
             string raw=engine.Snapshot();
             if(!string.IsNullOrEmpty(raw) && raw!="{}") {
@@ -277,61 +278,111 @@ namespace Cadrivect
                 source=="Direct"?"Checking your paired PS5…":source=="Demo"?"Starting offline demo…":"Looking for the Remote Play window…");
             try {
                 if(engine==null) engine=new EngineSession();
-                var args=new List<string> {"--surface",surface.Handle.ToInt64().ToString(CultureInfo.InvariantCulture)};
                 if(source=="Direct") {
-                    var console=UI<ComboBox>("ConsolePicker").SelectedItem as DirectConsole;
-                    string address=DirectConsole.Host(UI<TextBox>("ConsoleAddress").Text);
-                    consoleAddresses[console.Mac]=address; SaveSettings();
-                    address=await EnsureConsoleReady(console,address,false);
-                    if(closing || stopping) throw new OperationCanceledException();
-                    TransportProgress("Preparing your PS5 connection…");
-                    string runtime=Field(await PrepareConnection("sources/Prepare-Decoder.ps1"),"runtime");
-                    if(closing || stopping) throw new OperationCanceledException();
-                    if(string.IsNullOrEmpty(runtime)) throw new IOException("The video decoder runtime is unavailable.");
-                    int fps=UI<ComboBox>("DirectFps").SelectedIndex==1?30:60;
-                    var display=DisplayTarget.Select("source",surface.Handle); int hdr=UI<ComboBox>("HdrOutput").SelectedIndex;
-                    bool hdrStream=hdr==2 || (hdr==0 && display.AdvancedColorEnabled);
-                    int codec=DirectCodec(hdrStream);
-                    string pipe="Cadrivect-Video-"+Guid.NewGuid().ToString("N");
-                    args.AddRange(new[]{"--direct-pipe",pipe,"--direct-runtime",runtime,"--target-fps",fps.ToString()});
-                    sessionVideoKbps=DirectKbps();
-                    directCore=console.Connect(pipe,address,codec,fps,sessionVideoKbps,DirectStreamHeight(),EffectiveStreamVolume,
-                        UI<CheckBox>("DualSenseFeedback").IsChecked==true,UI<ComboBox>("DirectTouchpad").SelectedIndex==1);
-                    playingMac=console.Mac; playingPipe=pipe; titleAddress=address;
-                    TransportProgress("Connecting to "+console.Name+"…");
-                } else if(source=="Demo") {
-                    args.AddRange(new[]{"--demo","--target-fps","60"}); Show("Starting offline demo…");
+                    await RunDirectPlayback();
                 } else {
-                    using(var sony=Process.GetProcessesByName("RemotePlay").FirstOrDefault(p=>p.MainWindowHandle!=IntPtr.Zero)) {
-                        if(sony==null) throw new InvalidOperationException("Connect in Sony PS Remote Play first, or select Direct to PS5 for built-in pairing and playback.");
-                        AttachStreamAudio(sony.Id);
-                        args.AddRange(new[]{"--hwnd",sony.MainWindowHandle.ToInt64().ToString(CultureInfo.InvariantCulture)});
+                    var args=new List<string>();
+                    if(source=="Demo") {
+                        args.AddRange(new[]{"--demo","--target-fps","60"}); Show("Starting offline demo…");
+                    } else {
+                        using(var sony=Process.GetProcessesByName("RemotePlay").FirstOrDefault(p=>p.MainWindowHandle!=IntPtr.Zero)) {
+                            if(sony==null) throw new InvalidOperationException("Connect in Sony PS Remote Play first, or select Direct to PS5 for built-in pairing and playback.");
+                            AttachStreamAudio(sony.Id);
+                            args.AddRange(new[]{"--hwnd",sony.MainWindowHandle.ToInt64().ToString(CultureInfo.InvariantCulture)});
+                        }
+                        TransportProgress("Waiting for video from Sony Remote Play…");
                     }
-                    TransportProgress("Waiting for video from Sony Remote Play…");
+                    int code=await RunRenderer(args);
+                    if(!stopRequested && code!=0) failure=engine.Error();
                 }
-                args.AddRange(new[]{"--mode",modeIds[mode],"--multiplier",factor.ToString(),"--display","source","--renderer",SelectedRenderer,
-                    "--resolution",resolutionIds[UI<ComboBox>("RenderResolution").SelectedIndex],"--hdr",hdrIds[UI<ComboBox>("HdrOutput").SelectedIndex],
-                    "--frame-generation",meter.FrameGenerationProvider,"--dlss-quality",meter.DlssQuality,"--dlss-model",meter.DlssModelHint});
-                if(meter.WipeHorizontal) args.Add("--wipe-horizontal");
-                args.AddRange(new[]{"--comparison",meter.ComparisonView,"--wipe-position",meter.WipePosition.ToString("R",CultureInfo.InvariantCulture)});
-                rendering=engine.Start(args.ToArray()); preparing=false; UpdateTransport();
-                int code=await rendering;
-                if(!stopping && directCore!=null && directCore.HasExited && directCore.ExitCode!=0) failure=CoreError(directCore.ExitCode);
-                if(!stopRequested && code!=0 && failure.Length==0) failure=engine.Error();
                 if(!stopRequested && !firstFrame && failure.Length==0) failure="The stream ended before its first picture. Check that the console is awake, then reconnect.";
             } catch(OperationCanceledException) { }
             catch(Exception e) {failure=e.GetBaseException().Message;}
             await EndPlayback();
         }
+        Task<int> RunRenderer(List<string> args)
+        {
+            args.AddRange(new[]{"--surface",surface.Handle.ToInt64().ToString(CultureInfo.InvariantCulture),
+                    "--mode",modeIds[mode],"--multiplier",factor.ToString(),"--display","source","--renderer",SelectedRenderer,
+                    "--resolution",resolutionIds[UI<ComboBox>("RenderResolution").SelectedIndex],"--hdr",hdrIds[UI<ComboBox>("HdrOutput").SelectedIndex],
+                    "--frame-generation",meter.FrameGenerationProvider,"--dlss-quality",meter.DlssQuality,"--dlss-model",meter.DlssModelHint});
+            if(meter.WipeHorizontal) args.Add("--wipe-horizontal");
+            args.AddRange(new[]{"--comparison",meter.ComparisonView,"--wipe-position",meter.WipePosition.ToString("R",CultureInfo.InvariantCulture)});
+            rendering=engine.Start(args.ToArray()); preparing=false; UpdateTransport();
+            return rendering;
+        }
+        async Task RunDirectPlayback()
+        {
+            var cancel=preparingConnection.Token;
+            var console=(DirectConsole)UI<ComboBox>("ConsolePicker").SelectedItem;
+            string address=DirectConsole.Host(UI<TextBox>("ConsoleAddress").Text);
+            consoleAddresses[console.Mac]=address; SaveSettings();
+            address=await EnsureConsoleReady(console,address,false);
+            cancel.ThrowIfCancellationRequested();
+            TransportProgress("Preparing your PS5 connection…");
+            string runtime=Field(await PrepareConnection("sources/Prepare-Decoder.ps1"),"runtime");
+            cancel.ThrowIfCancellationRequested();
+            if(string.IsNullOrEmpty(runtime)) throw new IOException("The video decoder runtime is unavailable.");
+
+            long last;
+            bool recentDisconnect=false;
+            if(lastDirectEnd.TryGetValue(console.Mac,out last)) {
+                int elapsed=(int)Math.Min(int.MaxValue,(Stopwatch.GetTimestamp()-last)*1000.0/Stopwatch.Frequency);
+                recentDisconnect=elapsed<60000;
+                if(elapsed<3000) {
+                    TransportProgress("Giving the PS5 time to release the previous session…");
+                    await Task.Delay(3000-elapsed,cancel);
+                }
+            }
+            for(int attempt=0;;attempt++) {
+                cancel.ThrowIfCancellationRequested();
+                int fps=UI<ComboBox>("DirectFps").SelectedIndex==1?30:60;
+                int hdr=UI<ComboBox>("HdrOutput").SelectedIndex;
+                int codec=DirectCodec(hdr==2 || (hdr==0 && DisplayTarget.Select("source",surface.Handle).AdvancedColorEnabled));
+                string pipe="Cadrivect-Video-"+Guid.NewGuid().ToString("N");
+                sessionVideoKbps=DirectKbps();
+                directCore=console.Connect(pipe,address,codec,fps,sessionVideoKbps,DirectStreamHeight(),EffectiveStreamVolume,
+                    UI<CheckBox>("DualSenseFeedback").IsChecked==true,UI<ComboBox>("DirectTouchpad").SelectedIndex==1);
+                playingMac=console.Mac; playingPipe=pipe; titleAddress=address;
+                TransportProgress("Connecting to "+console.Name+"…");
+                int rendererCode=await RunRenderer(new List<string>{"--direct-pipe",pipe,"--direct-runtime",runtime,"--target-fps",fps.ToString()});
+                preparing=true; rendering=null; UpdateTransport();
+                int coreCode=await ReleaseDirectHelper();
+                cancel.ThrowIfCancellationRequested();
+                bool temporary=coreCode==30 || coreCode==31 || (coreCode==32 && recentDisconnect);
+                if(firstFrame || !temporary || attempt>=directRetrySeconds.Length) {
+                    if(coreCode!=0) failure=CoreError(coreCode);
+                    else if(rendererCode!=0) failure=engine.Error();
+                    return;
+                }
+                int delay=directRetrySeconds[attempt];
+                string reason=coreCode==30?"The PS5 reports Remote Play is busy.":"The PS5 connection was temporarily unavailable.";
+                TransportProgress(reason+" Retrying in "+delay+" seconds ("+(attempt+1)+"/"+directRetrySeconds.Length+").");
+                await Task.Delay(delay*1000,cancel);
+            }
+        }
+        async Task<int> ReleaseDirectHelper()
+        {
+            var owned=directCore;
+            if(owned==null) return 0;
+            directCore=null;
+            DirectConsole.RequestDisconnect(owned);
+            try {
+                return await Task.Run(delegate {
+                    using(owned) {
+                        if(owned.WaitForExit(4000)) return owned.ExitCode;
+                        StopOwned(owned); return 0;
+                    }
+                });
+            } finally {
+                if(firstFrame && !string.IsNullOrEmpty(playingMac)) lastDirectEnd[playingMac]=Stopwatch.GetTimestamp();
+            }
+        }
         async Task EndPlayback()
         {
             stopping=true; UpdateTransport();
             try {
-                if(directCore!=null) {
-                    var owned=directCore; directCore=null;
-                    DirectConsole.RequestDisconnect(owned);
-                    await Task.Run(delegate {using(owned) {if(!owned.WaitForExit(1500)) StopOwned(owned);}});
-                }
+                await ReleaseDirectHelper();
             } catch(Exception e) {failure=e.GetBaseException().Message;}
             finally {
                 rendering=null; Finish(failure.Length==0);
@@ -385,6 +436,12 @@ namespace Cadrivect
             if(code==24 || code==25) return "The PS5 requires its user login PIN. Unlock the active console profile and reconnect.";
             if(code==28) return "The Direct audio volume control could not open. Reconnect to start the session.";
             if(code==26) return "The audio output could not start. Select an available Windows playback device and reconnect.";
+            if(code==30) return "The PS5 still reports Remote Play is in use. Check whether another Remote Play client is connected.";
+            if(code==31) return "The PS5 refused the Remote Play connection. Check that Remote Play is enabled and the console is reachable.";
+            if(code==32) return "The PS5 closed the Remote Play connection.";
+            if(code==33) return "The PS5 rejected this Remote Play protocol version.";
+            if(code==34) return "The PS5 reported that its Remote Play service crashed.";
+            if(code==35) return "The PS5 rejected the saved registration. Pair the console again.";
             if(code==23) return "The PS5 session disconnected. Check that the console is awake and its address is reachable.";
             return "The direct streaming engine stopped (code "+code+").";
         }

@@ -15,7 +15,7 @@ using System.Windows.Threading;
 
 internal static partial class WindowChromeProbe
 {
-    static int RunStopProbe(Assembly production,string root)
+    static int RunStopProbe(Assembly production,string root,string reconnectStage=null)
     {
         IsolateSetupProfile();
         var app=new Application();
@@ -23,7 +23,11 @@ internal static partial class WindowChromeProbe
         var type=production.GetType("Cadrivect.Dashboard",true);
         var dashboard=Activator.CreateInstance(type,BindingFlags.Instance|BindingFlags.NonPublic,null,new object[]{window,false},null);
         app.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle,new Action(async delegate {
-            try {await CheckStopModal(type,dashboard);completed=true;window.Close();}
+            try {
+                if(reconnectStage!=null) await CheckDirectReconnect(type,dashboard,reconnectStage);
+                else await CheckStopModal(type,dashboard);
+                completed=true;window.Close();
+            }
             catch(Exception error) {failure=error;app.Shutdown(1);}
         }));
         int result=app.Run(window);

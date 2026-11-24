@@ -11,6 +11,23 @@
 #define DIRECT_AUDIO_MAX_TARGET_US 55000u
 #define DIRECT_OPUS_MAX_MS 120u
 enum { DIRECT_AUDIO_DEVICE_ERROR = 26, DIRECT_AUDIO_FORMAT_ERROR = 29 };
+// Managed retries depend on these process exit codes. Keep unknown protocol
+// errors terminal: libchiaki also uses them for malformed or rejected requests.
+static inline int direct_quit_status(ChiakiQuitReason reason)
+{
+    switch (reason) {
+        case CHIAKI_QUIT_REASON_STOPPED:
+        case CHIAKI_QUIT_REASON_STREAM_CONNECTION_REMOTE_SHUTDOWN: return 0;
+        case CHIAKI_QUIT_REASON_SESSION_REQUEST_RP_IN_USE: return 30;
+        case CHIAKI_QUIT_REASON_SESSION_REQUEST_CONNECTION_REFUSED:
+        case CHIAKI_QUIT_REASON_CTRL_CONNECTION_REFUSED: return 31;
+        case CHIAKI_QUIT_REASON_STREAM_CONNECTION_REMOTE_DISCONNECTED: return 32;
+        case CHIAKI_QUIT_REASON_SESSION_REQUEST_RP_VERSION_MISMATCH: return 33;
+        case CHIAKI_QUIT_REASON_SESSION_REQUEST_RP_CRASH: return 34;
+        case CHIAKI_QUIT_REASON_PSN_REGIST_FAILED: return 35;
+        default: return 23;
+    }
+}
 #define DIRECT_AUDIO_CAPACITY 8192u /* frames; holds a 120 ms Opus packet at 48 kHz */
 typedef struct {
     HANDLE pipe, stop;

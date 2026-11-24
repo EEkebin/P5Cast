@@ -31,6 +31,12 @@ if (!(Test-Path -LiteralPath $upstream)) {
     if ($LASTEXITCODE -ne 0) { throw 'Could not obtain the official chiaki-ng sources.' }
 }
 if ((& git -C $upstream rev-parse HEAD) -ne $revision) { throw 'Unexpected chiaki-ng revision.' }
+$reconnectPatch = Join-Path $PSScriptRoot 'chiaki-reconnect.patch'
+& git -C $upstream apply --reverse --check --quiet $reconnectPatch
+if ($LASTEXITCODE -ne 0) {
+    & git -C $upstream apply $reconnectPatch
+    if ($LASTEXITCODE -ne 0) { throw 'Could not apply the pinned libchiaki reconnect fixes.' }
+}
 & git -C $upstream submodule update --init --depth 1 --jobs 3 third-party/nanopb third-party/gf-complete third-party/jerasure
 if ($LASTEXITCODE -ne 0) { throw 'Could not obtain the pinned chiaki-ng submodules.' }
 $env:MSYSTEM='UCRT64'

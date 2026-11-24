@@ -566,10 +566,48 @@ static void verify_rest(void)
     for (int i = 0; i < 3; i++) CloseHandle(events[i]);
 }
 
+// Reserve an unlistened loopback port so that the OS supplies a real TCP
+// refusal without another process being able to bind the test port.
+static void verify_connect_refusal(void)
+{
+    WSADATA wsa;
+    CHECK(WSAStartup(MAKEWORD(2, 2), &wsa) == 0);
+    SOCKET reserved = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    SOCKET client = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    CHECK(reserved != INVALID_SOCKET && client != INVALID_SOCKET);
+    struct sockaddr_in loopback = {0};
+    loopback.sin_family = AF_INET;
+    loopback.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    int address_len = sizeof(loopback);
+    CHECK(bind(reserved, (struct sockaddr *)&loopback, address_len) == 0);
+    CHECK(getsockname(reserved, (struct sockaddr *)&loopback, &address_len) == 0);
+    ChiakiStopPipe stop;
+    CHECK(chiaki_stop_pipe_init(&stop) == CHIAKI_ERR_SUCCESS);
+    CHECK(chiaki_socket_set_nonblock(client, true) == CHIAKI_ERR_SUCCESS);
+    CHECK(chiaki_stop_pipe_connect(&stop, client, (struct sockaddr *)&loopback, address_len, 5000)
+        == CHIAKI_ERR_CONNECTION_REFUSED);
+    closesocket(client);
+    closesocket(reserved);
+    chiaki_stop_pipe_fini(&stop);
+    WSACleanup();
+}
+
 #undef main
 int main(void)
 {
     SDL_SetMainReady();
+    verify_connect_refusal();
+    CHECK(direct_quit_status(CHIAKI_QUIT_REASON_SESSION_REQUEST_RP_IN_USE) == 30);
+    CHECK(direct_quit_status(CHIAKI_QUIT_REASON_SESSION_REQUEST_CONNECTION_REFUSED) == 31);
+    CHECK(direct_quit_status(CHIAKI_QUIT_REASON_CTRL_CONNECTION_REFUSED) == 31);
+    CHECK(direct_quit_status(CHIAKI_QUIT_REASON_STREAM_CONNECTION_REMOTE_DISCONNECTED) == 32);
+    CHECK(direct_quit_status(CHIAKI_QUIT_REASON_SESSION_REQUEST_RP_VERSION_MISMATCH) == 33);
+    CHECK(direct_quit_status(CHIAKI_QUIT_REASON_SESSION_REQUEST_RP_CRASH) == 34);
+    CHECK(direct_quit_status(CHIAKI_QUIT_REASON_PSN_REGIST_FAILED) == 35);
+    CHECK(direct_quit_status(CHIAKI_QUIT_REASON_CTRL_CONNECT_FAILED) == 23);
+    CHECK(direct_quit_status(CHIAKI_QUIT_REASON_SESSION_REQUEST_UNKNOWN) == 23);
+    CHECK(direct_quit_status(CHIAKI_QUIT_REASON_STOPPED) == 0);
+    CHECK(direct_quit_status(CHIAKI_QUIT_REASON_STREAM_CONNECTION_REMOTE_SHUTDOWN) == 0);
     verify_profile();
     for (int codec = 1; codec <= 3; codec++) {
         for (unsigned version = 1; version <= 3; version++) verify_video(codec, version);

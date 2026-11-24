@@ -59,7 +59,7 @@ done
 # statically linked into it, next to the distributed native binary.
 tar --exclude=.git --exclude=__pycache__ --exclude='*.pyc' -czf "$stage/Direct-source.tar.gz" \
     -C "$src" Audio.c Direct.c Direct.h Gamepad.c Haptics.c Haptics.h HapticsVerify.c Register.c Rest.c Verify.c Video.c CMakeLists.txt \
-        Build.ps1 build-native.sh packages.sha256 LICENSE.txt README.md \
+        Build.ps1 build-native.sh packages.sha256 chiaki-reconnect.patch LICENSE.txt README.md \
     -C "$work" upstream/.gitmodules upstream/CMakeLists.txt upstream/COPYING upstream/LICENSES \
         upstream/cmake upstream/lib upstream/third-party/CMakeLists.txt \
         upstream/third-party/nanopb upstream/third-party/gf-complete upstream/third-party/jerasure

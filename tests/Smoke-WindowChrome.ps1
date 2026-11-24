@@ -1,6 +1,6 @@
 # After Build.ps1. The WPF test only opens on a disposable, inactive Windows desktop.
 [CmdletBinding()]
-param([string]$AppRoot,[switch]$CheckRenderers,[switch]$CheckHdr,[switch]$CheckScaling,[switch]$CheckDrawers,[string]$Screenshot,[switch]$CheckWipeInput,[switch]$CheckTransport,[switch]$CheckSetup,[switch]$CheckStop,[switch]$CheckPopout)
+param([string]$AppRoot,[switch]$CheckRenderers,[switch]$CheckHdr,[switch]$CheckScaling,[switch]$CheckDrawers,[string]$Screenshot,[switch]$CheckWipeInput,[switch]$CheckTransport,[switch]$CheckSetup,[switch]$CheckStop,[switch]$CheckPopout,[switch]$CheckReconnect)
 $ErrorActionPreference='Stop'
 if(!$AppRoot){$AppRoot=Split-Path $PSScriptRoot}
 $AppRoot=(Resolve-Path -LiteralPath $AppRoot).Path
@@ -14,7 +14,8 @@ try {
     $manifest=Join-Path (Split-Path $PSScriptRoot) 'app\app.manifest'
     $refs=@('PresentationFramework','PresentationCore','WindowsBase','UIAutomationTypes','UIAutomationProvider') | ForEach-Object {"/r:$fx\WPF\$_.dll"}
     $probe=Join-Path $stage 'WindowChromeProbe.exe'
-    & "$fx\csc.exe" /nologo /target:exe /optimize+ /platform:x64 /r:System.Xaml.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll "/win32manifest:$manifest" @refs "/out:$probe" "$PSScriptRoot\WindowChromeProbe.cs" "$PSScriptRoot\DrawerProbe.cs" "$PSScriptRoot\SettingsControlsProbe.cs" "$PSScriptRoot\WipeInputProbe.cs" "$PSScriptRoot\..\engine\WipeLayout.cs" "$PSScriptRoot\TransportProbe.cs" "$PSScriptRoot\VolumeControlsProbe.cs" "$PSScriptRoot\SetupWizardProbe.cs" "$PSScriptRoot\StopModalProbe.cs" "$PSScriptRoot\PopoutProbe.cs"
+    $refs+="/r:System.Security.dll"
+    & "$fx\csc.exe" /nologo /target:exe /optimize+ /platform:x64 /r:System.Xaml.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll "/win32manifest:$manifest" @refs "/out:$probe" "$PSScriptRoot\WindowChromeProbe.cs" "$PSScriptRoot\DrawerProbe.cs" "$PSScriptRoot\SettingsControlsProbe.cs" "$PSScriptRoot\WipeInputProbe.cs" "$PSScriptRoot\..\engine\WipeLayout.cs" "$PSScriptRoot\TransportProbe.cs" "$PSScriptRoot\VolumeControlsProbe.cs" "$PSScriptRoot\SetupWizardProbe.cs" "$PSScriptRoot\StopModalProbe.cs" "$PSScriptRoot\PopoutProbe.cs" "$PSScriptRoot\ReconnectProbe.cs"
     if($LASTEXITCODE){throw 'Window chrome probe compilation failed.'}
     $prior=$env:P5CAST_PROBE_RENDERERS
     $priorScale=$env:P5CAST_PROBE_SCALING
@@ -31,10 +32,17 @@ try {
         $cases=@()
         if($CheckSetup){$cases+='setup'}
         if($CheckStop){$cases+='stop'}
+        if($CheckReconnect){$cases+='reconnect'}
         if(!$cases.Count -or $CheckTransport -or $CheckDrawers -or $CheckScaling -or $CheckRenderers -or $CheckHdr -or $CheckWipeInput -or $CheckPopout -or $Screenshot){$cases+='window'}
         foreach($case in $cases){
             $caseDir=Join-Path $stage $case
             [void][IO.Directory]::CreateDirectory($caseDir)
+            if($case -eq 'reconnect'){
+                $runtime=& "$AppRoot\sources\Prepare-Decoder.ps1" | ConvertFrom-Json
+                if(!$runtime.ok){throw 'Reconnect fixture requires a verified local video decoder'}
+                [IO.File]::WriteAllText((Join-Path $caseDir 'runtime.txt'),$runtime.runtime)
+                Copy-Item -LiteralPath "$PSScriptRoot\fixtures\text.h264" -Destination $caseDir
+            }
             $env:P5CAST_PROBE_SETUP=if($case -eq 'setup'){'1'}else{'0'}
             $env:P5CAST_PROBE_STOP=if($case -eq 'stop'){'1'}else{'0'}
             $window=$case -eq 'window'

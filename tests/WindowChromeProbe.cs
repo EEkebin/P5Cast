@@ -670,6 +670,7 @@ internal static partial class WindowChromeProbe
         var production=Assembly.LoadFrom(Path.Combine(root,"P5Cast.exe"));
         production.GetType("Cadrivect.Program",true).GetField("Root",BindingFlags.Static|BindingFlags.NonPublic).SetValue(null,root);
         if(Environment.GetEnvironmentVariable("P5CAST_PROBE_STOP")=="1") return RunStopProbe(production,root);
+        if(Path.GetFileName(stage)=="reconnect") return RunStopProbe(production,root,stage);
         Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle,setup ? (Action)CheckSetupWindow : reopen ? (Action)CheckSavedScale : CheckWindow);
         int code=(int)production.EntryPoint.Invoke(null,new object[]{new string[0]});
         if(failure!=null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
@@ -692,7 +693,7 @@ internal static partial class WindowChromeProbe
                 // These suites exercise four backends in sequence. Each gesture has its own deadline.
                 bool multiBackend=Environment.GetEnvironmentVariable("P5CAST_PROBE_RENDERERS")=="hdr" ||
                     Environment.GetEnvironmentVariable("P5CAST_PROBE_WIPE_INPUT")=="1";
-                uint timeoutMs=multiBackend ? 120000u :
+                uint timeoutMs=multiBackend || Path.GetFileName(stage)=="reconnect" ? 120000u :
                     CheckTransportOption || CheckPopoutOption || Environment.GetEnvironmentVariable("P5CAST_WIZARD_CASE")=="pair" ? 90000u : 30000u;
                 if(WaitForSingleObject(pi.Process,timeoutMs)!=0) {
                     TerminateProcess(pi.Process,2); WaitForSingleObject(pi.Process,3000);
@@ -704,6 +705,7 @@ internal static partial class WindowChromeProbe
         } finally {CloseDesktop(desktop);}
     }
     [STAThread] static int Main(string[] args) {
+        if(args.Length>=2 && args[0].StartsWith("Cadrivect-Video-",StringComparison.Ordinal)) return RunReconnectHelper(args);
         if(args.Length==1 && args[0]=="--stop-holder") {System.Threading.Thread.Sleep(45000);return 0;}
         if(args.Length==2 && args[0]=="--register") return RegisterSetupFixture(args[1]);
         report=Path.Combine(args[1],"chrome.log");

@@ -64,7 +64,7 @@ static void session_event(ChiakiEvent *event, void *user)
             break;
         case CHIAKI_EVENT_QUIT:
             InterlockedExchange(&core->connected, 0);
-            finish(core, chiaki_quit_reason_is_error(event->quit.reason) ? 23 : 0);
+            finish(core, direct_quit_status(event->quit.reason));
             break;
         default: break;
     }

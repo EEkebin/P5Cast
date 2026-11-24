@@ -54,10 +54,11 @@ namespace Cadrivect
         void MoveDashboard()
         {
             var target=UI<ComboBox>("PlaybackDisplay").SelectedItem as DisplayTarget;
-            if(target!=null) target.MoveSourceWindow(new WindowInteropHelper(window).Handle);
+            if(target!=null) target.MoveSourceWindow(new WindowInteropHelper(playerWindow ?? window).Handle);
         }
         void ToggleFullscreen()
         {
+            if(playerWindow!=null) {TogglePlayerFullscreen(); return;}
             surface.EndPointerGesture();
             SetFullscreenFrame(!fullscreen);
             fullscreen=!fullscreen;

@@ -278,6 +278,8 @@
       <Grid>
         <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Name="TransportRow" Height="52"/><RowDefinition Name="SettingsRow" Height="Auto"/></Grid.RowDefinitions>
         <Border Name="VideoHost" Background="Black" ClipToBounds="True"/>
+        <Button Name="DockPlaceholder" Content="Return video here" HorizontalAlignment="Center" VerticalAlignment="Center"
+                Visibility="Collapsed" ToolTip="Dock the player and keep playing"/>
         <Grid Name="OperationOverlay" Visibility="Collapsed" ClipToBounds="True" AutomationProperties.LabeledBy="{Binding ElementName=OperationTitle}">
           <Border Name="OperationCard" HorizontalAlignment="Center" VerticalAlignment="Top" MaxWidth="470" Margin="10,10,10,0" Padding="12,9" CornerRadius="10"
                   Background="{DynamicResource Theme.Surface}" BorderBrush="{DynamicResource Theme.Border}" BorderThickness="1">
@@ -333,6 +335,11 @@
             </Popup>
           </Grid>
           <Button DockPanel.Dock="Right" Name="Fullscreen" Content="Fullscreen" ToolTip="Fullscreen video (F11). Press Escape or double-click the video to return." Margin="0"/>
+          <Button DockPanel.Dock="Right" Name="PopoutVideo" Style="{StaticResource TitleAction}" ToolTip="Pop out video"
+                  AutomationProperties.Name="Pop out video" MinWidth="34" Padding="7,0" Margin="0,0,4,0">
+            <Path Name="PopoutGlyph" Data="M8,3 H2 V15 H15 V9 M10,1 H17 V8 M17,1 L8,10" Width="17" Height="17"
+                  Stroke="{DynamicResource Theme.Text}" StrokeThickness="1.5" StrokeLineJoin="Round" StrokeEndLineCap="Round"/>
+          </Button>
           <ToggleButton DockPanel.Dock="Right" Name="ShowSettings" Style="{StaticResource TitleAction}" AutomationProperties.Name="Settings drawer" Margin="0,0,6,0">
             <StackPanel Orientation="Horizontal"><TextBlock Name="SettingsActionLabel" Text="Settings" VerticalAlignment="Center"/>
               <Path Name="SettingsActionGlyph" Width="15" Height="15" Stretch="Uniform" Visibility="Collapsed" Stroke="{DynamicResource Theme.Muted}" StrokeThickness="1.5"

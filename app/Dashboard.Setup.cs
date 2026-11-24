@@ -83,7 +83,7 @@ namespace Cadrivect
             bool status=HistoryOpen;
             enabled=!dialog && !status;
             if(!enabled) surface.EndPointerGesture();
-            surface.ClipForModal(status);
+            surface.ClipForModal(status && playerWindow==null);
             UI<Border>("VideoHost").Visibility=dialog?Visibility.Hidden:Visibility.Visible;
             UI<Border>("HeaderBar").IsEnabled=!status;
             foreach(string name in new[]{"Workspace","StatusFooter","PlayNav","HostNav","ClientNav","ShowStats"})

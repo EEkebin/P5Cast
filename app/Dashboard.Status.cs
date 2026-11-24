@@ -33,7 +33,7 @@ namespace Cadrivect
             UI<Button>("CloseStatusHistory").Click+=delegate {SetStatusHistory(false);};
             UI<Button>("CancelOperation").Click+=delegate {CancelCurrentOperation();};
             var card=UI<Border>("OperationCard");
-            card.LayoutUpdated+=delegate {if(OperationOpen) surface.ClipForProgress(card);};
+            card.LayoutUpdated+=delegate {if(OperationOpen && playerWindow==null) surface.ClipForProgress(card);};
             Show(UI<TextBlock>("Status").Text);
         }
 

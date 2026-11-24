@@ -25,7 +25,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.29.0.0")]
+[assembly: AssemblyVersion("0.30.1.0")]
 
 namespace Cadrivect
 {
@@ -289,7 +289,7 @@ namespace Cadrivect
                 if(Active || preparing) await UserStop(); else await StartPlayback();
             };
             UI<Button>("Fullscreen").Click+=delegate {ToggleFullscreen();};
-            window.PreviewKeyDown+=async delegate(object sender,KeyEventArgs e) {
+            playbackKey=async delegate(object sender,KeyEventArgs e) {
                 bool chord=(Keyboard.Modifiers & (ModifierKeys.Control|ModifierKeys.Alt))==(ModifierKeys.Control|ModifierKeys.Alt);
                 var key=e.Key==Key.System?e.SystemKey:e.Key;
                 if(HistoryOpen) {
@@ -320,10 +320,12 @@ namespace Cadrivect
                 else if(chord && key==Key.B && rendering!=null) meter.ToggleOriginal();
                 else if(key==Key.Escape && surface.EndPointerGesture(true)) {e.Handled=true; return;}
                 else if(key==Key.Escape && UI<StackPanel>("PairPanel").IsVisible) SetPage("Play");
-                else if(key==Key.Escape && fullscreen) ToggleFullscreen();
+                else if(key==Key.Escape && (fullscreen || playerFullscreen)) ToggleFullscreen();
                 else return;
                 e.Handled=true;
             };
+            window.PreviewKeyDown+=playbackKey;
+            InitPopout();
             Bind("PairConsole",async delegate {
                 if(pairingCancellation!=null) return;
                 pairingCancellation=new System.Threading.CancellationTokenSource();
@@ -458,10 +460,8 @@ namespace Cadrivect
                 handled=true; return IntPtr.Zero;
             }
             if(message==0x02E0 || message==0x007E) QueueInterfaceScale(); // WM_DPICHANGED / WM_DISPLAYCHANGE
-            if(message==0x232 || message==0x7E) {
-                RefreshDisplays(DisplayTarget.DeviceForWindow(hwnd));
-                if(engine!=null) engine.InvalidateDisplay();
-            }
+            if((message==0x232 || message==0x7E) && hwnd==new WindowInteropHelper(playerWindow ?? window).Handle)
+                SyncPlaybackDisplay(playerWindow ?? window);
             return IntPtr.Zero;
         }
         string SelectedDisplayName()

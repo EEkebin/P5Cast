@@ -116,7 +116,12 @@ internal static partial class WindowChromeProbe
     static RotateTransform Rotation(Line line) { return Transforms(line).Children.OfType<RotateTransform>().Single(); }
     static double Shift(Line line) { return Transforms(line).Children.OfType<TranslateTransform>().Single().Y; }
     static bool Near(double x,double y) { return Math.Abs(x-y)<0.25; }
-    static IntPtr Video() { return ((HwndHost)Find<Border>("VideoHost").Child).Handle; }
+    static IntPtr Video() {
+        var host=Find<Border>("VideoHost").Child as HwndHost;
+        var player=DetachedPlayer();
+        if(host==null && player!=null) host=((Border)player.FindName("PlayerSurface")).Child as HwndHost;
+        return host==null ? IntPtr.Zero : host.Handle;
+    }
 
     static FrameworkElement FindVisual(DependencyObject parent,string typeName,Func<FrameworkElement,bool> accept=null) {
         for(int i=0;i<VisualTreeHelper.GetChildrenCount(parent);i++) {
@@ -416,9 +421,11 @@ internal static partial class WindowChromeProbe
             Note("Native maximize, restore and minimize passed.");
             Require(Find<ComboBox>("SourceChoice").SelectedItem.ToString()=="Offline demo","Refusing to start a network source.");
             if(CheckTransportOption) {await CheckVolumeControls(); await CheckIdleRendererCancel(); await CheckCanceledStartup();}
+            if(CheckPopoutOption) await CheckIdlePopout();
             if(CheckTransportOption) BeginDemoWithSpinner(); else Click("OpenSource");
             await Until(delegate{return status.Text=="Offline demo";},"The offline demo did not present its first frame.");
             if(CheckTransportOption) {await WaitForOperation("Presented offline demo");await CheckLiveTransport();}
+            if(CheckPopoutOption) await CheckLivePopout();
             await CheckComparisonViews();
             var peer=Peer(toggle);
             var provider=peer.GetPattern(PatternInterface.Toggle) as IToggleProvider;
@@ -665,7 +672,7 @@ internal static partial class WindowChromeProbe
         if(Environment.GetEnvironmentVariable("P5CAST_PROBE_STOP")=="1") return RunStopProbe(production,root);
         Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle,setup ? (Action)CheckSetupWindow : reopen ? (Action)CheckSavedScale : CheckWindow);
         int code=(int)production.EntryPoint.Invoke(null,new object[]{new string[0]});
-        if(failure!=null) throw failure;
+        if(failure!=null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
         Require(completed && code==0,"The production window did not close normally.");
         return 0;
     }
@@ -686,7 +693,7 @@ internal static partial class WindowChromeProbe
                 bool multiBackend=Environment.GetEnvironmentVariable("P5CAST_PROBE_RENDERERS")=="hdr" ||
                     Environment.GetEnvironmentVariable("P5CAST_PROBE_WIPE_INPUT")=="1";
                 uint timeoutMs=multiBackend ? 120000u :
-                    CheckTransportOption || Environment.GetEnvironmentVariable("P5CAST_WIZARD_CASE")=="pair" ? 90000u : 30000u;
+                    CheckTransportOption || CheckPopoutOption || Environment.GetEnvironmentVariable("P5CAST_WIZARD_CASE")=="pair" ? 90000u : 30000u;
                 if(WaitForSingleObject(pi.Process,timeoutMs)!=0) {
                     TerminateProcess(pi.Process,2); WaitForSingleObject(pi.Process,3000);
                     throw new TimeoutException("The private dashboard did not close in time.");

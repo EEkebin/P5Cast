@@ -50,6 +50,7 @@ namespace Cadrivect
 
         void ApplyInterfaceScale()
         {
+            if(playerWindow!=null) UpdatePlayerScale();
             var source=PresentationSource.FromVisual(window) as HwndSource;
             if(source==null || source.CompositionTarget==null || window.WindowState==WindowState.Minimized) return;
             var info=new FrameMonitor {Size=Marshal.SizeOf(typeof(FrameMonitor))};
@@ -73,7 +74,7 @@ namespace Cadrivect
             if(availableWidth<=0 || availableHeight<=0) return;
             double fit=Math.Min(availableWidth/MinimumLayoutWidth,availableHeight/MinimumLayoutHeight);
             double zoom=fullscreen?1:Math.Min(requested,fit);
-            surface.SetWipeScale((float)(dpi*zoom));
+            if(playerWindow==null) surface.SetWipeScale((float)(dpi*zoom));
             if(Math.Abs(interfaceTransform.ScaleX-zoom)>0.00001) {
                 interfaceTransform.ScaleX=zoom; interfaceTransform.ScaleY=zoom;
                 titleChrome.CaptionHeight=HeaderHeight*zoom;

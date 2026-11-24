@@ -17,7 +17,7 @@ internal static partial class WindowChromeProbe
     [DllImport("user32.dll")] static extern IntPtr ChildWindowFromPointEx(IntPtr parent,NativePoint point,uint skip);
     [DllImport("user32.dll",CharSet=CharSet.Unicode)]
     static extern IntPtr FindWindowEx(IntPtr parent,IntPtr after,string cls,string title);
-    static async Task CheckWipeInput(MethodInfo snapshot,string backend,bool hdr)
+    static async Task CheckWipeInput(MethodInfo snapshot,string backend,bool hdr,IntPtr popout=default(IntPtr))
     {
         var json=new JavaScriptSerializer();
         Func<Dictionary<string,object>> sample=()=>json.Deserialize<Dictionary<string,object>>((string)snapshot.Invoke(null,null));
@@ -29,7 +29,7 @@ internal static partial class WindowChromeProbe
         Require(button!=null && button.IsEnabled,"Wipe view is missing.");
         SelectPlaybackMode(button);
         await Until(()=>Equals(sample()["comparisonView"],comparison),comparison+" did not start.");
-        bool fullscreen=backend=="d3d12";
+        bool fullscreen=backend=="d3d12" && popout==IntPtr.Zero;
         if(fullscreen) {
             Click("Fullscreen");
             var full=Screen().Full;
@@ -50,7 +50,7 @@ internal static partial class WindowChromeProbe
             double sx=native.Width/Convert.ToDouble(frame["surfaceWidth"]),sy=native.Height/Convert.ToDouble(frame["surfaceHeight"]);
             var picture=new Rectangle((int)Math.Round(sx*Convert.ToDouble(frame["pictureX"])),(int)Math.Round(sy*Convert.ToDouble(frame["pictureY"])),
                                      (int)Math.Round(sx*Convert.ToDouble(frame["pictureWidth"])),(int)Math.Round(sy*Convert.ToDouble(frame["pictureHeight"])));
-            if(!horizontal) await CheckLoupeInput(backend,picture,native,sample);
+            if(!horizontal) await CheckLoupeInput(backend,picture,native,sample,popout==IntPtr.Zero ? hwnd : popout);
             await CheckWipeAxis(backend,picture,horizontal,slider,sample);
         }
         if(fullscreen) {
@@ -67,7 +67,7 @@ internal static partial class WindowChromeProbe
         Note(backend+" passed native dragging, cancellation and inset handle recovery on both axes.");
     }
 
-    static async Task CheckLoupeInput(string backend,Rectangle picture,Bounds native,Func<Dictionary<string,object>> sample) {
+    static async Task CheckLoupeInput(string backend,Rectangle picture,Bounds native,Func<Dictionary<string,object>> sample,IntPtr focusedWindow) {
         int x=picture.Left+picture.Width/4,y=picture.Top+picture.Height/4;
         Action<IntPtr,int> wheel=(target,delta)=>SendMessage(target,0x20A,new IntPtr(delta<<16),IntPtr.Zero);
         SendMessage(video,0x201,new IntPtr(1),Packed(x,y));
@@ -79,12 +79,12 @@ internal static partial class WindowChromeProbe
                         Math.Abs(Convert.ToDouble(sample()["loupeY"])-(y+.5)/native.Height)<.0005,
                     "The loupe did not track the pointer in screen pixels.");
         if(backend=="d3d11") {
-            wheel(video,60); wheel(hwnd,60);
+            wheel(video,60); wheel(focusedWindow,60);
             await Until(()=>Convert.ToInt32(sample()["loupeLevel"])==3,"Partial wheel deltas did not accumulate to one zoom step.");
             wheel(video,1200);
             await Until(()=>Convert.ToInt32(sample()["loupeLevel"])==5,"The loupe did not stop at 5x.");
-            wheel(hwnd,-1200);
-            await Until(()=>Convert.ToInt32(sample()["loupeLevel"])==0,"The focused dashboard wheel did not reach native scale.");
+            wheel(focusedWindow,-1200);
+            await Until(()=>Convert.ToInt32(sample()["loupeLevel"])==0,"The focused window did not forward wheel input down to native scale.");
             wheel(video,120);
             await Until(()=>Convert.ToInt32(sample()["loupeLevel"])==2,"One wheel step did not leave native scale.");
         }

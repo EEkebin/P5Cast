@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-AGPL-3.0-only-OpenSSL
 #include "Direct.h"
+#include "Haptics.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,6 +14,7 @@ typedef struct {
     Video video;
     Audio audio;
     Gamepad gamepad;
+    Haptics *haptics;
     ChiakiOpusDecoder opus;
     RestControl rest;
     uint8_t pin[4];
@@ -53,6 +55,13 @@ static void session_event(ChiakiEvent *event, void *user)
         case CHIAKI_EVENT_RUMBLE:
             InterlockedExchange(&core->rumble, 0x10000 | (event->rumble.left << 8) | event->rumble.right);
             break;
+        case CHIAKI_EVENT_TRIGGER_EFFECTS:
+        case CHIAKI_EVENT_TRIGGER_INTENSITY:
+            gamepad_feedback_event(&core->gamepad, event);
+            break;
+        case CHIAKI_EVENT_HAPTIC_INTENSITY:
+            haptics_intensity(core->haptics, event->intensity);
+            break;
         case CHIAKI_EVENT_QUIT:
             InterlockedExchange(&core->connected, 0);
             finish(core, chiaki_quit_reason_is_error(event->quit.reason) ? 23 : 0);
@@ -67,7 +76,7 @@ static void display_state(void *user, bool restricted)
     (void)user; (void)restricted;
 }
 
-static HANDLE connect_player(const char *name)
+static HANDLE connect_player(const char *name, HANDLE stop)
 {
     size_t length = strlen(name);
     if (length == 0 || length > 120) return INVALID_HANDLE_VALUE;
@@ -85,7 +94,7 @@ static HANDLE connect_player(const char *name)
         if (error != ERROR_PIPE_BUSY && error != ERROR_FILE_NOT_FOUND) break;
         if (error == ERROR_PIPE_BUSY) WaitNamedPipeA(path, 100);
         else Sleep(20);
-    } while (GetTickCount64() < deadline);
+    } while (GetTickCount64() < deadline && WaitForSingleObject(stop, 0) == WAIT_TIMEOUT);
     return INVALID_HANDLE_VALUE;
 }
 
@@ -104,14 +113,20 @@ static bool read_auth(ChiakiConnectInfo *info, Direct *core)
 
 static int run(Direct *core, const char *pipe_name, ChiakiConnectInfo *info)
 {
-    core->video.pipe = connect_player(pipe_name);
+    core->video.pipe = connect_player(pipe_name, core->video.stop);
     if (core->video.pipe == INVALID_HANDLE_VALUE) return 21;
     if (!video_header(&core->video)) return 21;
     SDL_SetMainReady();
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     SDL_SetHint(SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS, "0");
+    const char *option = getenv("P5CAST_DUALSENSE_FEEDBACK");
+    bool feedback = !option || strcmp(option, "0") != 0;
+    if (feedback) SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5_RUMBLE, "1");
     if (SDL_Init(SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) < 0) return 22;
     if (chiaki_lib_init() != CHIAKI_ERR_SUCCESS) return 22;
+    gamepad_init(&core->gamepad);
+    gamepad_tick(&core->gamepad);
+    info->enable_dualsense = feedback && (!core->gamepad.pad || gamepad_is_dualsense(core->gamepad.pad));
     ChiakiLog log;
     chiaki_log_init(&log, 0, NULL, NULL); // Never persist network credentials or protocol traces.
     if (chiaki_session_init(&core->session, info, &log) != CHIAKI_ERR_SUCCESS) return 23;
@@ -121,22 +136,44 @@ static int run(Direct *core, const char *pipe_name, ChiakiConnectInfo *info)
     ChiakiAudioSink sink;
     audio_decoder_sink(&core->audio, &core->opus, &sink);
     chiaki_session_set_audio_sink(&core->session, &sink);
+    if (info->enable_dualsense) {
+        core->haptics = haptics_create();
+        if (core->haptics) {
+            ChiakiAudioSink motors = {0};
+            motors.user = core->haptics;
+            motors.frame_cb = haptics_frame;
+            chiaki_session_set_haptics_sink(&core->session, &motors);
+        }
+    }
     ChiakiCtrlDisplaySink display = {0};
     display.user = core;
     display.cantdisplay_cb = display_state;
     chiaki_session_ctrl_set_display_sink(&core->session, &display);
     chiaki_session_set_event_cb(&core->session, session_event, core);
     chiaki_session_set_video_sample_cb(&core->session, video_sample, &core->video);
-    gamepad_init(&core->gamepad);
     int status = 23;
     if (chiaki_session_start(&core->session) == CHIAKI_ERR_SUCCESS) {
+        chiaki_session_set_controller_state(&core->session, &core->gamepad.current);
         uint64_t next_stats = GetTickCount64() + 1000;
+        bool rumbling = false;
         while (WaitForSingleObject(core->video.stop, 4) == WAIT_TIMEOUT) {
             rest_tick(&core->rest, InterlockedCompareExchange(&core->connected, 0, 0) != 0,
                       &core->session, chiaki_session_goto_bed);
             if (gamepad_tick(&core->gamepad)) chiaki_session_set_controller_state(&core->session, &core->gamepad.current);
+            if (info->enable_dualsense) {
+                gamepad_apply_feedback(&core->gamepad);
+                haptics_controller(core->haptics, core->gamepad.pad);
+            }
             LONG rumble = InterlockedExchange(&core->rumble, 0);
-            if (rumble && core->gamepad.pad) SDL_GameControllerRumble(core->gamepad.pad, ((rumble >> 8) & 255) * 257, (rumble & 255) * 257, 500);
+            if (!core->gamepad.pad) rumbling = false;
+            else if ((rumble || rumbling) && haptics_playing(core->haptics)) {
+                // Return the motors to waveform playback after legacy rumble.
+                if (rumbling) SDL_GameControllerRumble(core->gamepad.pad, 0, 0, 0);
+                rumbling = false;
+            } else if (rumble) {
+                int sent = SDL_GameControllerRumble(core->gamepad.pad, ((rumble >> 8) & 255) * 257, (rumble & 255) * 257, 500);
+                rumbling = sent == 0 && (rumble & 0xffff);
+            }
             LONG audio_error = InterlockedCompareExchange(&core->audio.failed, 0, 0);
             if (audio_error) { finish(core, audio_error); break; }
             if (GetTickCount64() >= next_stats) {
@@ -145,12 +182,15 @@ static int run(Direct *core, const char *pipe_name, ChiakiConnectInfo *info)
                 next_stats = GetTickCount64() + 1000;
             }
         }
+        gamepad_release_feedback(&core->gamepad);
+        if (rumbling && core->gamepad.pad) SDL_GameControllerRumble(core->gamepad.pad, 0, 0, 0);
         chiaki_session_stop(&core->session);
         chiaki_session_join(&core->session);
         status = core->status;
     }
     chiaki_opus_decoder_fini(&core->opus);
     chiaki_session_fini(&core->session);
+    haptics_destroy(core->haptics);
     return status;
 }
 
@@ -182,6 +222,8 @@ int main(int argc, char **argv)
     if (read_auth(&info, &core)) {
         if (rest_control) {
             rest_open(&core.rest, argv[1]);
+            HANDLE stop = session_stop_event(argv[1]);
+            if (stop) { CloseHandle(core.video.stop); core.video.stop = stop; }
             core.report_peer = GetFileType(GetStdHandle(STD_OUTPUT_HANDLE)) == FILE_TYPE_PIPE;
         }
         // The dashboard initializes this scalar before releasing credentials on stdin.

@@ -24,7 +24,7 @@ namespace Cadrivect
         {
             public readonly string Pipe;
             readonly string prefix;
-            readonly EventWaitHandle[] events=new EventWaitHandle[3];
+            readonly EventWaitHandle[] events=new EventWaitHandle[4];
             MemoryMappedFile volumeMap;
             MemoryMappedViewAccessor volume;
             Task pending;
@@ -37,7 +37,7 @@ namespace Cadrivect
                 using(var user=WindowsIdentity.GetCurrent())
                     acl.AddAccessRule(new EventWaitHandleAccessRule(user.User,EventWaitHandleRights.FullControl,AccessControlType.Allow));
                 try {
-                    string[] names={"request","accepted","rejected"};
+                    string[] names={"request","accepted","rejected","disconnect"};
                     for(int i=0;i<names.Length;i++) {
                         bool created;
                         events[i]=new EventWaitHandle(false,EventResetMode.ManualReset,prefix+names[i],out created,acl);
@@ -60,6 +60,10 @@ namespace Cadrivect
                 lock(this) {
                     if(volume!=null)volume.Write(0,Math.Max(0,Math.Min(100,percent)));
                 }
+            }
+            public void Disconnect()
+            {
+                lock(this) {if(events[3]!=null) events[3].Set();}
             }
             public Task Request(Process owned)
             {
@@ -95,9 +99,16 @@ namespace Cadrivect
                 lock(this) {
                     if(volume!=null){volume.Dispose();volume=null;}
                     if(volumeMap!=null){volumeMap.Dispose();volumeMap=null;}
+                    for(int i=0;i<events.Length;i++) {
+                        if(events[i]!=null) {events[i].Dispose(); events[i]=null;}
+                    }
                 }
-                foreach(var handle in events) if(handle!=null) handle.Dispose();
             }
+        }
+        internal static void RequestDisconnect(Process owned)
+        {
+            RestControl control;
+            if(owned!=null && restControls.TryGetValue(owned,out control)) control.Disconnect();
         }
         internal static void SetVolume(Process owned,int percent)
         {
@@ -232,12 +243,15 @@ namespace Cadrivect
                 throw new ArgumentException("Enter the PS5’s LAN address or DNS name.");
             return s;
         }
-        static Process Begin(string args,bool captureOutput,bool streamStats=false)
+        static Process Begin(string args,bool captureOutput,bool? dualSenseFeedback=null)
         {
             if(!File.Exists(CorePath)) throw new FileNotFoundException("The direct streaming engine is missing. Extract the complete P5Cast release.");
             var info=new ProcessStartInfo(CorePath,args) {WorkingDirectory=Path.GetDirectoryName(CorePath),UseShellExecute=false,
                 CreateNoWindow=true,RedirectStandardInput=true,RedirectStandardOutput=captureOutput};
-            if(streamStats) info.EnvironmentVariables["P5CAST_DIRECT_STATS_VERSION"]="3";
+            if(dualSenseFeedback.HasValue) {
+                info.EnvironmentVariables["P5CAST_DIRECT_STATS_VERSION"]="3";
+                info.EnvironmentVariables["P5CAST_DUALSENSE_FEEDBACK"]=dualSenseFeedback.Value ? "1" : "0";
+            }
             return Process.Start(info);
         }
         static void WriteSecrets(Process p,byte[] secret)
@@ -256,7 +270,7 @@ namespace Cadrivect
             return Connect(pipe,host,codec,fps,videoKbps,streamHeight,null);
         }
 
-        internal Process Connect(string pipe,string host,int codec,int fps,int videoKbps,int streamHeight,int? volume)
+        internal Process Connect(string pipe,string host,int codec,int fps,int videoKbps,int streamHeight,int? volume,bool dualSenseFeedback=true)
         {
             if(Array.IndexOf(StreamHeights,streamHeight)<0)
                 throw new ArgumentOutOfRangeException("streamHeight","Choose a supported PS5 stream resolution.");
@@ -269,7 +283,7 @@ namespace Cadrivect
             byte[] secret=Keys(); Process p=null;
             try {
                 if(secret.Length!=32 && secret.Length!=36) throw new InvalidDataException("This registration needs to be paired again.");
-                p=Begin(arguments,true,true);
+                p=Begin(arguments,true,dualSenseFeedback);
                 var control=new RestControl(pipe,p.Id,volume);
                 try {
                     restControls.Add(p,control);

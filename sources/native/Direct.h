@@ -49,6 +49,12 @@ typedef struct {
     ChiakiControllerState current;
     int8_t touches[2];
     uint64_t next_scan;
+    SRWLOCK feedback_lock;
+    ChiakiTriggerEffectsEvent triggers;
+    ChiakiDualSenseEffectIntensity trigger_strength;
+    uint8_t last_report[47];
+    uint64_t retry_after;
+    bool feedback_sent;
 } Gamepad;
 
 typedef struct {
@@ -62,6 +68,7 @@ typedef struct {
     bool queued;
 } RestControl;
 
+HANDLE session_stop_event(const char *pipe_name);
 void rest_open(RestControl *control, const char *pipe_name);
 void rest_close(RestControl *control);
 void rest_tick(RestControl *control, bool connected, ChiakiSession *session, ChiakiErrorCode (*send)(ChiakiSession *));
@@ -79,3 +86,7 @@ void SDLCALL audio_render(void *user, Uint8 *stream, int length);
 void audio_stats(Audio *audio, uint64_t now_ms, DirectMetrics *metrics);
 void gamepad_init(Gamepad *gamepad);
 bool gamepad_tick(Gamepad *gamepad);
+bool gamepad_is_dualsense(SDL_GameController *pad);
+void gamepad_feedback_event(Gamepad *pad, const ChiakiEvent *event);
+void gamepad_apply_feedback(Gamepad *pad);
+void gamepad_release_feedback(Gamepad *pad);

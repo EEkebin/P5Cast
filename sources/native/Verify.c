@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-AGPL-3.0-only-OpenSSL
 #include "Direct.h"
+#include "Haptics.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -363,6 +364,69 @@ static void verify_first_audio_volume(void)
     puts("Measured SDL disk output: first 240 stereo frames muted, 2 ms gain ramps, exact 25%/100% plateaus, smooth return to silence.");
 }
 
+static uint8_t observed_effect[47];
+static int effect_calls;
+
+static int SDLCALL observe_effect(void *user, const void *data, int size)
+{
+    (void)user;
+    CHECK(size == sizeof(observed_effect));
+    memcpy(observed_effect, data, sizeof(observed_effect));
+    effect_calls++;
+    return 0;
+}
+
+static void verify_triggers(Gamepad *pad)
+{
+    SDL_VirtualJoystickDesc desc = {0};
+    desc.version = SDL_VIRTUAL_JOYSTICK_DESC_VERSION;
+    desc.type = SDL_JOYSTICK_TYPE_GAMECONTROLLER;
+    desc.naxes = SDL_CONTROLLER_AXIS_MAX;
+    desc.nbuttons = SDL_CONTROLLER_BUTTON_MAX;
+    desc.vendor_id = 0x054c;
+    desc.product_id = 0x0ce6;
+    desc.SendEffect = observe_effect;
+    ChiakiEvent event = {.type = CHIAKI_EVENT_TRIGGER_EFFECTS};
+    event.trigger_effects.type_left = 0x21;
+    event.trigger_effects.type_right = 0x26;
+    for (int i = 0; i < 10; i++) {
+        event.trigger_effects.left[i] = 10 + i;
+        event.trigger_effects.right[i] = 90 - i;
+    }
+    gamepad_feedback_event(pad, &event);
+    for (int pass = 0; pass < 2; pass++) {
+        if (pass) desc.product_id = 0x0df2;
+        int index = SDL_JoystickAttachVirtualEx(&desc);
+        CHECK(index >= 0);
+        gamepad_tick(pad);
+        CHECK(gamepad_is_dualsense(pad->pad));
+        int before = effect_calls;
+        gamepad_apply_feedback(pad);
+        CHECK(effect_calls == before+1 && observed_effect[0] == 0x0c && observed_effect[1] == 0x40);
+        CHECK(observed_effect[10] == 0x26 && observed_effect[21] == 0x21);
+        CHECK(!memcmp(observed_effect+11, event.trigger_effects.right, 10));
+        CHECK(!memcmp(observed_effect+22, event.trigger_effects.left, 10));
+        gamepad_apply_feedback(pad);
+        CHECK(effect_calls == before+1);
+        ChiakiEvent strength = {.type = CHIAKI_EVENT_TRIGGER_INTENSITY, .intensity = Off};
+        gamepad_feedback_event(pad,&strength);
+        gamepad_apply_feedback(pad);
+        CHECK(observed_effect[10] == 5 && observed_effect[21] == 5);
+        strength.intensity = Weak;
+        gamepad_feedback_event(pad,&strength);
+        gamepad_apply_feedback(pad);
+        CHECK(observed_effect[10] == 0x26 && observed_effect[36] == 0x90);
+        strength.intensity = Medium;
+        gamepad_feedback_event(pad,&strength);
+        gamepad_apply_feedback(pad);
+        CHECK(observed_effect[36] == 0x60);
+        gamepad_release_feedback(pad);
+        CHECK(observed_effect[0] == 0x0c && observed_effect[10] == 5 && observed_effect[21] == 5);
+        CHECK(SDL_JoystickDetachVirtual(index) == 0);
+        CHECK(gamepad_tick(pad) && !pad->pad);
+    }
+}
+
 static void verify_virtual_pad(void)
 {
     SDL_SetHintWithPriority(SDL_HINT_JOYSTICK_HIDAPI, "0", SDL_HINT_OVERRIDE);
@@ -377,6 +441,9 @@ static void verify_virtual_pad(void)
     gamepad_init(&pad);
     pad.pad = SDL_GameControllerOpen(index);
     CHECK(pad.pad);
+    CHECK(!gamepad_is_dualsense(pad.pad));
+    gamepad_apply_feedback(&pad);
+    CHECK(!pad.feedback_sent);
     SDL_Joystick *joy = SDL_GameControllerGetJoystick(pad.pad);
     CHECK(SDL_JoystickSetVirtualButton(joy, SDL_CONTROLLER_BUTTON_A, SDL_PRESSED) == 0);
     CHECK(SDL_JoystickSetVirtualButton(joy, SDL_CONTROLLER_BUTTON_START, SDL_PRESSED) == 0);
@@ -388,6 +455,7 @@ static void verify_virtual_pad(void)
     CHECK(pad.current.left_x == 14500 && pad.current.r2_state == 255);
     CHECK(SDL_JoystickDetachVirtual(index) == 0);
     CHECK(gamepad_tick(&pad) && !pad.pad && !pad.current.buttons && !pad.current.r2_state);
+    verify_triggers(&pad);
     SDL_QuitSubSystem(SDL_INIT_GAMECONTROLLER);
 }
 
@@ -410,6 +478,16 @@ static void verify_rest(void)
         CHECK(events[i] && GetLastError() != ERROR_ALREADY_EXISTS);
     }
     RestControl control = {0};
+    snprintf(name, sizeof(name), "Local\\P5Cast.Rest.%lu.fixture.disconnect", GetCurrentProcessId());
+    HANDLE stop = CreateEventA(NULL, TRUE, FALSE, name);
+    CHECK(stop && GetLastError() != ERROR_ALREADY_EXISTS);
+    HANDLE native_stop = session_stop_event("fixture");
+    CHECK(native_stop && !session_stop_event("another-session"));
+    CHECK(WaitForSingleObject(native_stop, 0) == WAIT_TIMEOUT);
+    CHECK(SetEvent(stop) && WaitForSingleObject(native_stop, 0) == WAIT_OBJECT_0);
+    CHECK(WaitForSingleObject(events[0], 0) == WAIT_TIMEOUT);
+    CloseHandle(native_stop);
+    CloseHandle(stop);
     rest_open(&control, "another-session");
     rest_tick(&control, true, NULL, record_rest);
     CHECK(!rest_calls && !control.request);
@@ -447,6 +525,7 @@ int main(void)
     verify_first_audio_volume();
     verify_rest();
     verify_virtual_pad();
+    verify_haptics();
     puts("Verified video bitrate profiles, CDV1/CDV2/CDV3 framing and loss counters, actual decoded stereo Opus and bitrate, bounded dummy queue, virtual controller, and session-scoped explicit rest command exactly once.");
     return 0;
 }

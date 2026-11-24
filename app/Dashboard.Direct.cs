@@ -198,6 +198,7 @@ namespace Cadrivect
             if(!stopRequested && (preparing || Active) && !closing && !stopping)
                 Show(preparing || (rendering!=null && !firstFrame) ? "Cancelling connection…" : "Disconnecting…");
             stopRequested=true;
+            DirectConsole.RequestDisconnect(directCore);
             ReleaseStreamAudio();
             if(preparingConnection!=null) preparingConnection.Cancel();
             stopping=preparing || Active;
@@ -262,7 +263,8 @@ namespace Cadrivect
                     string pipe="Cadrivect-Video-"+Guid.NewGuid().ToString("N");
                     args.AddRange(new[]{"--direct-pipe",pipe,"--direct-runtime",runtime,"--target-fps",fps.ToString()});
                     sessionVideoKbps=DirectKbps();
-                    directCore=console.Connect(pipe,address,codec,fps,sessionVideoKbps,DirectStreamHeight(),EffectiveStreamVolume);
+                    directCore=console.Connect(pipe,address,codec,fps,sessionVideoKbps,DirectStreamHeight(),EffectiveStreamVolume,
+                        UI<CheckBox>("DualSenseFeedback").IsChecked==true);
                     playingMac=console.Mac; playingPipe=pipe; titleAddress=address;
                     TransportProgress("Connecting to "+console.Name+"…");
                 } else if(source=="Demo") {
@@ -295,6 +297,7 @@ namespace Cadrivect
             try {
                 if(directCore!=null) {
                     var owned=directCore; directCore=null;
+                    DirectConsole.RequestDisconnect(owned);
                     await Task.Run(delegate {using(owned) {if(!owned.WaitForExit(1500)) StopOwned(owned);}});
                 }
             } catch(Exception e) {failure=e.GetBaseException().Message;}

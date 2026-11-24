@@ -25,7 +25,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.28.0.0")]
+[assembly: AssemblyVersion("0.29.0.0")]
 
 namespace Cadrivect
 {
@@ -243,6 +243,9 @@ namespace Cadrivect
             var sdrCodec=UI<ComboBox>("DirectSdrCodec");
             sdrCodec.ItemsSource=new[]{"H.265 (HEVC)","H.264 (AVC)"};
             sdrCodec.SelectedIndex=Field(saved,"directSdrCodec")=="h264" ? 1 : 0;
+            var dualSenseFeedback=UI<CheckBox>("DualSenseFeedback");
+            dualSenseFeedback.IsChecked=!Field(saved,"dualSenseFeedback").Equals("False",StringComparison.OrdinalIgnoreCase);
+            dualSenseFeedback.Click+=delegate {SaveSettings();};
             var directRate=UI<ComboBox>("DirectBitrate");
             directRate.ItemsSource=directRates.Select(rate=>rate+" Mbps").ToArray();
             directRate.SelectedIndex=SavedChoiceIndex(saved,"directMbps",directRates,100);
@@ -675,6 +678,7 @@ namespace Cadrivect
                     fpsDialMaximum=meter.DialMaximum,streamVolume=volumeLevel,streamMuted=volumeMuted,setupVersion=setupVersion,consoleMac=pendingSetupConsole ?? (console==null?"":console.Mac),consoleAddresses=consoleAddresses,directStreamHeight=DirectStreamHeight(),directFps=UI<ComboBox>("DirectFps").SelectedIndex,
                     display=SelectedDisplayName(), uiScale=PreferredScalePercent,theme=themeId, resolution=UI<ComboBox>("RenderResolution").SelectedIndex,hdr=preferredHdr,renderer=SelectedRenderer,
                     directSdrCodec=UI<ComboBox>("DirectSdrCodec").SelectedIndex==1?"h264":"hevc",
+                    dualSenseFeedback=UI<CheckBox>("DualSenseFeedback").IsChecked==true,
                     useOpenNr=meter.UseOpenNr,openNrModelDirectory=openNrModelDirectory,
                     maximized=(fullscreen?previousWindowState:window.WindowState)==WindowState.Maximized,
                     clientHdr=UI<CheckBox>("ClientHdr").IsChecked==true,hostDisplay=hostTarget==null ? "" : hostTarget.DeviceName,

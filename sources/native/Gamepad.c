@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-AGPL-3.0-only-OpenSSL
 #include "Direct.h"
+#include <string.h>
 
 static const struct { SDL_GameControllerButton button; uint32_t mask; } buttons[] = {
     {SDL_CONTROLLER_BUTTON_A, CHIAKI_CONTROLLER_BUTTON_CROSS}, {SDL_CONTROLLER_BUTTON_B, CHIAKI_CONTROLLER_BUTTON_MOON},
@@ -16,6 +17,66 @@ void gamepad_init(Gamepad *pad)
 {
     chiaki_controller_state_set_idle(&pad->current);
     pad->touches[0] = pad->touches[1] = -1;
+    pad->trigger_strength = Strong;
+    pad->triggers.type_left = pad->triggers.type_right = 0x05;
+}
+
+bool gamepad_is_dualsense(SDL_GameController *pad)
+{
+    if (!pad || SDL_GameControllerGetVendor(pad) != 0x054c) return false;
+    Uint16 product = SDL_GameControllerGetProduct(pad);
+    return product == 0x0ce6 || product == 0x0df2;
+}
+
+// libchiaki owns the event contents. SDL output belongs on the polling thread.
+void gamepad_feedback_event(Gamepad *pad, const ChiakiEvent *event)
+{
+    AcquireSRWLockExclusive(&pad->feedback_lock);
+    switch (event->type) {
+        case CHIAKI_EVENT_TRIGGER_EFFECTS: pad->triggers = event->trigger_effects; break;
+        case CHIAKI_EVENT_TRIGGER_INTENSITY: pad->trigger_strength = event->intensity; break;
+        default: break;
+    }
+    ReleaseSRWLockExclusive(&pad->feedback_lock);
+}
+
+enum { RIGHT_EFFECT = 10, LEFT_EFFECT = 21, MOTOR_ATTENUATION = 36 };
+
+void gamepad_apply_feedback(Gamepad *pad)
+{
+    if (!gamepad_is_dualsense(pad->pad) || GetTickCount64() < pad->retry_after) return;
+    // DualSense output payload (SDL adds the USB or Bluetooth transport header).
+    uint8_t report[47] = {0x0c, 0x40};
+    AcquireSRWLockShared(&pad->feedback_lock);
+    if (pad->trigger_strength == Off) {
+        report[RIGHT_EFFECT] = report[LEFT_EFFECT] = 0x05; // Release both motors.
+    } else {
+        report[RIGHT_EFFECT] = pad->triggers.type_right;
+        report[LEFT_EFFECT] = pad->triggers.type_left;
+        memcpy(report + RIGHT_EFFECT + 1, pad->triggers.right, sizeof(pad->triggers.right));
+        memcpy(report + LEFT_EFFECT + 1, pad->triggers.left, sizeof(pad->triggers.left));
+    }
+    // The low nibble stays zero. Waveform vibration strength is applied to PCM.
+    report[MOTOR_ATTENUATION] = pad->trigger_strength == Weak ? 0x90 : pad->trigger_strength == Medium ? 0x60 : 0;
+    ReleaseSRWLockShared(&pad->feedback_lock);
+    if (pad->feedback_sent && !memcmp(report, pad->last_report, sizeof(report))) return;
+    if (SDL_GameControllerSendEffect(pad->pad, report, sizeof(report)) < 0) {
+        pad->retry_after = GetTickCount64() + 500;
+        return;
+    }
+    memcpy(pad->last_report, report, sizeof(report));
+    pad->feedback_sent = true;
+}
+
+void gamepad_release_feedback(Gamepad *pad)
+{
+    if (pad->feedback_sent && pad->pad && SDL_GameControllerGetAttached(pad->pad)) {
+        uint8_t release[47] = {0x0c};
+        release[RIGHT_EFFECT] = release[LEFT_EFFECT] = 0x05;
+        SDL_GameControllerSendEffect(pad->pad, release, sizeof(release));
+    }
+    pad->feedback_sent = false;
+    pad->retry_after = 0;
 }
 
 static uint8_t trigger(SDL_GameController *pad, SDL_GameControllerAxis axis)
@@ -31,9 +92,12 @@ bool gamepad_tick(Gamepad *pad)
         if (event.type == SDL_CONTROLLERDEVICEADDED) pad->next_scan = 0;
     }
     if (pad->pad && !SDL_GameControllerGetAttached(pad->pad)) {
+        gamepad_release_feedback(pad);
         SDL_GameControllerClose(pad->pad);
         pad->pad = NULL;
-        gamepad_init(pad);
+        chiaki_controller_state_set_idle(&pad->current);
+        pad->touches[0] = pad->touches[1] = -1;
+        pad->next_scan = 0;
         return true;
     }
     uint64_t now = GetTickCount64();

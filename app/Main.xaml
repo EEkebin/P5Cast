@@ -417,6 +417,7 @@
                     </UniformGrid>
                     <WrapPanel Margin="0,0,0,9"><Button Name="AddConsole" Content="Add console"/><Button Name="WakeConsole" Content="Wake PS5" ToolTip="Wake the paired PS5 from rest mode without starting a stream."/></WrapPanel>
                     <WrapPanel><TextBlock Text="When I disconnect" VerticalAlignment="Center" Margin="0,0,10,0"/><ComboBox Name="StopBehavior" Width="182" ToolTip="Applies when stopping a Direct session or closing P5Cast. Remembered separately for each paired console."/></WrapPanel>
+                    <CheckBox Name="DualSenseFeedback" Content="DualSense feedback" Margin="0,10,0,0" ToolTip="Enable game-controlled adaptive triggers and supported haptics on your next Direct to PS5 connection."/>
                   </StackPanel>
                 </Grid>
                 <StackPanel Name="StreamSettings" Visibility="Collapsed">

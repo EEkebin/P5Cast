@@ -273,6 +273,7 @@ internal static class Player
             Renderer.ValidateFrameGeneration(generation,multiplier);
             if(host==null && generation=="amd" && backend!="d3d12" && backend!="vulkan") throw new ArgumentException("AMD frame generation requires Direct3D 12 or Vulkan.");
             if(host==null && generation=="fruc" && !Renderer.SupportsFrucBackend(backend)) throw new ArgumentException(Renderer.FrucBackendReason);
+            if(SwapChainFrameGeneration.Uses(generation) && backend!="d3d12") throw new ArgumentException("Select Direct3D 12 for "+SwapChainFrameGeneration.Label(generation)+".");
             if(multiplier<1 || multiplier>4) throw new ArgumentException("Multiplier must be between 1 and 4.");
             int seconds=int.Parse(Option(args,"--seconds",testing ? "4":"0"),CultureInfo.InvariantCulture);
             using(var sample=testing ? new SampleWindow():null)
@@ -405,6 +406,8 @@ internal static class Player
                                     if(renderer.Captured==0) throw new IOException("The Direct session closed before the first video frame.");
                                     break;
                                 }
+                                // Retire a previous generator before initializing the next picture SDK on this device.
+                                renderer.SetFrameGenerationProvider(compare ? "p5cast" : generation);
                                 if(changeRequested || previousView!=comparisonView) {
                                     if(requestedMode!=null) {
                                         try {
@@ -419,13 +422,13 @@ internal static class Player
                                     redraw=true;
                                     requestedMode=null; changeRequested=false;
                                 }
-                                renderer.SetFrameGenerationProvider(compare ? "p5cast" : generation);
                                 if(controls!=null) {
                                     controls.SetNotice(settingsNotice ?? (!string.IsNullOrEmpty(renderer.FrameGenerationNotice) ? renderer.FrameGenerationNotice : renderer.EffectNotice));
                                     controls.UpdateLive(now,renderer,compare,lastRealAge,decoded);
                                 }
                                 if((host!=null || live!=null) && now-lastSnapshot>=(host==null ? 1000:250)) {
-                                    var sampleRates=new RateSample {Time=now,Input=renderer.Captured,Output=renderer.Presented,Generated=renderer.Generated,Fruc=renderer.FrucPresented,Decoded=direct ? decoded.DecodedFrames : 0};
+                                    var sampleRates=new RateSample {Time=now,Input=renderer.Captured,Output=renderer.Presented,Generated=renderer.Generated,Fruc=renderer.FrucPresented,Decoded=direct ? decoded.DecodedFrames : 0,
+                                        Dlss=renderer.DlssFgPresented,Xess=renderer.XessFgPresented};
                                     while(rates.Count>1 && now-rates.Peek().Time>2000) rates.Dequeue();
                                     var baseline=rates.Peek();
                                     double perSecond=1000/(now-baseline.Time);
@@ -435,6 +438,7 @@ internal static class Player
                                         renderer.Captured,renderer.Presented,renderer.Generated,(renderer.Captured-baseline.Input)*perSecond,
                                         (renderer.Presented-baseline.Output)*perSecond,(renderer.Generated-baseline.Generated)*perSecond)
                                         +",\"frucPresentedFps\":"+Number((renderer.FrucPresented-baseline.Fruc)*perSecond)
+                                        +",\"proxyGeneratedFps\":"+Number((generation=="dlss-fg" ? sampleRates.Dlss-baseline.Dlss : generation=="xess-fg" ? sampleRates.Xess-baseline.Xess : 0)*perSecond)
                                         +",\"streamFps\":"+Number(direct ? (sampleRates.Decoded-baseline.Decoded)*perSecond : -1)
                                         +",\"repaints\":"+renderer.Repaints+",\"mode\":"+JsonString(mode)+",\"multiplier\":"+multiplier+",\"effectivePictureMode\":"+JsonString(renderer.EffectivePictureMode)
                                         +",\"settingsRevision\":"+presentedSettingsRevision
@@ -490,7 +494,7 @@ internal static class Player
                                     previousTime=timestamp;
                                     if(firstInput==0) firstInput=timestamp;
                                     lastInput=timestamp;
-                                    int count=continuous && !compare && string.IsNullOrEmpty(renderer.FrameGenerationNotice) ? multiplier:1;
+                                    int count=continuous && !compare && !SwapChainFrameGeneration.Uses(generation) && string.IsNullOrEmpty(renderer.FrameGenerationNotice) ? multiplier:1;
                                     // Uploading the decoded image and finishing the previous real frame can
                                     // consume a midpoint slot on their own. Schedule from the ready image.
                                     pacing.Begin(clock.Elapsed.TotalMilliseconds,lastDrawStart,period,count);
@@ -585,7 +589,7 @@ internal static class Player
     {
         return value<0 || double.IsNaN(value) || double.IsInfinity(value) ? "null":value.ToString("0.##",CultureInfo.InvariantCulture);
     }
-    struct RateSample {internal double Time; internal int Input,Output,Generated,Fruc,Decoded;}
+    struct RateSample {internal double Time; internal int Input,Output,Generated,Fruc,Decoded,Dlss,Xess;}
     static string Telemetry(Renderer renderer,DirectVideo direct,int targetFps,int factor,double age,bool demo)
     {
         Size input=renderer.InputSize;
@@ -611,6 +615,7 @@ internal static class Player
                +",\"openNrEvaluations\":"+renderer.OpenNrEvaluations
                +",\"estimatedGameFps\":"+Number(direct==null ? -1 : direct.GameFps)+",\"estimateGameFps\":"+(direct!=null && direct.EstimateGameFps ? "true" : "false")
                +",\"frucPresented\":"+renderer.FrucPresented
+               +",\"proxyGenerated\":"+renderer.ProxyGenerated
                +",\"openNrProcessingRenderer\":"+JsonString(PictureLabels.HasOpenNr(renderer.EffectivePictureMode) ? "vulkan" : "")
                +",\"frucEvaluations\":"+renderer.FrucEvaluations+",\"frucMidpoints\":"+renderer.FrucMidpoints
                +",\"activeNisFilter\":"+JsonString(renderer.ActiveNisFilter)+",\"nisEvaluations\":"+renderer.NisEvaluations

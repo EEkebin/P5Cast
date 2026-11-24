@@ -11,13 +11,14 @@ using Device = SharpDX.Direct3D11.Device;
 internal sealed class GpuCapabilities
 {
     const int W=640, H=360;
-    const string FrameGenerationReason="NVIDIA DLSS Frame Generation is not integrated. The player offers video-based interpolation.";
+    string dlssFgReason="Select Direct3D 12 for NVIDIA DLSS Frame Generation.";
+    string xessFgReason="Select Direct3D 12 for Intel XeSS Frame Generation.";
     public string Adapter { get; private set; }
     public bool Dlss { get { return dlssReason==null; } }
     public bool Dlaa { get { return dlaaReason==null; } }
     public bool RtxVideo { get { return rtxReason==null; } }
     public bool OpticalFlow { get { return flowReason==null; } }
-    public bool NativeFrameGeneration { get { return false; } }
+    public bool NativeFrameGeneration { get { return dlssFgReason==null; } }
     string fgReason="AMD frame generation requires Direct3D 12 or Vulkan.",fgVersion="";
     string frucReason=Renderer.FrucBackendReason;
     bool frucRuntimeInstalled,frucRuntimeImportAvailable;
@@ -45,6 +46,10 @@ internal sealed class GpuCapabilities
             {
                 Presentation.CheckOutput(backend,device);
                 result.Adapter=adapter.Description.Description.TrimEnd('\0',' ');
+                if(backend=="d3d12") {
+                    result.xessFgReason=SwapChainFrameGeneration.Probe(device,"xess-fg");
+                    result.dlssFgReason=adapter.Description.VendorId==0x10de ? SwapChainFrameGeneration.Probe(device,"dlss-fg") : "Requires a supported NVIDIA RTX GPU.";
+                }
                 if(NisScaler.SupportsBackend(backend)) result.nisReason=NisScaler.Probe(device);
                 if(Renderer.HasVendorBridge(backend,"fsr-temporal"))
                     result.fsrReason=result.CheckVideo(device,"fsr-temporal",backend);
@@ -87,7 +92,7 @@ internal sealed class GpuCapabilities
         }
         catch(Exception e) {
             if(result.Adapter=="Unavailable") result.outputFailure=e.Message;
-            result.AllUnavailable(e.Message);result.nisReason=result.fsrReason=result.fgReason=e.Message;
+            result.AllUnavailable(e.Message);result.nisReason=result.fsrReason=result.fgReason=result.xessFgReason=result.dlssFgReason=e.Message;
         }
         return result;
     }
@@ -187,7 +192,8 @@ internal sealed class GpuCapabilities
             case "frucFrameGeneration": return frucReason ?? "";
             case "fsr-temporal": return fsrReason ?? "";
             case "opticalFlow": return flowReason ?? "";
-            case "nativeFrameGeneration": return FrameGenerationReason;
+            case "nativeFrameGeneration": case "dlssFrameGeneration": return dlssFgReason ?? "";
+            case "xessFrameGeneration": return xessFgReason ?? "";
             case "original": case "fsr": case "sharp": return "";
             default: return "Unknown picture mode.";
         }
@@ -217,7 +223,7 @@ internal sealed class GpuCapabilities
         foreach(string id in PictureLabels.Ids)
             json.Append(',').Append(Quote(id)).Append(Supports(id) ? ":true" : ":false")
                 .Append(',').Append(Quote(id+"Reason")).Append(':').Append(Quote(Reason(id)));
-        foreach(string id in new[]{"amdFrameGeneration","frucFrameGeneration","opticalFlow","nativeFrameGeneration"})
+        foreach(string id in new[]{"amdFrameGeneration","frucFrameGeneration","dlssFrameGeneration","xessFrameGeneration","opticalFlow","nativeFrameGeneration"})
             json.Append(',').Append(Quote(id)).Append(Supports(id) ? ":true" : ":false")
                 .Append(',').Append(Quote(id+"Reason")).Append(':').Append(Quote(Reason(id)));
         json.Append(",\"presentationDrivers\":[");

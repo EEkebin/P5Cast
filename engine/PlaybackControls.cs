@@ -16,7 +16,7 @@ internal sealed class PlaybackControls : Form
     static readonly string[] Names=PictureLabels.Modes;
     static readonly int nrIndex=Array.IndexOf(Modes,"dlss-nr");
     readonly CheckBox openNr=new CheckBox {Text="Use open source",ForeColor=TextColor,BackColor=Surface,Enabled=false};
-    readonly CheckBox nrPrepass=new CheckBox {Text="Apply OpenDLSS-NR first",ForeColor=TextColor,BackColor=Surface,Enabled=false};
+    readonly CheckBox nrPrepass=new CheckBox {Text="Apply OpenDLSS-NR first (AI)",ForeColor=TextColor,BackColor=Surface,Enabled=false};
     bool preferNrPrepass;
     Dictionary<string,object> capabilities;
     static readonly Color Surface=Color.FromArgb(19,30,35), Idle=Color.FromArgb(31,45,51),
@@ -37,7 +37,7 @@ internal sealed class PlaybackControls : Form
     readonly TimingBar videoTime=new TimingBar(PlaybackGraph.InputColor), audioTime=new TimingBar(PlaybackGraph.GeneratedColor);
     readonly int targetFps;
     readonly ToolTip tips=new ToolTip();
-    bool expanded,pinned;
+    bool expanded,pinned,showP5CastFactor=true;
     int lastDpi;
     double chipUntil=5200, nextPlacement, lastSample;
     int captured,presented,created;
@@ -84,7 +84,9 @@ internal sealed class PlaybackControls : Form
                 if(index==nrIndex) preferNrPrepass=false;
                 Request(ChosenMode(Modes[index]),-1);
             });
-            button.AccessibleName="Picture: "+Names[i];
+            string detail=PictureDescription(Modes[i],null);
+            button.AccessibleName="Picture · "+Names[i]; button.AccessibleDescription=detail;
+            tips.SetToolTip(button,detail);
             if(Modes[i]=="nis") {
                 button.Enabled=false;
                 tips.SetToolTip(button,NisScaler.SupportsBackend(backend) ? "Checking NVIDIA Image Scaling support…" : NisScaler.BackendReason);
@@ -104,10 +106,11 @@ internal sealed class PlaybackControls : Form
             preferNrPrepass=nrPrepass.Checked;
             Request(ChosenMode(baseMode),-1);
         };
-        Add(Label("Frame generation",TextColor),16,441,220,20,14);
+        Add(Label("P5Cast interpolation · no AI",TextColor),16,441,324,20,14);
         for(int i=0;i<4;i++) {
             int factor=i+1; var button=MakeButton(i==0 ? "Off":factor+"×",delegate { Request(null,factor); });
-            button.AccessibleName=i==0 ? "Frame generation off":"Frame generation "+factor+" times";
+            button.AccessibleName=i==0 ? "Frame generation off":"P5Cast motion interpolation "+factor+" times";
+            tips.SetToolTip(button,i==0 ? "Show source frames." : "Use P5Cast motion interpolation at "+factor+"×.");
             Add(button,16+i*83,468,77,30,13); factors[i]=button;
         }
         pin=MakeButton("Pin stats",delegate { pinned=!pinned; Mark(pin,pinned); pin.Text=pinned ? "Unpin stats":"Pin stats"; });
@@ -137,11 +140,13 @@ internal sealed class PlaybackControls : Form
     {
         panel.Controls.Add(control); children.Add(control); sizes.Add(fontSize); layout.Add(new Rectangle(x,y,w,h));
     }
-    static void Mark(Button b,bool active)
+    void Mark(Button b,bool active)
     {
         b.BackColor=active ? Mint : Idle; b.ForeColor=active ? Surface : TextColor;
         b.FlatAppearance.BorderColor=active ? Mint : Edge;
-        b.AccessibleDescription=active ? "Selected":"Available";
+        string description=tips.GetToolTip(b);
+        b.AccessibleDescription=string.IsNullOrEmpty(description) ? (active ? "Selected" : "Available") :
+            (active ? "Selected. " : "")+description;
     }
     void Request(string mode,int factor)
     {
@@ -162,6 +167,24 @@ internal sealed class PlaybackControls : Form
         string combined=PictureLabels.WithOpenNr(baseMode);
         return preferNrPrepass && Supports(combined) ? combined : baseMode;
     }
+    static string PictureDescription(string mode,string fsrVersion)
+    {
+        switch(mode) {
+            case "original": return "Standard · Show the incoming picture.";
+            case "sharp": return "Standard · Spatial sharpening.";
+            case "fsr": return "Standard · AMD spatial upscaling and sharpening.";
+            case "nis": return "Standard · NVIDIA spatial upscaling and sharpening.";
+            case "rtxvideo": return "AI · Upscale decoded video with RTX Video Super Resolution.";
+            case "dlss": return "AI · Upscale with DLSS and motion estimated from the video.";
+            case "dlaa": return "AI · DLAA anti-aliasing at source resolution.";
+            case "dlss-nr": return "AI · Neural rendering at source resolution.";
+            case "fsr-temporal":
+                bool? usesAi=PictureLabels.FsrUsesAi(fsrVersion);
+                return usesAi.HasValue ? (usesAi.Value ? "AI" : "Standard")+" · AMD FSR "+fsrVersion+" temporal upscaling."
+                    : "AMD temporal upscaling. The GPU probe identifies the provider.";
+            default: return "";
+        }
+    }
     public void Sync(string mode,int factor)
     {
         selection=mode; multiplier=factor;
@@ -172,7 +195,7 @@ internal sealed class PlaybackControls : Form
         for(int i=0;i<modes.Length;i++) if(modes[i]!=null)
             Mark(modes[i],Modes[i]==baseMode);
         RefreshNr();
-        for(int i=0;i<factors.Length;i++) Mark(factors[i],i+1==factor);
+        for(int i=0;i<factors.Length;i++) Mark(factors[i],showP5CastFactor && i+1==factor);
     }
     public void SetNotice(string message)
     {
@@ -229,7 +252,8 @@ internal sealed class PlaybackControls : Form
                     if(values.TryGetValue("fsrVersion",out provider)) {
                         modes[6].Text=PictureLabels.TemporalFsr(provider as string);
                         modes[6].AccessibleName=modes[6].Text;
-                        tips.SetToolTip(modes[6],"AMD temporal upscaling · "+modes[6].Text);
+                        modes[6].AccessibleDescription=PictureDescription("fsr-temporal",provider as string);
+                        tips.SetToolTip(modes[6],modes[6].AccessibleDescription);
                     }
                     for(int i=3;i<modes.Length;i++) {
                         if(i==nrIndex || modes[i]==null) continue;
@@ -237,7 +261,7 @@ internal sealed class PlaybackControls : Form
                         if(!values.TryGetValue(mode,out supported) || !(supported is bool)) continue;
                         if(mode=="nis" && (bool)supported) {
                             modes[i].Enabled=true;
-                            tips.SetToolTip(modes[i],"NVIDIA Image Scaling · Upscale or sharpen at native resolution");
+                            tips.SetToolTip(modes[i],PictureDescription(mode,null));
                         }
                         if(!(bool)supported) {
                             modes[i].Enabled=false;
@@ -319,6 +343,11 @@ internal sealed class PlaybackControls : Form
     static string Ms(double value) { return value<0 || double.IsNaN(value) ? "—":value.ToString("0.0")+" ms"; }
     public void UpdateLive(double now,Renderer renderer,bool compare,double lastAge,DirectVideo direct)
     {
+        bool usingP5Cast=!compare && renderer.FrameGenerationProvider=="p5cast";
+        if(showP5CastFactor!=usingP5Cast){
+            showP5CastFactor=usingP5Cast;
+            for(int i=0;i<factors.Length;i++) Mark(factors[i],usingP5Cast && i+1==multiplier);
+        }
         if(now-lastSample>=1000) {
             double interval=(now-lastSample)/1000;
             float inRate=(float)((renderer.Captured-captured)/interval),outRate=(float)((renderer.Presented-presented)/interval),

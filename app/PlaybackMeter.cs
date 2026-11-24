@@ -109,7 +109,8 @@ namespace Cadrivect
             set {qualityChoice.SelectedIndex=Math.Max(0,Array.IndexOf(QualityIds,value));}
         }
         internal event Action<string> DlssQualityChanged;
-        readonly RadioButton amdGeneration,frucGeneration;
+        readonly RadioButton amdGeneration,frucGeneration,dlssGeneration,xessGeneration;
+        readonly Panel aiPictures,standardPictures,pendingPicture,aiGeneration,standardGeneration,pendingGeneration;
         readonly StackPanel frucSetup;
         internal event Action FrucImportRequested,FrucSdkRequested;
         internal string FrucAvailabilityReason {get {return (string)frucGeneration.ToolTip;}}
@@ -117,11 +118,17 @@ namespace Cadrivect
         internal int GenerationSelectionRevision {get;private set;}
         internal static string SavedProvider(string provider,int factor)
         {
-            return factor==2 && (provider=="amd" || provider=="fruc") ? provider : "p5cast";
+            return factor==2 && (provider=="amd" || provider=="fruc" || provider=="dlss-fg" || provider=="xess-fg") ? provider : "p5cast";
         }
         internal bool ProviderAvailable(string provider)
         {
-            return provider=="fruc" ? frucGeneration.IsEnabled : provider=="amd" && amdGeneration.IsEnabled;
+            switch(provider) {
+                case "dlss-fg": return dlssGeneration.IsEnabled;
+                case "xess-fg": return xessGeneration.IsEnabled;
+                case "fruc": return frucGeneration.IsEnabled;
+                case "amd": return amdGeneration.IsEnabled;
+                default: return false;
+            }
         }
         readonly Slider divider;
         readonly ToggleButton horizontalSplit;
@@ -145,7 +152,7 @@ namespace Cadrivect
         readonly TextBox dialScaleInput;
         internal event Action DialMaximumChanged;
         readonly CheckBox estimateGameFps=new CheckBox {Content="Estimate game FPS",Margin=new Thickness(0,5,0,2),
-            ToolTip="Sample motion in the Direct PS5 video. Still scenes and uncertain readings show a dash."};
+            ToolTip="Estimate game FPS by comparing pixels in the Direct PS5 video. This uses no AI. Still scenes and uncertain readings show a dash."};
         internal bool EstimateGameFps {get {return estimateGameFps.IsChecked==true;} set {estimateGameFps.IsChecked=value;}}
         internal event Action EstimateGameFpsChanged;
         internal int DialMaximum {
@@ -156,7 +163,7 @@ namespace Cadrivect
         int selectedMode,selectedBase,selectedFactor=1;
         bool syncing,hdr,directSelected;
         int requestedVideoKbps;
-        string liveFsrVersion;
+        string liveFsrVersion, liveFsrGenerationVersion;
         long lastSample=-1;
 
         public PlaybackMeter(Action<int,int> change,Action<string> compare)
@@ -247,10 +254,9 @@ namespace Cadrivect
             AutomationProperties.SetLabeledBy(modeGroup,modeHeading);
             picture.Children.Add(modeHeading);
             picture.Children.Add(modeGroup);
-            AddPictureRow(modeGroup,null,"original","sharp");
-            AddPictureRow(modeGroup,"Spatial upscaling","nis","fsr");
-            AddPictureRow(modeGroup,"Video & temporal upscaling","rtxvideo","fsr-temporal");
-            AddPictureRow(modeGroup,"NVIDIA DLSS","dlss","dlaa","dlss-nr");
+            standardPictures=AddPictureRow(modeGroup,"Standard · no AI","original","sharp","nis","fsr");
+            aiPictures=AddPictureRow(modeGroup,"AI enhancement","rtxvideo","dlss","dlaa","dlss-nr");
+            pendingPicture=AddPictureRow(modeGroup,"AMD · AI status unknown","fsr-temporal");
             useOpenNr=new CheckBox {Content="Use open source for DLSS 5 NR",Margin=new Thickness(4,5,0,2),
                 ToolTip="Use OpenDLSS-NR with SDR or HDR10 on Direct3D 11, Direct3D 12 or Vulkan. HDR playback applies the model’s color and shading changes to the original HDR picture."};
             AutomationProperties.SetAutomationId(useOpenNr,"UseOpenNr");
@@ -264,7 +270,7 @@ namespace Cadrivect
             nrModelSettings.Checked+=delegate {UpdateNeuralSetup();};
             nrModelSettings.Unchecked+=delegate {UpdateNeuralSetup();};
             DockPanel.SetDock(nrModelSettings,Dock.Right); nrOptions.Children.Add(nrModelSettings);
-            nrPrepass=new CheckBox {Content="Apply OpenDLSS-NR first",VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(4,0,4,0)};
+            nrPrepass=new CheckBox {Content="Apply OpenDLSS-NR first (AI)",VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(4,0,4,0)};
             ToolTipService.SetShowOnDisabled(nrPrepass,true);
             AutomationProperties.SetAutomationId(nrPrepass,"OpenNrPrepass");
             nrPrepass.Checked+=ChangePrepass; nrPrepass.Unchecked+=ChangePrepass;
@@ -337,7 +343,7 @@ namespace Cadrivect
             AutomationProperties.SetAutomationId(displayedSize,"Metric_displayedSize");
             picture.Children.Add(displayedSize);
             Subheading(picture,"Frame generation");
-            picture.Children.Add(Label("P5Cast interpolation",Muted,11,FontWeights.Normal));
+            picture.Children.Add(Label("P5Cast interpolation · no AI",Muted,11,FontWeights.Normal));
             var factorGrid=new UniformGrid {Rows=1,Columns=4,Margin=new Thickness(-2,0,-2,0)};
             picture.Children.Add(factorGrid);
             for(int i=0;i<4;i++)
@@ -359,13 +365,13 @@ namespace Cadrivect
                 factorGrid.Children.Add(button);
             }
             FrameGenerationProvider="p5cast";
-            var vendorTitle=Label("Vendor interpolation",Muted,11,FontWeights.Normal);
-            vendorTitle.Margin=new Thickness(0,4,0,0); picture.Children.Add(vendorTitle);
-            var vendorRates=new UniformGrid {Columns=2,Rows=1,Margin=new Thickness(-2,0,-2,0)};
-            AutomationProperties.SetName(vendorRates,"Vendor interpolation");
-            amdGeneration=AddGenerationProvider(vendorRates,group,"amd","AMD FSR 2×","AmdFrameGeneration");
-            frucGeneration=AddGenerationProvider(vendorRates,group,"fruc","NVIDIA FRUC 2×","NvidiaFrucFrameGeneration");
-            picture.Children.Add(vendorRates);
+            standardGeneration=AddPictureRow(picture,"Optical-flow interpolation · no AI");
+            aiGeneration=AddPictureRow(picture,"AI frame generation");
+            pendingGeneration=AddPictureRow(picture,"AMD · AI status unknown");
+            amdGeneration=AddGenerationProvider(pendingGeneration,group,"amd","AMD FSR 2×","AmdFrameGeneration");
+            frucGeneration=AddGenerationProvider(standardGeneration,group,"fruc","NVIDIA FRUC 2×","NvidiaFrucFrameGeneration");
+            dlssGeneration=AddGenerationProvider(aiGeneration,group,"dlss-fg","NVIDIA DLSS FG 2×","DlssFrameGeneration");
+            xessGeneration=AddGenerationProvider(aiGeneration,group,"xess-fg","Intel XeSS FG 2×","XessFrameGeneration");
             frucSetup=new StackPanel {Margin=new Thickness(0,3,0,0),Visibility=Visibility.Collapsed};
             var sdkLink=new Hyperlink(new Run("Get NVIDIA Optical Flow SDK"));
             sdkLink.SetResourceReference(TextElement.ForegroundProperty,Mint);
@@ -522,13 +528,25 @@ namespace Cadrivect
             var label=Label(title,Mint,12,FontWeights.SemiBold);
             label.Margin=new Thickness(0,8,0,2); parent.Children.Add(label);
         }
-        void AddPictureRow(Panel parent,string title,params string[] ids)
+        Panel AddPictureRow(Panel parent,string title,params string[] ids)
         {
-            if(title!=null) Subheading(parent,title);
+            var section=new StackPanel();
+            Subheading(section,title);
             var grid=new UniformGrid {Columns=2,Margin=new Thickness(-2,1,-2,0)};
-            AutomationProperties.SetName(grid,title ?? "Basic picture modes");
+            AutomationProperties.SetName(grid,title);
             foreach(string id in ids) grid.Children.Add(modes[Array.IndexOf(ModeIds,id)]);
-            parent.Children.Add(grid);
+            section.Children.Add(grid); parent.Children.Add(section);
+            return grid;
+        }
+        static void ClassifyFsr(RadioButton control,string version,Panel ai,Panel standard,Panel unknown)
+        {
+            bool? usesAi=PictureLabels.FsrUsesAi(version);
+            var row=usesAi==true ? ai : usesAi==false ? standard : unknown;
+            if(control.Parent!=row) {
+                ((Panel)control.Parent).Children.Remove(control);
+                row.Children.Add(control);
+            }
+            ((FrameworkElement)unknown.Parent).Visibility=row==unknown ? Visibility.Visible : Visibility.Collapsed;
         }
         static ControlTemplate MakeGroupTemplate()
         {
@@ -700,7 +718,13 @@ namespace Cadrivect
         void SyncGenerationChoice()
         {
             FrameGenerationProvider=SavedProvider(FrameGenerationProvider,selectedFactor);
-            var choice=FrameGenerationProvider=="amd" ? amdGeneration : FrameGenerationProvider=="fruc" ? frucGeneration : factors[selectedFactor-1];
+            var choice=factors[selectedFactor-1];
+            switch(FrameGenerationProvider) {
+                case "fruc":choice=frucGeneration;break;
+                case "amd":choice=amdGeneration;break;
+                case "dlss-fg":choice=dlssGeneration;break;
+                case "xess-fg":choice=xessGeneration;break;
+            }
             choice.IsChecked=true;
         }
         void RefreshComparison(int? requested=null)
@@ -755,7 +779,7 @@ namespace Cadrivect
             syncing=true;
             try {SyncPictureChoice(Math.Max(0,Math.Min(ModeIds.Length-1,modeIndex))); SyncGenerationChoice(); RefreshComparison();}
             finally {syncing=false;}
-            liveFsrVersion=null; lastSample=-1; dial.SetRates(double.NaN,double.NaN,double.NaN,double.NaN);
+            liveFsrVersion=liveFsrGenerationVersion=null; lastSample=-1; dial.SetRates(double.NaN,double.NaN,double.NaN,double.NaN);
             sourceValue.Text=generatedValue.Text="—"; targetValue.Text="Target —";
             pictureSize.Text="Waiting for video"; pictureScale.Text=""; activeQuality.Text="";
             displayedSize.Visibility=Visibility.Collapsed;
@@ -788,20 +812,32 @@ namespace Cadrivect
                 modes[i].IsEnabled=available; modes[i].ToolTip=reason;
             }
             modes[6].Content=PictureLabels.TemporalFsr(liveFsrVersion ?? Text(gpu,"fsrVersion"));
+            ClassifyFsr(modes[6],liveFsrVersion ?? Text(gpu,"fsrVersion"),aiPictures,standardPictures,pendingPicture);
             RefreshGenerationAvailability();
             for(int i=0;i<factors.Length;i++) factors[i].IsEnabled=i==0 || !noAdapter;
             RefreshQualityChoice();
         }
         void RefreshGenerationAvailability()
         {
+            SetSwapChainAvailability(dlssGeneration,"dlssFrameGeneration");
+            SetSwapChainAvailability(xessGeneration,"xessFrameGeneration");
+            string version=liveFsrGenerationVersion ?? Text(gpu,"amdFrameGenerationVersion");
+            ClassifyFsr(amdGeneration,version,aiGeneration,standardGeneration,pendingGeneration);
             amdGeneration.IsEnabled=Flag(gpu,"amdFrameGeneration")==true;
-            amdGeneration.ToolTip=amdGeneration.IsEnabled ? "AMD FSR frame generation "+Text(gpu,"amdFrameGenerationVersion")+" · one generated frame between source frames." :
+            amdGeneration.ToolTip=amdGeneration.IsEnabled ? "AMD FSR frame generation "+version+" · one generated frame between source frames." :
                 Text(gpu,"amdFrameGenerationReason") ?? Text(gpu,"probeFailure") ?? "Checking GPU support.";
             frucGeneration.IsEnabled=Flag(gpu,"frucFrameGeneration")==true;
             frucGeneration.ToolTip=frucGeneration.IsEnabled ? "NVIDIA FRUC generates one intermediate frame between two source frames in SDR or HDR10." :
                 Text(gpu,"frucFrameGenerationReason") ?? Text(gpu,"probeFailure") ?? "Checking NVIDIA FRUC support.";
             AutomationProperties.SetHelpText(frucGeneration,(string)frucGeneration.ToolTip);
             frucSetup.Visibility=Flag(gpu,"frucRuntimeImportAvailable")==true ? Visibility.Visible : Visibility.Collapsed;
+        }
+        void SetSwapChainAvailability(RadioButton button,string key)
+        {
+            button.IsEnabled=Flag(gpu,key)==true;
+            button.ToolTip=button.IsEnabled ? "Experimental Direct3D 12 interpolation with motion estimated from video." :
+                Text(gpu,key+"Reason") ?? Text(gpu,"probeFailure") ?? "Checking frame generation support.";
+            AutomationProperties.SetHelpText(button,(string)button.ToolTip);
         }
         void RefreshQualityChoice()
         {
@@ -930,6 +966,7 @@ namespace Cadrivect
             if(fsrVersion!=liveFsrVersion) {
                 liveFsrVersion=fsrVersion;
                 modes[6].Content=PictureLabels.TemporalFsr(liveFsrVersion ?? Text(gpu,"fsrVersion"));
+                ClassifyFsr(modes[6],liveFsrVersion ?? Text(gpu,"fsrVersion"),aiPictures,standardPictures,pendingPicture);
             }
             int mode=Array.IndexOf(ModeIds,requested); bool? comparing=Flag(snapshot,"compare");
             int priorView=selectedView;
@@ -942,14 +979,27 @@ namespace Cadrivect
             activeQuality.Text=requestedBase=="dlss" && effectiveBase=="dlaa" ? "Native · DLAA" :
                 effectiveBase=="dlss" && quality>0 ? "Active · "+QualityLabels[quality] : "";
             string message=Text(snapshot,"effectNotice");
+            string chosenProvider=Text(snapshot,"frameGenerationProvider");
+            if((chosenProvider=="dlss-fg" || chosenProvider=="xess-fg") && comparing!=true && string.IsNullOrEmpty(message)) {
+                string label=chosenProvider=="dlss-fg" ? "NVIDIA DLSS FG" : "Intel XeSS FG";
+                double proxyRate=Number(snapshot,"proxyGeneratedFps");
+                message=Text(snapshot,"activeFrameGenerationProvider")==chosenProvider && proxyRate>0
+                    ? label+" · "+Metric(proxyRate," generated FPS","0.#")
+                    : label+" selected · waiting for a generated presentation";
+            }
             string fgVersion=Text(snapshot,"activeFrameGenerationVersion");
+            string activeAmdVersion=chosenProvider=="amd" && !string.IsNullOrWhiteSpace(fgVersion) ? fgVersion : null;
+            if(liveFsrGenerationVersion!=activeAmdVersion) {
+                liveFsrGenerationVersion=activeAmdVersion;
+                RefreshGenerationAvailability();
+            }
             if(Text(snapshot,"frameGenerationProvider")=="fruc" && comparing!=true && string.IsNullOrEmpty(message)) {
                 double rate=Number(snapshot,"frucPresentedFps");
                 message=Text(snapshot,"activeFrameGenerationProvider")=="fruc" && rate>0
                     ? "NVIDIA FRUC · "+Metric(rate," generated FPS","0.#")
                     : "NVIDIA FRUC selected · waiting for a generated frame to present";
             }
-            if(comparing!=true && !string.IsNullOrEmpty(fgVersion) && string.IsNullOrEmpty(Text(snapshot,"effectNotice")))
+            if(comparing!=true && activeAmdVersion!=null && string.IsNullOrEmpty(Text(snapshot,"effectNotice")))
                 message=(string.IsNullOrEmpty(message) ? "" : message+" · ")+"AMD frame generation "+fgVersion;
             int active=Array.IndexOf(ModeIds,effective);
             if(string.IsNullOrEmpty(message) && comparing!=true && active>=0 && mode>=0 && active!=mode && effective!="dlaa") message="Active picture · "+ModeLabels[active];

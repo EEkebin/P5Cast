@@ -48,7 +48,7 @@ $refs += 'SharpDX','SharpDX.DXGI','SharpDX.Direct3D11' | ForEach-Object { "/r:$i
 $resources = Get-ChildItem $intermediate -Filter '*.cso' | ForEach-Object { "/resource:$($_.FullName),$($_.Name)" }
 $resources += "/resource:$nisTables,NisCoefficients.bin"
 $resources += "/resource:$PSScriptRoot\shaders\Effects.glsl,Effects.glsl","/resource:$PSScriptRoot\third_party\ffx_a.h,ffx_a.h","/resource:$PSScriptRoot\third_party\ffx_fsr1.h,ffx_fsr1.h"
-$playerFiles=@('Player.cs','FramePacing.cs','PictureLabels.cs','D3D12Effects.cs','NativeD3D12Presentation.cs','VulkanEffects.cs','VulkanSwapChain.cs','OpenGlEffects.cs','EmbeddedPlayback.cs','PlaybackControls.cs','PlaybackGraph.cs','DirectVideo.cs','DemoVideo.cs','GpuCapabilities.cs','Renderer.cs','NisScaler.cs','NisConfig.cs','Renderer.Loupe.cs','WipeLayout.cs','Presentation.cs','Capture.cs','SharedCapture.cs','VulkanCapture.cs','Renderer.Nvidia.cs','Renderer.OpenNr.cs','GameCadence.cs','HdrPipeline.cs','DisplayHdr.cs','DisplayTarget.cs',
+$playerFiles=@('Player.cs','FramePacing.cs','PictureLabels.cs','D3D12Effects.cs','NativeD3D12Presentation.cs','VulkanEffects.cs','VulkanSwapChain.cs','OpenGlEffects.cs','EmbeddedPlayback.cs','PlaybackControls.cs','PlaybackGraph.cs','DirectVideo.cs','DemoVideo.cs','GpuCapabilities.cs','Renderer.cs','NisScaler.cs','NisConfig.cs','Renderer.Loupe.cs','WipeLayout.cs','Presentation.cs','Capture.cs','SharedCapture.cs','VulkanCapture.cs','Renderer.Nvidia.cs','Renderer.OpenNr.cs','SwapChainFrameGeneration.cs','GameCadence.cs','HdrPipeline.cs','DisplayHdr.cs','DisplayTarget.cs',
     'optical\NvidiaOpticalFlow.cs','FrucFrames.cs','nvidia\NgxVideo.cs','nvidia\DlssModel.cs','nvidia\NeuralRendering.cs','amd\FsrUpscaler.cs','amd\framegeneration\FsrFrameGeneration.cs','Renderer.FrameGeneration.cs','rtxvideo\RtxVideo.cs') | ForEach-Object { Join-Path $PSScriptRoot $_ }
 & $csc /nologo /target:winexe /platform:x64 /optimize+ "/win32icon:$PSScriptRoot\..\app\assets\mark.ico" @refs @resources "/out:$OutDir\CadrivectPlayer.exe" @playerFiles
 if ($LASTEXITCODE) { throw 'Player compilation failed.' }
@@ -57,9 +57,10 @@ Copy-Item "$PSScriptRoot\optical\NVIDIA-OPTICAL-FLOW-LICENSE.txt" -Destination $
 Copy-Item -LiteralPath "$PSScriptRoot\third_party\nis\LICENSE.txt" -Destination (Join-Path $OutDir 'NVIDIA-NIS-LICENSE.txt') -Force
 & "$PSScriptRoot\amd\Build.ps1" -OutDir $OutDir
 & "$PSScriptRoot\fruc\Build.ps1" -OutDir $OutDir
+& "$PSScriptRoot\dlss-fg\Build.ps1" -OutDir $OutDir
+& "$PSScriptRoot\xess-fg\Build.ps1" -OutDir $OutDir
 & "$PSScriptRoot\vulkan\Build.ps1" -OutDir $OutDir
 & "$PSScriptRoot\vulkan\Build-Capture.ps1" -OutDir $OutDir
-& "$PSScriptRoot\nvidia\Build.ps1" -OutDir $OutDir
 & "$PSScriptRoot\nvidia\neural\Build.ps1" -OutDir $OutDir
 & "$PSScriptRoot\open-nr\Build.ps1" -OutDir $OutDir
 & "$PSScriptRoot\rtxvideo\Build.ps1" -OutDir $OutDir

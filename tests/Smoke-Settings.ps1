@@ -114,9 +114,6 @@ try {
     $null=$busyMethod.Invoke($meter,@($false))
     Require ($neuralPanel.Visibility -eq 'Collapsed') 'Completed setup removes the download action'
     $pictureButtons=$meter.GetType().GetField('modes','Instance,NonPublic').GetValue($meter)
-    Require ($pictureButtons[8].Parent -eq $pictureButtons[2].Parent) 'NIS and spatial FSR share a row'
-    Require ($pictureButtons[3].Parent -eq $pictureButtons[6].Parent -and $pictureButtons[6].Parent -ne $pictureButtons[2].Parent) 'RTX Video SR and temporal FSR share a separate row'
-    Require ($pictureButtons[4].Parent -eq $pictureButtons[5].Parent -and $pictureButtons[5].Parent -eq $pictureButtons[7].Parent) 'The DLSS family shares a group'
     $pictureGroup=$pictureButtons[0].GroupName
     Require ($pictureButtons.Count -eq 9 -and $pictureGroup -and @($pictureButtons | Where-Object {$_.GroupName -ne $pictureGroup}).Count -eq 0) 'Every picture method belongs to the same single-choice radio group'
     (Widget HdrOutput).SelectedItem='SDR'
@@ -173,14 +170,31 @@ try {
     $amd=$meter.GetType().GetField('amdGeneration','Instance,NonPublic').GetValue($meter)
     $frucSetup=$meter.GetType().GetField('frucSetup','Instance,NonPublic').GetValue($meter)
     $provider=$meter.GetType().GetProperty('FrameGenerationProvider',[Reflection.BindingFlags]'Instance,NonPublic')
-    Require ($amd.Parent -eq $fruc.Parent -and $amd.GroupName -eq $fruc.GroupName) 'AMD and NVIDIA share one mutually exclusive vendor interpolation group'
+    function MeterField($name){$meter.GetType().GetField($name,$flags).GetValue($meter)}
+    $aiPictures=MeterField aiPictures; $standardPictures=MeterField standardPictures; $pendingPicture=MeterField pendingPicture
+    $aiGeneration=MeterField aiGeneration; $standardGeneration=MeterField standardGeneration; $pendingGeneration=MeterField pendingGeneration
+    $dlssFg=MeterField dlssGeneration; $xessFg=MeterField xessGeneration
+    foreach($index in 0,1,2,8){Require ($pictureButtons[$index].Parent -eq $standardPictures) 'Original, Sharpen, FSR Spatial and NIS are in the standard picture group'}
+    foreach($index in 3,4,5,7){Require ($pictureButtons[$index].Parent -eq $aiPictures) 'RTX VSR, DLSS, DLAA and neural rendering are in the AI picture group'}
+    Require ($amd.Parent -eq $pendingGeneration -and $pictureButtons[6].Parent -eq $pendingPicture) 'AMD stays unclassified until its runtime version is known'
+    Require ($dlssFg.Parent -eq $aiGeneration -and $xessFg.Parent -eq $aiGeneration -and $fruc.Parent -eq $standardGeneration) 'DLSS FG and XeSS FG share the AI group, and optical-flow FRUC is in the standard group'
+    foreach($radio in $amd,$dlssFg,$xessFg){Require ($radio.GroupName -eq $fruc.GroupName) 'All frame generator radios are mutually exclusive across groups'}
+    Require (!$dlssFg.IsEnabled -and !$xessFg.IsEnabled) 'Missing SDK capability data must not enable either generator'
+    $caps['dlssFrameGeneration']=$true; $caps['xessFrameGeneration']=$false; $caps['xessFrameGenerationReason']='Fixture requires a different graphics API.'
+    $meter.SetCapabilities($caps)
+    Require ($dlssFg.IsEnabled -and !$xessFg.IsEnabled -and $xessFg.ToolTip -eq $caps['xessFrameGenerationReason']) 'Each SDK requires its own probe and unavailable controls explain why'
     Require (!$fruc.IsEnabled -and $frucSetup.Visibility -eq 'Collapsed') 'FRUC waits for its own GPU probe'
     $caps['frucRuntimeImportAvailable']=$true; $caps['frucFrameGenerationReason']='Import the NVIDIA runtime.'
     $meter.SetCapabilities($caps)
     Require (!$fruc.IsEnabled -and $fruc.ToolTip -eq 'Import the NVIDIA runtime.' -and $frucSetup.Visibility -eq 'Visible') 'A missing FRUC runtime explains how to import it'
     (Widget HdrOutput).SelectedItem='SDR'
     $caps['amdFrameGeneration']=$true; $caps['frucFrameGeneration']=$true; $caps['frucRuntimeImportAvailable']=$false
-    $meter.SetCapabilities($caps); $amd.IsChecked=$true; $fruc.IsChecked=$true
+    $caps['xessFrameGeneration']=$true
+    $meter.SetCapabilities($caps); $dlssFg.IsChecked=$true
+    Require ($provider.GetValue($meter) -eq 'dlss-fg') 'Selecting DLSS FG requests its SDK'
+    $xessFg.IsChecked=$true
+    Require ($provider.GetValue($meter) -eq 'xess-fg' -and !$dlssFg.IsChecked) 'Selecting Intel FG clears DLSS FG'
+    $amd.IsChecked=$true; $fruc.IsChecked=$true
     Require ($fruc.IsEnabled -and !$amd.IsChecked -and $provider.GetValue($meter) -eq 'fruc' -and $frucSetup.Visibility -eq 'Collapsed') 'Selecting FRUC replaces AMD with NVIDIA at 2x'
     $viewButtons[1].IsChecked=$true
     $guide=$meter.GetType().GetField('comparisonGuide','Instance,NonPublic').GetValue($meter)
@@ -209,6 +223,18 @@ try {
         $baseIndex=[Array]::IndexOf($ids,$base); $pictureButtons[$baseIndex].IsChecked=$true
         $prepass.IsChecked=$true
         Require ($prepass.IsEnabled -and $ids[(&$readMode)] -eq $combined -and $pictureButtons[$baseIndex].IsChecked -and $fruc.IsChecked) "Neural preprocessing keeps $base and FRUC selected"
+        if($base -eq 'fsr-temporal') {
+            foreach($version in '3.1.6','4.1.2') {
+                $caps['fsrVersion']=$version;$caps['amdFrameGenerationVersion']=$version
+                $meter.SetCapabilities($caps)
+                $pictures=if($version.StartsWith('3')){$standardPictures}else{$aiPictures}
+                $generators=if($version.StartsWith('3')){$standardGeneration}else{$aiGeneration}
+                Require ($pictureButtons[$baseIndex].Parent -eq $pictures -and $amd.Parent -eq $generators -and
+                    $pendingPicture.Parent.Visibility -eq 'Collapsed' -and $pendingGeneration.Parent.Visibility -eq 'Collapsed') "Detected FSR $version physically moves both controls to the matching groups"
+                Require ($prepass.IsChecked -and $pictureButtons[$baseIndex].IsChecked -and $fruc.IsChecked -and
+                    $ids[(&$readMode)] -eq $combined -and @($pictureButtons|Where-Object {$_.IsChecked}).Count -eq 1) 'Reclassifying FSR retains the selected combined picture and independent generator'
+            }
+        }
         $prepass.IsChecked=$false
         Require ($ids[(&$readMode)] -eq $base -and $pictureButtons[$baseIndex].IsChecked) "Turning the pre-pass off preserves $base"
     }
@@ -236,8 +262,14 @@ try {
         $networkExplanation.Visibility -eq 'Collapsed') 'Leaving a network session restores the preceding local picture and frame generation choices'
     $meter.Reset(3,2)
     $oldSample=[Collections.Generic.Dictionary[string,object]]::new()
+    $oldSample['mode']='fsr-temporal'; $oldSample['effectivePictureMode']='fsr-temporal'; $oldSample['fsrVersion']='3.1.6'
+    $oldSample['frameGenerationProvider']='amd'; $oldSample['activeFrameGenerationVersion']='3.1.6'
+    $meter.Update($oldSample)
+    Require ($amd.Parent -eq $standardGeneration -and $pictureButtons[6].Parent -eq $standardPictures) 'The running FSR providers override a different version reported by the initial hardware probe'
+    $oldSample.Clear()
     $oldSample['mode']='original'; $oldSample['multiplier']=1; $oldSample['frameGenerationProvider']='p5cast'
     $meter.Update($oldSample)
+    Require ($amd.Parent -eq $aiGeneration -and $pictureButtons[6].Parent -eq $aiPictures) 'Leaving active FSR restores the classification from the hardware probe'
     Require ($pictureButtons[3].IsChecked -and $fruc.IsChecked -and $provider.GetValue($meter) -eq 'fruc') 'A delayed renderer sample cannot overwrite the requested RTX Video SR and FRUC settings'
     (Widget HdrOutput).SelectedItem='HDR10'
     Require ($fruc.IsEnabled -and $fruc.IsChecked -and $provider.GetValue($meter) -eq 'fruc') 'Requesting HDR10 keeps the NVIDIA FRUC provider selected'

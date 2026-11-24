@@ -19,6 +19,8 @@ internal sealed partial class Renderer
     public string FrameGenerationNotice {get;private set;}
     public string ActiveFrameGenerationVersion {get {return amdFrames==null?"":amdFrames.ActiveVersion;}}
     public string ActiveFrameGenerationProvider {get {
+        if(SwapChainFrameGeneration.Uses(FrameGenerationProvider)) return lastProxyExtra!=0 &&
+            System.Diagnostics.Stopwatch.GetTimestamp()-lastProxyExtra<2*System.Diagnostics.Stopwatch.Frequency ? FrameGenerationProvider : "";
         return lastFrucPresentation!=0 && System.Diagnostics.Stopwatch.GetTimestamp()-lastFrucPresentation<System.Diagnostics.Stopwatch.Frequency*2 ? "fruc" : amdFrames!=null?"amd":"";
     }}
     public int FrucEvaluations {get;private set;}
@@ -28,7 +30,11 @@ internal sealed partial class Renderer
     internal static void ValidateFrameGeneration(string provider,int multiplier)
     {
         if(provider==null || provider=="p5cast") return;
-        if(provider!="amd" && provider!="fruc") throw new ArgumentException("Choose p5cast, amd, or fruc for frame generation.");
+        if(SwapChainFrameGeneration.Uses(provider)) {
+            if(multiplier!=2) throw new ArgumentException(SwapChainFrameGeneration.Label(provider)+" currently supports 2× in P5Cast.");
+            return;
+        }
+        if(provider!="amd" && provider!="fruc") throw new ArgumentException("Unknown frame generation provider.");
         if(multiplier!=2) throw new ArgumentException((provider=="fruc"?"NVIDIA FRUC":"AMD frame generation")+" requires a 2× multiplier.");
     }
 
@@ -42,6 +48,7 @@ internal sealed partial class Renderer
     }
     void ReleaseFrameGeneration()
     {
+        ReleaseProxyFrames();
         if(amdFrames!=null) {amdFrames.Dispose();amdFrames=null;}
         if(frucFrames!=null) {frucFrames.Dispose();frucFrames=null;}
         foreach(var image in new[]{sdkFrameColor,amdFrameMotion,amdFrameDepth,sdkMidpoint,frucPqMidpoint}) if(image!=null) image.Dispose();

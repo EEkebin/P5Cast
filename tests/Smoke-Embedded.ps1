@@ -1,10 +1,11 @@
 [CmdletBinding()]
 param([string]$PlayerExe,[string]$DirectRuntime,[string]$OutputDirectory,
-      [ValidateSet('auto','d3d11','d3d12','vulkan','opengl')][string]$Renderer='auto',[string]$HdrDisplay,[switch]$CheckComparison,[switch]$CheckNeuralRendering,[switch]$CheckFruc,[switch]$CheckOpenNr)
+      [ValidateSet('auto','d3d11','d3d12','vulkan','opengl')][string]$Renderer='auto',[string]$HdrDisplay,[switch]$CheckComparison,[switch]$CheckNeuralRendering,[switch]$CheckFruc,[switch]$CheckOpenNr,
+      [ValidateSet('both','dlss-fg','xess-fg')][string]$InitialGenerator='both',[switch]$CheckSwapChainGeneration)
 $ErrorActionPreference='Stop'
 $repo=Split-Path $PSScriptRoot
 if (!$PlayerExe) { $PlayerExe=Join-Path $repo 'engine\bin\CadrivectPlayer.exe' }
-if (!$DirectRuntime -and !$CheckNeuralRendering -and (!$CheckOpenNr -or $HdrDisplay) -and (!$CheckFruc -or $HdrDisplay)) {
+if (!$DirectRuntime -and !$CheckSwapChainGeneration -and !$CheckNeuralRendering -and (!$CheckOpenNr -or $HdrDisplay) -and (!$CheckFruc -or $HdrDisplay)) {
     $runtime=& "$repo\sources\Prepare-Decoder.ps1" | ConvertFrom-Json
     if (!$runtime.ok) { throw $runtime.error }
     $DirectRuntime=$runtime.runtime
@@ -15,9 +16,28 @@ $framework=Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 $refs=@('System.Xaml','System.Web.Extensions','System.Windows.Forms','System.Drawing') | ForEach-Object { "/r:$_.dll" }
 $refs+=@('PresentationCore','PresentationFramework','WindowsBase') | ForEach-Object { "/r:$framework\WPF\$_.dll" }
 $probe=Join-Path $OutputDirectory 'EmbeddedProbe.exe'
-$entry=if($CheckFruc -and !$HdrDisplay){'FrucPlaybackRunner'}else{'EmbeddedProbe'}
-& "$framework\csc.exe" /nologo /optimize+ /platform:x64 "/main:$entry" @refs "/out:$probe" "$PSScriptRoot\EmbeddedProbe.cs" "$PSScriptRoot\ComparisonProbe.cs" "$PSScriptRoot\FrucPlaybackProbe.cs"
+$entry=if($CheckSwapChainGeneration){'SwapChainGenerationRunner'}elseif($CheckFruc -and !$HdrDisplay){'FrucPlaybackRunner'}else{'EmbeddedProbe'}
+& "$framework\csc.exe" /nologo /optimize+ /platform:x64 "/main:$entry" @refs "/out:$probe" "$PSScriptRoot\EmbeddedProbe.cs" "$PSScriptRoot\ComparisonProbe.cs" "$PSScriptRoot\FrucPlaybackProbe.cs" "$PSScriptRoot\SwapChainGenerationProbe.cs"
 if ($LASTEXITCODE) { throw 'Embedded WPF probe compilation failed.' }
+if ($CheckSwapChainGeneration) {
+    $PlayerExe=(Resolve-Path -LiteralPath $PlayerExe).Path
+    if($Renderer -eq 'auto'){$Renderer='d3d12'}
+    $caps=(& $PlayerExe --capabilities --quiet --renderer $Renderer | Out-String | ConvertFrom-Json)
+    if($null -eq $caps.dlssFrameGeneration -or $null -eq $caps.xessFrameGeneration){throw 'Missing SDK frame generation capabilities.'}
+    $supported=@{'dlss-fg'=$caps.dlssFrameGeneration;'xess-fg'=$caps.xessFrameGeneration}
+    $color=if($HdrDisplay){$HdrDisplay}else{'sdr'}
+    $pictures=@('dlss','dlaa','rtxvideo'|Where-Object {$caps.$_}) -join ','
+    if(!$pictures){$pictures='none'}
+    $providers=if($InitialGenerator -eq 'both'){@('dlss-fg','xess-fg')}else{@($InitialGenerator)}
+    foreach($provider in $providers) {
+        $other=if($provider -eq 'dlss-fg'){'xess-fg'}else{'dlss-fg'}
+        $startExpected=if($supported[$provider]){'yes'}else{'no'}
+        $switchExpected=if($supported[$other]){'yes'}else{'no'}
+        & $probe $PlayerExe $Renderer $provider $startExpected $switchExpected $color $pictures
+        if($LASTEXITCODE){throw "Embedded SDK frame generation failed starting with $provider on $Renderer ($color)."}
+    }
+    return
+}
 if ($CheckFruc -and !$HdrDisplay) {
     $PlayerExe=(Resolve-Path -LiteralPath $PlayerExe).Path
     if($Renderer -eq 'auto'){$Renderer='d3d11'}

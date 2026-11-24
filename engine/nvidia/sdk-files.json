@@ -26,5 +26,21 @@
   {
     "path": "LICENSE.txt",
     "sha256": "d4216e39ebef5f9b50a6712ebb37beeb5379862a67733a9999c651f21592aaf0"
+  },
+  {
+    "path": "include/nvsdk_ngx_helpers_dlssg_d3d.h",
+    "sha256": "6335ebcb95de39a361e87fe0257d6ce0723e5d8deaa15db3b35afacf2b3f4220"
+  },
+  {
+    "path": "include/nvsdk_ngx_params_dlssg.h",
+    "sha256": "c24fa5aa68ffa2808c828b75cfa32843f1606f80a145f84055ac450d7e6c74ad"
+  },
+  {
+    "path": "include/nvsdk_ngx_defs_dlssg.h",
+    "sha256": "c29765ab9e0125f9d724ae9811cc2abe03738d17486ec8eee80d78a1504549e1"
+  },
+  {
+    "path": "lib/Windows_x86_64/rel/nvngx_dlssg.dll",
+    "sha256": "8d59d49b36410dd6b62fef2503a5871d347415bd85d943fa0848563a95dd50c7"
   }
 ]

@@ -151,7 +151,7 @@ internal sealed partial class Renderer : IDisposable
             blend.RenderTarget[0]=targetBlend;
             handleBlend=new BlendState(Device,blend);
             vertex=new VertexShader(Device,Shader("Fullscreen"));
-            foreach(string name in new [] {"Original","Sharp","Easu","Rcas","Motion","Interpolate","OpticalField","NgxVectors","PreserveNgxStrokes","FitNgxFrame","FitNrIntermediate","WipeDivider","WipeHandle","InspectionLoupe"})
+            foreach(string name in new [] {"PresentationMotion","Original","Sharp","Easu","Rcas","Motion","Interpolate","OpticalField","NgxVectors","PreserveNgxStrokes","FitNgxFrame","FitNrIntermediate","WipeDivider","WipeHandle","InspectionLoupe"})
                 shaders.Add(name,new PixelShader(Device,Shader(name)));
             InitHdrShaders();
             context.InputAssembler.PrimitiveTopology=PrimitiveTopology.TriangleList;
@@ -572,7 +572,7 @@ internal sealed partial class Renderer : IDisposable
         if(vendor) source=EnhancedFrame(mode,finishPrevious);
         string applied=vendor ? neuralMode : mode;
         EffectivePictureMode=combined ? PictureLabels.WithOpenNr(applied) : applied;
-        bool sdkGeneration=FrameGenerationProvider!="p5cast",sdkIntermediate=false;
+        bool sdkGeneration=FrameGenerationProvider=="amd" || FrameGenerationProvider=="fruc",sdkIntermediate=false;
         if(sdkGeneration) {
             PrepareSdkFrame(vendor);
             if(phase<1 && HasPrevious) {
@@ -701,8 +701,10 @@ internal sealed partial class Renderer : IDisposable
             VerifyNextOutput=false;
         }
         int pixel=samplePixel ? ReadCenterPixel() : 0;
-        if(presentation==null) swap.Present(0,PresentFlags.None);
-        else presentation.Present(backBuffer);
+        if(!PresentProxyFrame()) {
+            if(presentation==null) swap.Present(0,PresentFlags.None);
+            else presentation.Present(backBuffer);
+        }
         return pixel;
     }
     void SampleOutput()

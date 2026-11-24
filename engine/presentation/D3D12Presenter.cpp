@@ -180,7 +180,10 @@ struct D3D12Display {
         if (FAILED(hr)) return hr;
         // A hidden child can report DXGI_STATUS_OCCLUDED and discard its first frame.
         if (!shown) {
-            ShowWindow(child, SW_SHOWNA);
+            // A new provider may share this parent with the normal presenter.
+            // Display its first image above that sibling while preserving focus.
+            if (!SetWindowPos(child, HWND_TOP, 0, 0, 0, 0,
+                SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)) return WindowFailure();
             shown = true;
         }
         return chain->Present(0, 0);

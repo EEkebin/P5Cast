@@ -19,4 +19,14 @@ internal static class PictureLabels
     {
         return string.IsNullOrWhiteSpace(provider) ? "FSR Temporal" : "FSR "+provider+" · Temporal";
     }
+
+    internal static bool? FsrUsesAi(string provider)
+    {
+        System.Version version;
+        if(System.Version.TryParse(provider,out version)) {
+            if(version.Major==3) return false;
+            if(version.Major==4) return true;
+        }
+        return null;
+    }
 }

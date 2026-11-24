@@ -156,6 +156,13 @@ NgxGuidance NgxVectors(Vertex v) {
         guide.ink=max(guide.ink,strokeConfidence(previous,v.uv,before));
     return guide;
 }
+float2 PresentationMotion(Vertex v) : SV_Target {
+    float2 movement=-flow.SampleLevel(linearClamp,v.uv,0).xy;
+    float3 now=image.SampleLevel(linearClamp,v.uv,0).rgb;
+    float3 before=previous.SampleLevel(linearClamp,v.uv,0).rgb;
+    if(stationaryEdge(v.uv,now,before)) return 0;
+    return movement*targetSize/sourceSize;
+}
 float max4(float4 values) {return max(max(values.x,values.y),max(values.z,values.w));}
 // A decoded white HUD element can move independently of the scenery that supplied
 // our estimated motion. Bound lost brightness against the current frame, including

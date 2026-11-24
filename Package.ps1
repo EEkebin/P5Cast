@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$Version = '0.31.0',[string]$BuildDir=$PSScriptRoot)
+param([string]$Version = '0.32.0',[string]$BuildDir=$PSScriptRoot)
 $ErrorActionPreference = 'Stop'
 if ($Version -notmatch '^\d+\.\d+\.\d+(-[a-z0-9.-]+)?$') { throw 'Invalid version.' }
 $dist = Join-Path $PSScriptRoot 'dist'
@@ -22,7 +22,7 @@ try {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination (Join-Path $bundle $file)
     }
     $runtimeFiles = @('CadrivectPlayer.exe','SharpDX.dll','SharpDX.Direct3D11.dll','SharpDX.DXGI.dll','SharpDX-LICENSE.txt','FSR-LICENSE.txt','NVIDIA-NIS-LICENSE.txt',
-        'P5Cast.NeuralVk.dll','P5Cast.OpenNr.dll','NVIDIA-NEURAL-RENDERING-LICENSE.txt','Cadrivect.Ngx.dll','nvngx_dlss.dll','NVIDIA-RTX-LICENSE.txt','Cadrivect.RtxVideo.dll','nvngx_vsr.dll',
+        'P5Cast.NeuralVk.dll','P5Cast.OpenNr.dll','P5Cast.DlssFg.dll','P5Cast.XessFg.dll','NVIDIA-NEURAL-RENDERING-LICENSE.txt','Cadrivect.Ngx.dll','nvngx_dlss.dll','NVIDIA-RTX-LICENSE.txt','Cadrivect.RtxVideo.dll','nvngx_vsr.dll',
         'NVIDIA_RTX_Video_SDK_License.pdf','NVIDIA-OPTICAL-FLOW-LICENSE.txt','P5Cast.Fruc.dll','P5Cast.FrucHost.exe','Cadrivect.Decoder.dll','FFmpeg-LICENSE.txt',
         'P5Cast.Fsr.dll','amd_fidelityfx_loader_dx12.dll','amd_fidelityfx_upscaler_dx12.dll','amd_fidelityfx_framegeneration_dx12.dll','AMD-FSR-LICENSE.md','AMD-FSR-NOTICES.md',
         'P5Cast.FsrVk.dll','amd_fidelityfx_loader_vk.dll','amd_fidelityfx_upscaler_vk.dll','amd_fidelityfx_framegeneration_vk.dll',
@@ -31,6 +31,16 @@ try {
         Copy-Item -LiteralPath (Join-Path $BuildDir "engine\bin\$file") -Destination (Join-Path $bundle "engine\bin\$file")
     }
     Copy-Item -Recurse -LiteralPath (Join-Path $BuildDir 'engine\bin\direct') -Destination (Join-Path $bundle 'engine\bin\direct')
+    $frameRuntimes=@{
+        'dlss-fg'=@('nvngx_dlssg.dll','NVIDIA-RTX-LICENSE.txt')
+        'xess-fg'=@('libxell.dll','libxess_fg.dll','LICENSE.txt','third-party-programs.txt')
+    }
+    foreach($provider in $frameRuntimes.Keys) {
+        $dest=[IO.Directory]::CreateDirectory((Join-Path $bundle "engine\bin\$provider")).FullName
+        foreach($name in $frameRuntimes[$provider]) {
+            Copy-Item -LiteralPath (Join-Path $BuildDir "engine\bin\$provider\$name") -Destination $dest
+        }
+    }
     # The open provider ships code and notices. A model is downloaded separately for each user.
     foreach ($part in 'shaders','ptx','licenses') {
         $source=Join-Path $BuildDir "engine\bin\open-nr\$part"

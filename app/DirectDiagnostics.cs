@@ -15,9 +15,9 @@ namespace Cadrivect
             "sourceFps submittedFps decodeMs lastPcSubmitMs requestedVideoKbps bitrateMbps videoFramesLost slowVideoHandoffs " +
             "audioQueueMs audioTargetMs audioUnderruns audioConcealments audioQueueTrims audioFrameGapMaxMs audioCallbackGapMaxMs " +
             "multiplier targetPresentedFps generatedFps displayRefreshHz inputWidth inputHeight outputWidth outputHeight " +
-            "displayedWidth displayedHeight nvidiaEvaluations openNrEvaluations nisEvaluations fsrEvaluations frucEvaluations frucMidpoints frucPresented frucPresentedFps streamFps estimatedGameFps").Split(' ');
+            "displayedWidth displayedHeight nvidiaEvaluations openNrEvaluations nisEvaluations fsrEvaluations frucEvaluations frucMidpoints frucPresented frucPresentedFps streamFps estimatedGameFps proxyGenerated proxyGeneratedFps").Split(' ');
         // Only renderer identifiers belong in a trace. Unknown values and free-form messages stay out.
-        static readonly string[] providers={"p5cast","amd","fruc"};
+        static readonly string[] providers={"p5cast","amd","fruc","dlss-fg","xess-fg"};
         static readonly KeyValuePair<string,string[]>[] identifiers={
             new KeyValuePair<string,string[]>("mode",PictureLabels.Ids),
             new KeyValuePair<string,string[]>("effectivePictureMode",PictureLabels.Ids),

@@ -3,6 +3,7 @@
 #include <new>
 #include "nvsdk_ngx_helpers_d3d.h"
 #include "DlssModelHint.h"
+#include "NgxDevice.h"
 
 extern "C" __declspec(dllexport) HRESULT P5SetDlssModelHint(ID3D11Device* device,unsigned preset) {
     if (!device || (preset && preset!=11 && preset!=12 && preset!=13)) return E_INVALIDARG;
@@ -54,7 +55,7 @@ struct VideoState {
             else NVSDK_NGX_D3D11_DestroyParameters(parameters);
         }
         if (initialized) {
-            if (dx12.device) NVSDK_NGX_D3D12_Shutdown1(dx12.device.Get());
+            if (dx12.device) releaseNgxDevice(dx12.device.Get());
             else NVSDK_NGX_D3D11_Shutdown1(device);
         }
         if (device) device->Release();
@@ -132,7 +133,7 @@ EXPORT unsigned NgxOpen3(ID3D11Device* device, ID3D11DeviceContext* context,
     if (FAILED(opened)) { delete state; return NVSDK_NGX_Result_Fail; }
     const char* project="15b28241-0e5d-45d2-8a98-f9676d9723ea";
     NVSDK_NGX_Result result=state->dx12.device
-        ? NVSDK_NGX_D3D12_Init_with_ProjectID(project,NVSDK_NGX_ENGINE_TYPE_CUSTOM,"Cadrivect 1",dataFolder,state->dx12.device.Get(),&info,NVSDK_NGX_Version_API)
+        ? acquireNgxDevice(state->dx12.device.Get(),runtimeFolder,dataFolder)
         : NVSDK_NGX_D3D11_Init_with_ProjectID(project,NVSDK_NGX_ENGINE_TYPE_CUSTOM,"Cadrivect 1",dataFolder,device,&info,NVSDK_NGX_Version_API);
     if (NVSDK_NGX_SUCCEED(result)) {
         state->initialized=true;
@@ -200,3 +201,5 @@ EXPORT unsigned NgxEvaluate(VideoState* state,ID3D11DeviceContext* context,ID3D1
     return NGX_D3D11_EVALUATE_DLSS_EXT(context,state->feature,state->parameters,&params);
 }
 EXPORT void NgxClose(VideoState* state) { delete state; }
+
+#include "../dlss-fg/NgxFrameGeneration.h"

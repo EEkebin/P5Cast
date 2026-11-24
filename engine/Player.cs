@@ -288,7 +288,7 @@ internal static class Player
                         if(!testing && !direct) WindowsApi.SetForegroundWindow(source);
                     }
                     using(var renderer=new Renderer(host==null ? window.Handle:host.Handle,host==null ? window.ClientSize:host.ClientSize,raster,hdr,mode,host!=null,backend))
-                    using(var capture=captureWindow ? new WindowCapture(source,renderer.Device,renderer.HdrEnabled,backend=="vulkan" || backend=="d3d12"):null)
+                    using(var capture=captureWindow ? new WindowCapture(source,renderer):null)
                     using(var decoded=direct ? new DirectVideo(pipe,runtime):null)
                     using(var offline=demo ? new DemoVideo(renderer,host.Handle,targetFps):null)
                     using(var controls=host==null ? new PlaybackControls(window,source,mode,multiplier,targetFps,backend):null)

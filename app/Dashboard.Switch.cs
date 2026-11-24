@@ -104,6 +104,7 @@ namespace Cadrivect
                     bool complete=await ReadGpu(previousMode,cancel.Token);
                     if(closing || !Equals(picker.SelectedItem,target)) return;
                     if(complete && !cancel.IsCancellationRequested) {SaveSettings();return;}
+                    string failure=meter.Capabilities==null ? "" : Field(meter.Capabilities,"presentationError");
                     restoringSwitch=true;
                     try {
                         picker.SelectedItem=old;
@@ -116,7 +117,8 @@ namespace Cadrivect
                         await ReadGpu(previousMode);
                     }
                     SaveSettings();
-                    Show(cancel.IsCancellationRequested ? "Graphics API switch cancelled." : "GPU check failed. Restored "+old+".",!cancel.IsCancellationRequested);
+                    Show(cancel.IsCancellationRequested ? "Graphics API switch cancelled." :
+                        (failure.Length==0 ? "GPU check failed." : failure)+" Restored "+old+".",!cancel.IsCancellationRequested);
                 } finally {EndOperation(id);}
             }
         }

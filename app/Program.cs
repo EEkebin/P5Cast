@@ -25,7 +25,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.25.0.0")]
+[assembly: AssemblyVersion("0.26.0.0")]
 
 namespace Cadrivect
 {
@@ -411,6 +411,7 @@ namespace Cadrivect
                 if(gpu==null || closing || generation!=gpuProbeGeneration) return false;
                 meter.SetCapabilities(gpu);
                 completed=true;
+                if(Field(gpu,"presentationError").Length!=0) return false;
                 if(!Active && !preparing && revision==pictureSelectionRevision) {
                     if(mode==0 && requested>=3 && meter.SupportsSelectedColor(requested) && Field(gpu,modeIds[requested]).Equals("true",StringComparison.OrdinalIgnoreCase))
                         mode=requested;

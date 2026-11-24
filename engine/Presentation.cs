@@ -1,116 +1,75 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Runtime.InteropServices;
-using System.Text;
 using SharpDX.Direct3D11;
 using SharpDX.DXGI;
-using Device = SharpDX.Direct3D11.Device;
+using Device=SharpDX.Direct3D11.Device;
 
-// The portable presenter uses its own graphics context and copies the final SDR
-// or packed PQ image before the effects device unmaps the staging texture.
-internal sealed class Presentation : IDisposable
+internal interface IFramePresenter : IDisposable
 {
-    const string Library="P5Cast.Presentation.dll";
-    const DllImportSearchPath Search=DllImportSearchPath.AssemblyDirectory | DllImportSearchPath.System32 |
-        DllImportSearchPath.UseDllDirectoryForDependencies;
-    [DefaultDllImportSearchPaths(Search)]
-    [DllImport(Library,CallingConvention=CallingConvention.Cdecl,ExactSpelling=true)]
-    static extern int p5_present_available(string driver);
-    [DefaultDllImportSearchPaths(Search)]
-    [DllImport(Library,CallingConvention=CallingConvention.Cdecl,ExactSpelling=true)]
-    static extern IntPtr p5_present_create_color(IntPtr parent,string driver,int width,int height,int hdr10,[Out] byte[] error,int errorLength);
-    [DefaultDllImportSearchPaths(Search)]
-    [DllImport(Library,CallingConvention=CallingConvention.Cdecl,ExactSpelling=true)]
-    static extern int p5_present_output_hdr10(IntPtr instance);
-    [DefaultDllImportSearchPaths(Search)]
-    [DllImport(Library,CallingConvention=CallingConvention.Cdecl,ExactSpelling=true)]
-    static extern int p5_present_resize(IntPtr instance,int width,int height,[Out] byte[] error,int errorLength);
-    [DefaultDllImportSearchPaths(Search)]
-    [DllImport(Library,CallingConvention=CallingConvention.Cdecl,ExactSpelling=true)]
-    static extern int p5_present_frame(IntPtr instance,IntPtr bgra,int pitch,int width,int height,
-        int outputWidth,int outputHeight,[Out] byte[] error,int errorLength);
-    [DefaultDllImportSearchPaths(Search)]
-    [DllImport(Library,CallingConvention=CallingConvention.Cdecl,ExactSpelling=true)]
-    static extern void p5_present_destroy(IntPtr instance);
+    bool Hdr10 { get; }
+    void ResizeWindow(Size size);
+    void Present(Texture2D texture);
+}
 
-    readonly byte[] error=new byte[1024];
-    readonly string backend;
-    IntPtr instance;
-    Texture2D readback;
-    Size readbackSize,windowSize;
-    public bool Hdr10 { get; private set; }
-
+internal static class Presentation
+{
     public static string Resolve(string requested)
     {
         string key=requested.ToLowerInvariant();
         switch(key) {
             case "auto": case "d3d11": return "d3d11";
-            case "d3d12": case "vulkan": case "opengl": case "metal": return key;
-            default: throw new ArgumentException("Choose auto, d3d11, d3d12, vulkan, opengl or metal for --renderer.");
+            case "d3d12": case "vulkan": case "opengl": return key;
+            case "metal": throw new InvalidOperationException("metal presentation is unavailable on Windows.");
+            default: throw new ArgumentException("Choose auto, d3d11, d3d12, vulkan or opengl for --renderer.");
         }
     }
-
-    static string Driver(string key) { return key=="d3d12" ? "direct3d12" : key; }
 
     public static IEnumerable<string> BuiltDrivers()
     {
-        var drivers=new List<string>{"d3d11"};
-        try {
-            foreach(string key in new[]{"d3d12","vulkan","opengl","metal"})
-                if(p5_present_available(Driver(key))!=0) drivers.Add(key);
-        } catch(DllNotFoundException) { } catch(EntryPointNotFoundException) { } catch(BadImageFormatException) { }
-        return drivers;
+        return new[]{"d3d11","d3d12","vulkan","opengl"};
     }
 
-    public Presentation(IntPtr hwnd,string key,Size size,bool hdr10)
+    public static SwapChainDescription DescribeSwapChain(IntPtr hwnd,Size size,bool hdr10)
     {
-        backend=key;
-        windowSize=size;
-        string driver=Driver(key);
-        if(p5_present_available(driver)==0) throw new InvalidOperationException(key+" presentation is unavailable on this platform.");
-        instance=p5_present_create_color(hwnd,driver,size.Width,size.Height,hdr10 ? 1:0,error,error.Length);
-        if(instance==IntPtr.Zero) throw Failure("initialization");
-        try {
-            Hdr10=p5_present_output_hdr10(instance)==1;
-            if(Hdr10!=hdr10) throw new InvalidOperationException(key+" did not create the requested presentation color space.");
-        } catch { Dispose(); throw; }
+        return new SwapChainDescription {
+            BufferCount=2,Flags=SwapChainFlags.None,IsWindowed=true,OutputHandle=hwnd,
+            ModeDescription=new ModeDescription(size.Width,size.Height,new Rational(0,1),DisplayHdr.OutputFormat(hdr10)),
+            Usage=Usage.RenderTargetOutput,SampleDescription=new SampleDescription(1,0),SwapEffect=SwapEffect.FlipDiscard
+        };
     }
 
-    InvalidOperationException Failure(string action)
+    // An effects device alone does not establish that its window-system interop works.
+    public static void CheckOutput(string backend,Device device)
     {
-        int length=Array.IndexOf(error,(byte)0);
-        string details=Encoding.UTF8.GetString(error,0,length<0 ? error.Length : length);
-        return new InvalidOperationException(backend+" presentation "+action+" failed. "+details);
-    }
-
-    public void Present(Device device,DeviceContext context,Texture2D target,Size size)
-    {
-        if(readback==null || readbackSize!=size) {
-            var desc=target.Description;
-            desc.BindFlags=BindFlags.None; desc.Usage=ResourceUsage.Staging; desc.CpuAccessFlags=CpuAccessFlags.Read;
-            var next=new Texture2D(device,desc);
-            if(readback!=null) readback.Dispose();
-            readback=next; readbackSize=size;
+        if(backend=="d3d11") return;
+        var size=new Size(32,32);
+        using(var window=new System.Windows.Forms.Form {ClientSize=size,ShowInTaskbar=false}) {
+            if(backend=="vulkan") {
+                using(var chain=VulkanSwapChain.Create(device,DescribeSwapChain(window.Handle,size,false)))
+                using(var target=Texture2D.FromSwapChain<Texture2D>(chain,0))
+                using(var view=new RenderTargetView(device,target)) {
+                    device.ImmediateContext.ClearRenderTargetView(view,new SharpDX.Mathematics.Interop.RawColor4(0,0,0,1));
+                    chain.Present(0,PresentFlags.None);
+                }
+            } else {
+                using(var presenter=Create(window.Handle,backend,device,size,false))
+                using(var target=new GpuImage(device,size.Width,size.Height,Format.B8G8R8A8_UNorm,true)) {
+                    device.ImmediateContext.ClearRenderTargetView(target.Write,new SharpDX.Mathematics.Interop.RawColor4(0,0,0,1));
+                    presenter.Present(target.Texture);
+                }
+            }
         }
-        context.CopyResource(target,readback);
-        var data=context.MapSubresource(readback,0,MapMode.Read,SharpDX.Direct3D11.MapFlags.None);
-        try {
-            if(p5_present_frame(instance,data.DataPointer,data.RowPitch,size.Width,size.Height,
-                windowSize.Width,windowSize.Height,error,error.Length)==0) throw Failure("frame delivery");
-        } finally { context.UnmapSubresource(readback,0); }
     }
 
-    public void ResizeWindow(Size size)
+    public static IFramePresenter Create(IntPtr hwnd,string backend,Device device,Size size,bool hdr10)
     {
-        if(size==windowSize) return;
-        if(p5_present_resize(instance,size.Width,size.Height,error,error.Length)==0) throw Failure("window resize");
-        windowSize=size;
-    }
-
-    public void Dispose()
-    {
-        if(readback!=null) { readback.Dispose(); readback=null; }
-        if(instance!=IntPtr.Zero) { p5_present_destroy(instance); instance=IntPtr.Zero; }
+        if(backend=="d3d12") return new NativeD3D12Presentation(hwnd,device,size,hdr10);
+        if(backend=="opengl" && !hdr10) {
+            var presenter=new OpenGlEffects(hwnd,device);
+            try { presenter.ResizeWindow(size); return presenter; }
+            catch { presenter.Dispose(); throw; }
+        }
+        throw new InvalidOperationException("No GPU presenter for "+backend+" in the selected color mode.");
     }
 }

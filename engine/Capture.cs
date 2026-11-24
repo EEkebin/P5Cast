@@ -72,11 +72,16 @@ internal static class WindowsApi
     }
 }
 
+internal interface ICaptureBridge : IDisposable
+{
+    Device CaptureDevice {get;}
+    bool Receive(Renderer renderer,Texture2D input,Rectangle crop,bool deduplicate);
+}
+
 internal sealed class WindowCapture : IDisposable
 {
     readonly IntPtr window;
-    readonly Device captureDevice;
-    Texture2D staging,uploaded;
+    readonly ICaptureBridge bridge;
     readonly IDirect3DDevice device;
     readonly GraphicsCaptureItem item;
     readonly Direct3D11CaptureFramePool pool;
@@ -84,18 +89,17 @@ internal sealed class WindowCapture : IDisposable
     Windows.Graphics.SizeInt32 size;
     DirectXPixelFormat format;
     static DirectXPixelFormat CaptureFormat(bool hdr) { return hdr ? DirectXPixelFormat.R16G16B16A16Float : DirectXPixelFormat.B8G8R8A8UIntNormalized; }
-    public WindowCapture(IntPtr source, Device renderDevice,bool hdr,bool transfer=false)
+    public WindowCapture(IntPtr source,Renderer renderer)
     {
         if (!GraphicsCaptureSession.IsSupported()) throw new InvalidOperationException("This Windows session does not support window capture.");
         window=source;
-        // Windows Graphics Capture needs a system D3D11 device. An image from
-        // that device cannot be submitted directly to a different API's context.
-        if(transfer) captureDevice=new Device(SharpDX.Direct3D.DriverType.Hardware,DeviceCreationFlags.BgraSupport);
         try {
-            device=WindowsApi.WinRTDevice(captureDevice ?? renderDevice);
+            if(renderer.Backend=="d3d12") bridge=new SharedCapture(renderer.Device);
+            else if(renderer.Backend=="vulkan") bridge=new VulkanCapture(renderer.Device);
+            device=WindowsApi.WinRTDevice(bridge==null ? renderer.Device : bridge.CaptureDevice);
             item=WindowsApi.CaptureItem(window);
             size=item.Size;
-            format=CaptureFormat(hdr);
+            format=CaptureFormat(renderer.HdrEnabled);
             pool=Direct3D11CaptureFramePool.CreateFreeThreaded(device,format,2,size);
             session=pool.CreateCaptureSession(item);
             session.IsCursorCaptureEnabled=false;
@@ -122,8 +126,10 @@ internal sealed class WindowCapture : IDisposable
                 {
                     // WGC may deliver queued surfaces from before Recreate. Their DXGI format
                     // must match the new pool before the renderer allocates its history textures.
-                    if ((int)texture.Description.Format!=(int)format) return false;
-                    fresh=renderer.Receive(captureDevice==null ? texture : Transfer(renderer.Device,texture),WindowsApi.ClientCrop(window,size.Width,size.Height),deduplicate);
+                    var desc=texture.Description;
+                    if((int)desc.Format!=(int)format || desc.Width<size.Width || desc.Height<size.Height) return false;
+                    var crop=WindowsApi.ClientCrop(window,size.Width,size.Height);
+                    fresh=bridge==null ? renderer.Receive(texture,crop,deduplicate) : bridge.Receive(renderer,texture,crop,deduplicate);
                 }
                 timestamp=frame.SystemRelativeTime.TotalMilliseconds;
                 return fresh;
@@ -133,35 +139,11 @@ internal sealed class WindowCapture : IDisposable
         pool.Recreate(device,format,2,size);
         return false;
     }
-    Texture2D Transfer(Device destination,Texture2D input)
-    {
-        var desc=input.Description;
-        if(staging==null || staging.Description.Width!=desc.Width || staging.Description.Height!=desc.Height || staging.Description.Format!=desc.Format) {
-            if(staging!=null) staging.Dispose();
-            if(uploaded!=null) uploaded.Dispose();
-            desc.OptionFlags=ResourceOptionFlags.None;
-            desc.BindFlags=BindFlags.None;
-            desc.Usage=ResourceUsage.Staging;
-            desc.CpuAccessFlags=CpuAccessFlags.Read;
-            staging=new Texture2D(captureDevice,desc);
-            desc.Usage=ResourceUsage.Default;
-            desc.CpuAccessFlags=CpuAccessFlags.None;
-            uploaded=new Texture2D(destination,desc);
-        }
-        var ctx=captureDevice.ImmediateContext;
-        ctx.CopyResource(input,staging);
-        var data=ctx.MapSubresource(staging,0,MapMode.Read,MapFlags.None);
-        try {destination.ImmediateContext.UpdateSubresource(data,uploaded,0);}
-        finally {ctx.UnmapSubresource(staging,0);}
-        return uploaded;
-    }
     public void Dispose()
     {
         if(session!=null) session.Dispose();
         if(pool!=null) pool.Dispose();
         if(device!=null) device.Dispose();
-        if(uploaded!=null) uploaded.Dispose();
-        if(staging!=null) staging.Dispose();
-        if(captureDevice!=null) captureDevice.Dispose();
+        if(bridge!=null) bridge.Dispose();
     }
 }

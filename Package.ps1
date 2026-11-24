@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$Version = '0.25.0',[string]$BuildDir=$PSScriptRoot)
+param([string]$Version = '0.26.0',[string]$BuildDir=$PSScriptRoot)
 $ErrorActionPreference = 'Stop'
 if ($Version -notmatch '^\d+\.\d+\.\d+(-[a-z0-9.-]+)?$') { throw 'Invalid version.' }
 $dist = Join-Path $PSScriptRoot 'dist'
@@ -26,7 +26,7 @@ try {
         'NVIDIA_RTX_Video_SDK_License.pdf','NVIDIA-OPTICAL-FLOW-LICENSE.txt','P5Cast.Fruc.dll','P5Cast.FrucHost.exe','Cadrivect.Decoder.dll','FFmpeg-LICENSE.txt',
         'P5Cast.Fsr.dll','amd_fidelityfx_loader_dx12.dll','amd_fidelityfx_upscaler_dx12.dll','amd_fidelityfx_framegeneration_dx12.dll','AMD-FSR-LICENSE.md','AMD-FSR-NOTICES.md',
         'P5Cast.FsrVk.dll','amd_fidelityfx_loader_vk.dll','amd_fidelityfx_upscaler_vk.dll','amd_fidelityfx_framegeneration_vk.dll',
-        'P5Cast.Presentation.dll','P5Cast.Dxvk.dll','DXVK-LICENSE.txt','SDL3.dll','SDL3-LICENSE.txt')
+        'P5Cast.Presentation.dll','P5Cast.Dxvk.dll','P5Cast.DxgiVk.dll','P5Cast.VulkanCapture.dll','DXVK-LICENSE.txt','SDL3.dll','SDL3-LICENSE.txt')
     foreach ($file in $runtimeFiles) {
         Copy-Item -LiteralPath (Join-Path $BuildDir "engine\bin\$file") -Destination (Join-Path $bundle "engine\bin\$file")
     }

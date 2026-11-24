@@ -44,8 +44,7 @@ internal sealed partial class Renderer : IDisposable
     public Device Device { get; private set; }
     readonly DeviceContext context;
     readonly SwapChain swap;
-    Presentation presentation;
-    OpenGlEffects openGlEffects;
+    IFramePresenter presentation;
     public string Backend { get; private set; }
     readonly Buffer constants;
     readonly ComputeShader changed;
@@ -112,15 +111,16 @@ internal sealed partial class Renderer : IDisposable
         Backend=Presentation.Resolve(backend);
         HdrEnabled=ChooseHdr(hdrMode);
         try {
-            if(Backend=="d3d11") {
-                var desc=new SwapChainDescription {
-                    BufferCount=2, Flags=SwapChainFlags.None, IsWindowed=true, OutputHandle=hwnd,
-                    ModeDescription=new ModeDescription(window.Width,window.Height,new Rational(0,1),DisplayHdr.OutputFormat(HdrEnabled)),
-                    Usage=Usage.RenderTargetOutput,SampleDescription=new SampleDescription(1,0),SwapEffect=SwapEffect.FlipDiscard
-                };
-                Device device; SwapChain chain;
-                Device.CreateWithSwapChain(DriverType.Hardware,DeviceCreationFlags.BgraSupport,desc,out device,out chain);
-                Device=device; swap=chain;
+            if(Backend=="d3d11" || Backend=="vulkan") {
+                var desc=Presentation.DescribeSwapChain(hwnd,window,HdrEnabled);
+                if(Backend=="vulkan") {
+                    Device=CreateEffectDevice(Backend);
+                    swap=VulkanSwapChain.Create(Device,desc);
+                } else {
+                    Device device; SwapChain chain;
+                    Device.CreateWithSwapChain(DriverType.Hardware,DeviceCreationFlags.BgraSupport,desc,out device,out chain);
+                    Device=device; swap=chain;
+                }
                 using(var factory=swap.GetParent<Factory>()) factory.MakeWindowAssociation(hwnd,WindowAssociationFlags.IgnoreAltEnter);
             } else {
                 Device=CreateEffectDevice(Backend);
@@ -218,15 +218,16 @@ internal sealed partial class Renderer : IDisposable
     void ConfigureDisplay(Size window,bool hdr,bool resize,bool allowSdr,bool displayChanged)
     {
         if(swap!=null) {
-            if(display!=null) { context.OutputMerger.ResetTargets(); display.Dispose(); display=null; }
-            if(backBuffer!=null) { backBuffer.Dispose(); backBuffer=null; }
-            if(resize) swap.ResizeBuffers(2,window.Width,window.Height,DisplayHdr.OutputFormat(hdr),SwapChainFlags.None);
-            // Reapply the swap-chain color space without walking the display topology
-            // again on a size-only change. Display notifications invalidate the cache.
-            outputInfo=DisplayHdr.Configure(swap,hdr,displayChanged || HdrEnabled!=hdr ? null : outputInfo);
-            backBuffer=Texture2D.FromSwapChain<Texture2D>(swap,0);
-            display=new RenderTargetView(Device,backBuffer);
-        } else hdr=ConfigurePortableDisplay(window,hdr,allowSdr,displayChanged);
+            try {
+                ConfigureSwapDisplay(window,hdr,resize,displayChanged);
+                if(hdr || displayChanged) OutputNotice=null;
+            } catch(Exception error) {
+                if(!allowSdr || !hdr || !IsEffectFailure(error)) throw;
+                hdr=false;
+                ConfigureSwapDisplay(window,false,true,true);
+                OutputNotice="Using SDR on this display. "+error.Message;
+            }
+        } else hdr=ConfigureGpuDisplay(window,hdr,allowSdr,displayChanged);
         if(HdrEnabled!=hdr)
         {
             // WGC and DirectVideo will deliver the corresponding input format on the next frame.
@@ -234,25 +235,34 @@ internal sealed partial class Renderer : IDisposable
             if(PictureLabels.IsNeuralRendering(failedMode)) {failedMode=null;EffectNotice="";}
         }
     }
-    bool ConfigurePortableDisplay(Size window,bool hdr,bool allowSdr,bool displayChanged)
+    void ConfigureSwapDisplay(Size window,bool hdr,bool resize,bool displayChanged)
+    {
+        if(display!=null) { context.OutputMerger.ResetTargets(); display.Dispose(); display=null; }
+        if(backBuffer!=null) { backBuffer.Dispose(); backBuffer=null; }
+        if(resize) swap.ResizeBuffers(2,window.Width,window.Height,DisplayHdr.OutputFormat(hdr),SwapChainFlags.None);
+        outputInfo=DisplayHdr.Configure(swap,hdr,displayChanged || HdrEnabled!=hdr ? null : outputInfo);
+        backBuffer=Texture2D.FromSwapChain<Texture2D>(swap,0);
+        display=new RenderTargetView(Device,backBuffer);
+    }
+    bool ConfigureGpuDisplay(Size window,bool hdr,bool allowSdr,bool displayChanged)
     {
         // Keep the currently displayed image and working swap chain until the new
         // API surface, color space, processing texture and render view all exist.
         var info=displayChanged || outputInfo==null ? DisplayHdr.Probe(hwnd) : outputInfo;
-        Presentation candidate=null;
+        IFramePresenter candidate=null;
         Texture2D target=null;
         RenderTargetView view=null;
         string notice=OutputNotice;
         try {
             if(presentation==null || presentation.Hdr10!=hdr || displayChanged) {
                 notice=null;
-                try { candidate=new Presentation(hwnd,Backend,window,hdr); }
+                try { candidate=Presentation.Create(hwnd,Backend,Device,window,hdr); }
                 catch(InvalidOperationException error) {
                     if(!allowSdr || !hdr) throw;
                     hdr=false;
                     notice="Using SDR on this display. "+error.Message;
                     if(presentation==null || presentation.Hdr10 || displayChanged)
-                        candidate=new Presentation(hwnd,Backend,window,false);
+                        candidate=Presentation.Create(hwnd,Backend,Device,window,false);
                 }
             }
             var desc=new Texture2DDescription {
@@ -420,8 +430,7 @@ internal sealed partial class Renderer : IDisposable
         var info=new FrameInfo { SourceX=srcSize.Width,SourceY=srcSize.Height,OutputX=outSize.Width,OutputY=outSize.Height,
                                  Phase=phase,WipeHorizontal=wipeHorizontal ? 1 : 0,OriginX=area.X,OriginY=area.Y,TargetX=area.Width,TargetY=area.Height,WipeGripState=wipeGripState };
         if(Backend=="opengl") {
-            if(openGlEffects==null) openGlEffects=new OpenGlEffects(hwnd,Device);
-            if(openGlEffects.Draw(name,target,area,input,previous,flow,clip,phase,srcSize)) return;
+            if(((OpenGlEffects)presentation).Draw(name,target,area,input,previous,flow,clip,phase,srcSize)) return;
         }
         context.UpdateSubresource(ref info,constants);
         if(auxiliary==null) context.OutputMerger.SetRenderTargets(target);
@@ -622,7 +631,7 @@ internal sealed partial class Renderer : IDisposable
         }
         int pixel=samplePixel ? ReadCenterPixel() : 0;
         if(presentation==null) swap.Present(0,PresentFlags.None);
-        else presentation.Present(Device,context,backBuffer,screenSize);
+        else presentation.Present(backBuffer);
         return pixel;
     }
     void SampleOutput()
@@ -682,7 +691,6 @@ internal sealed partial class Renderer : IDisposable
                 context.Flush(); DwmFlush();
             } catch(SharpDXException) { /* A removed device can no longer present. */ }
         }
-        if(openGlEffects!=null) openGlEffects.Dispose();
         if(context!=null) context.ClearState();
         if(loupePixels!=null) loupePixels.Dispose();
         if(loupeLabels!=null) loupeLabels.Dispose();

@@ -28,6 +28,7 @@ internal sealed class GpuCapabilities
     bool neuralRuntimeDownloadAvailable;
     string openNrReason=NeuralRendering.OpenBackendReason;
     bool openNrModelImportAvailable;
+    string outputFailure;
 
     public static GpuCapabilities Probe() { return ProbeForBackend("d3d11"); }
 
@@ -42,6 +43,7 @@ internal sealed class GpuCapabilities
             using(var dxgi=device.QueryInterface<SharpDX.DXGI.Device>())
             using(var adapter=dxgi.Adapter)
             {
+                Presentation.CheckOutput(backend,device);
                 result.Adapter=adapter.Description.Description.TrimEnd('\0',' ');
                 if(NisScaler.SupportsBackend(backend)) result.nisReason=NisScaler.Probe(device);
                 if(Renderer.HasVendorBridge(backend,"fsr-temporal"))
@@ -83,7 +85,10 @@ internal sealed class GpuCapabilities
                 }
             }
         }
-        catch(Exception e) { result.AllUnavailable(e.Message);result.nisReason=result.fsrReason=result.fgReason=e.Message; }
+        catch(Exception e) {
+            if(result.Adapter=="Unavailable") result.outputFailure=e.Message;
+            result.AllUnavailable(e.Message);result.nisReason=result.fsrReason=result.fgReason=e.Message;
+        }
         return result;
     }
     void AllUnavailable(string message) { dlssReason=dlaaReason=rtxReason=flowReason=neuralRenderingReason=openNrReason=frucReason=message;neuralRuntimeDownloadAvailable=openNrModelImportAvailable=frucRuntimeImportAvailable=false; }
@@ -198,6 +203,7 @@ internal sealed class GpuCapabilities
     public string ToJson()
     {
         var json=new StringBuilder("{\"adapter\":").Append(Quote(Adapter));
+        json.Append(",\"presentationError\":").Append(Quote(outputFailure ?? ""));
         json.Append(",\"fsrVersion\":").Append(Quote(fsrReason==null ? fsrVersion : ""));
         json.Append(",\"amdFrameGenerationVersion\":").Append(Quote(fgReason==null ? fgVersion : ""));
         json.Append(",\"frucRuntimeInstalled\":").Append(frucRuntimeInstalled ? "true":"false");

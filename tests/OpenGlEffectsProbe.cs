@@ -1,5 +1,4 @@
-// GPU readback on a hidden child window. Exercise GL/D3D registered textures
-// and the staging transfer path used when driver interop is unavailable.
+// Exercise GL/D3D registered textures and the actual back buffer of a hidden test window.
 using System;
 using System.Drawing;
 using System.Reflection;
@@ -12,9 +11,9 @@ using Device=SharpDX.Direct3D11.Device;
 internal static class OpenGlEffectsProbe
 {
     static readonly Size SizeA=new Size(63,37);
-    static Texture2D Surface(Device device, Size size, Format format) {
+    static Texture2D Surface(Device device, Size size, Format format,BindFlags bindings=BindFlags.RenderTarget|BindFlags.ShaderResource) {
         return new Texture2D(device,new Texture2DDescription {Width=size.Width,Height=size.Height,Format=format,MipLevels=1,ArraySize=1,
-            BindFlags=BindFlags.RenderTarget|BindFlags.ShaderResource,SampleDescription=new SampleDescription(1,0)});
+            BindFlags=bindings,SampleDescription=new SampleDescription(1,0)});
     }
     static int[] Read(Device device, Texture2D image) {
         var desc=image.Description;
@@ -35,7 +34,16 @@ internal static class OpenGlEffectsProbe
         var taken=(bool)gl.GetType().GetMethod("Draw").Invoke(gl,new object[]{pass,target,area,frame,previous,flow,clip,phase,source});
         Require(taken,pass+" did not execute through OpenGL.");
     }
-    static int[] Run(Device device, Control host,Type type,bool sharing) {
+    static Color PresentAndRead(Type type,object gl,Texture2D source,int x,int y) {
+        var bytes=new byte[4];var error=new byte[4096];
+        var flags=BindingFlags.NonPublic|BindingFlags.Instance;
+        var state=type.GetField("instance",flags).GetValue(gl);
+        var frame=type.GetMethod("p5_gl_present",BindingFlags.NonPublic|BindingFlags.Static);
+        int ok=(int)frame.Invoke(null,new object[]{state,source.NativePointer,new[]{x,y},bytes,error,error.Length});
+        Require(ok==1,"OpenGL window read failed: "+System.Text.Encoding.UTF8.GetString(error).TrimEnd('\0'));
+        return Color.FromArgb(255,bytes[0],bytes[1],bytes[2]);
+    }
+    static void Run(Device device, Control host,Type type) {
         var c=device.ImmediateContext;
         var bigger=new Size(125,73);
         var srcArea=new Rectangle(Point.Empty,SizeA);var biggerArea=new Rectangle(Point.Empty,bigger);
@@ -43,9 +51,9 @@ internal static class OpenGlEffectsProbe
         for(int y=0;y<SizeA.Height;y++) for(int x=0;x<SizeA.Width;x++) {
             source[y*SizeA.Width+x]=Color.FromArgb(255,((x/5+y/7)%2)*94+71,y*5+11,x*3+15).ToArgb();
         }
-        using(var gl=(IDisposable)Activator.CreateInstance(type,host.Handle,device,sharing))
+        using(var gl=(IDisposable)Activator.CreateInstance(type,host.Handle,device))
         using(var input=Surface(device,SizeA,Format.B8G8R8A8_UNorm))
-        using(var target=Surface(device,SizeA,Format.B8G8R8A8_UNorm))
+        using(var target=Surface(device,SizeA,Format.B8G8R8A8_UNorm,BindFlags.RenderTarget))
         using(var scaled=Surface(device,bigger,Format.B8G8R8A8_UNorm))
         using(var enhanced=Surface(device,bigger,Format.B8G8R8A8_UNorm))
         using(var vectors=Surface(device,new Size(6,4),Format.R16G16B16A16_Float))
@@ -77,9 +85,19 @@ internal static class OpenGlEffectsProbe
             var result=Read(device,enhanced);
             Require(Color.FromArgb(result[0]).G<50 && Color.FromArgb(result[result.Length-1]).G>165,"FSR flipped or corrupted the source.");
             int shared=(int)type.GetProperty("SharedTextures").GetValue(gl,null);
-            if(!sharing) Require(shared==0,"The forced staging test used registered textures.");
-            Console.WriteLine("{0}: {1} registered textures.",sharing?"Driver-selected transfer":"Forced staging",shared);
-            return result;
+            Require(shared>=5,"The OpenGL passes did not use shared GPU textures.");
+            var resize=type.GetMethod("ResizeWindow");
+            resize.Invoke(gl,new object[]{SizeA});
+            type.GetMethod("Present").Invoke(gl,new object[]{target});
+            Draw(gl,"Original",SizeA,srcArea,output,src);
+            foreach(Point p in new[]{new Point(2,3),new Point(54,29)}) {
+                Color actual=PresentAndRead(type,gl,target,p.X,p.Y);
+                int expected=source[p.Y*SizeA.Width+p.X];
+                Require(actual.ToArgb()==expected,"OpenGL window pixel at "+p+" was "+actual+"; expected "+Color.FromArgb(expected));
+            }
+            resize.Invoke(gl,new object[]{new Size(63,63)});
+            Require(PresentAndRead(type,gl,input,24,5).ToArgb()==Color.Black.ToArgb(),"OpenGL resize left a colored letterbox.");
+            Require(PresentAndRead(type,gl,input,2,16).ToArgb()==source[3*SizeA.Width+2],"OpenGL resize shifted the letterboxed image.");
         }
     }
     [STAThread] static int Main(string[] args) {
@@ -87,10 +105,10 @@ internal static class OpenGlEffectsProbe
             var renderer=Assembly.LoadFrom(args[0]).GetType("OpenGlEffects",true);
             using(var host=new Control())
             using(var device=new Device(SharpDX.Direct3D.DriverType.Hardware,DeviceCreationFlags.BgraSupport)) {
-                int[] shared=Run(device,host,renderer,true),copied=Run(device,host,renderer,false);
-                for(int i=0;i<shared.Length;i++) Require(shared[i]==copied[i],"FSR colors differ between transfer paths at pixel "+i+".");
+                host.ClientSize=new Size(160,120);
+                Run(device,host,renderer);
             }
-            Console.WriteLine("OpenGL Original, clipped Sharpen, Motion, Interpolate and FSR1 preserved orientation, channels and clipping. Shared and staged FSR outputs matched pixel-for-pixel.");
+            Console.WriteLine("Shared GPU textures passed OpenGL Original, clipped Sharpen, Motion, Interpolate and FSR1 tests. Verified the WGL window's actual RGB pixels, orientation and resized letterbox.");
             return 0;
         } catch(Exception e) {Console.Error.WriteLine(e);return 1;}
     }

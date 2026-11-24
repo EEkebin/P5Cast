@@ -14,7 +14,9 @@ Direct loads the three hash-verified FFmpeg DLLs from its local decoder cache an
 
 ## Presentation
 
-Choose a renderer before starting a session with `--renderer auto`, `d3d11`, `d3d12`, `vulkan`, or `opengl`. Auto selects D3D11 on Windows. D3D12, Vulkan and OpenGL upload the finished image through SDL3 and present in a child of the same video surface. SDR uses BGRA8. On HDR-capable D3D12 and Vulkan devices, the player outputs packed 10-bit PQ/BT.2020 values to a verified HDR10 swap chain. The extra GPU readback and upload can affect frame times at high resolutions. D3D12 runs the effects shader graph through D3D11On12 and evaluates NVIDIA features on the underlying D3D12 textures and command queue. A privately named DXVK library runs the shader graph on Vulkan. OpenGL runs its own GLSL picture and motion passes. Windows capture and OpenGL dashboard overlay composition use system D3D11. If the requested API cannot initialize or present, playback reports the driver error.
+Choose `--renderer auto`, `d3d11`, `d3d12`, `vulkan`, or `opengl` before starting playback. Auto selects D3D11 on Windows. D3D11 draws into a DXGI backbuffer. D3D12 uses D3D11On12 for its shader graph and submits a GPU copy of the finished texture into a flip swap chain on the same D3D12 queue. Vulkan renders into a Vulkan swap chain on the same DXVK device. OpenGL uses GLSL for its picture and motion passes, shares textures with the D3D11 capture and overlay code through WGL_NV_DX_interop2, and swaps the window from that GL context. D3D11, D3D12 and Vulkan can present a 10-bit PQ/BT.2020 frame when the monitor and driver support HDR10. OpenGL presents SDR.
+
+Windows Graphics Capture captures Sony Remote Play on system D3D11. D3D12 opens a shared Windows texture on the same adapter, and Vulkan imports the shared allocation with Win32 external memory. A keyed mutex orders access to the captured image. Direct PS5 playback uploads the decoded video planes separately. Individual providers such as OpenDLSS-NR can perform additional transfers inside their own effect pipeline.
 
 ## Processing
 

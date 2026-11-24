@@ -1,5 +1,16 @@
 LIBRARY vulkan-1.dll
 EXPORTS
+    vkAllocateMemory
+    vkBindImageMemory
+    vkCmdCopyImage
+    vkCreateImage
+    vkDestroyImage
+    vkEnumerateDeviceExtensionProperties
+    vkFreeMemory
+    vkGetImageMemoryRequirements
+    vkGetFenceStatus
+    vkGetPhysicalDeviceImageFormatProperties2
+    vkGetPhysicalDeviceProperties2
     vkAllocateCommandBuffers
     vkBeginCommandBuffer
     vkCmdPipelineBarrier

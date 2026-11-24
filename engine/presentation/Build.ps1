@@ -26,11 +26,17 @@ try {
     . (Join-Path $PSScriptRoot '..\nvidia\Use-Compiler.ps1')
     Push-Location -LiteralPath $stage
     try {
-        & cl.exe /nologo /std:c11 /utf-8 /MT /O2 /LD "/I$sdk\include" "$PSScriptRoot\Presenter.c" "$PSScriptRoot\HdrGpu.c" "$PSScriptRoot\GlEffects.c" /link /BREPRO /MANIFEST:NO /NODEFAULTLIB:oldnames.lib /OUT:P5Cast.Presentation.dll "$sdk\lib\x64\SDL3.lib" user32.lib opengl32.lib
+        & cl.exe /nologo /std:c++17 /EHsc /utf-8 /MT /O2 /c "$PSScriptRoot\D3D12Presenter.cpp"
+        if ($LASTEXITCODE) { throw 'The D3D12 presenter did not compile.' }
+        & cl.exe /nologo /std:c11 /utf-8 /MT /O2 /LD "/I$sdk\include" "$PSScriptRoot\Presenter.c" "$PSScriptRoot\HdrGpu.c" "$PSScriptRoot\GlEffects.c" D3D12Presenter.obj /link /BREPRO /MANIFEST:NO /NODEFAULTLIB:oldnames.lib /OUT:P5Cast.Presentation.dll "$sdk\lib\x64\SDL3.lib" user32.lib opengl32.lib dxgi.lib
         if ($LASTEXITCODE) { throw 'The SDL presenter did not compile.' }
         Copy-Item -LiteralPath '.\P5Cast.Presentation.dll', "$sdk\lib\x64\SDL3.dll" -Destination $out -Force
         Copy-Item -LiteralPath "$sdk\LICENSE.txt" -Destination (Join-Path $out 'SDL3-LICENSE.txt') -Force
         if ($VerifyHdr) {
+            & cl.exe /nologo /std:c++17 /EHsc /utf-8 /MT /O2 "$PSScriptRoot\VerifyD3D12.cpp" /link /NODEFAULTLIB:oldnames.lib /OUT:VerifyD3D12.exe dxgi.lib user32.lib
+            if ($LASTEXITCODE) { throw 'The D3D12 swap-chain test did not compile.' }
+            & '.\VerifyD3D12.exe' (Join-Path $out 'Cadrivect.Ngx.dll')
+            if ($LASTEXITCODE) { throw 'The native D3D12 swap-chain test failed.' }
             $test = Join-Path $PSScriptRoot '..\..\tests\GpuHdrTransportProbe.c'
             & cl.exe /nologo /std:c11 /utf-8 /MT /O2 /DP5CAST_VERIFY_HDR /DP5CAST_PRESENTER_BUILD=1 "/I$sdk\include" "/I$PSScriptRoot" "$PSScriptRoot\Presenter.c" "$PSScriptRoot\HdrGpu.c" "$PSScriptRoot\GlEffects.c" $test /link /NODEFAULTLIB:oldnames.lib /OUT:GpuHdrTransportProbe.exe "$sdk\lib\x64\SDL3.lib" user32.lib opengl32.lib
             if ($LASTEXITCODE) { throw 'The HDR GPU transport probe did not compile.' }

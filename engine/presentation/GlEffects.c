@@ -18,6 +18,7 @@ typedef BOOL (WINAPI *DXCLOSE)(HANDLE);
 typedef HANDLE (WINAPI *DXREGISTER)(HANDLE,void *,GLuint,GLenum,GLenum);
 typedef BOOL (WINAPI *DXUNREGISTER)(HANDLE,HANDLE);
 typedef BOOL (WINAPI *DXLOCK)(HANDLE,GLint,HANDLE *);
+typedef const char *(WINAPI *WglExtensions)(HDC);
 #define GL_FUNCTIONS(X) \
  X(CreateShader,PFNGLCREATESHADERPROC) X(ShaderSource,PFNGLSHADERSOURCEPROC) X(CompileShader,PFNGLCOMPILESHADERPROC) \
  X(GetShaderiv,PFNGLGETSHADERIVPROC) X(GetShaderInfoLog,PFNGLGETSHADERINFOLOGPROC) X(DeleteShader,PFNGLDELETESHADERPROC) \
@@ -25,14 +26,12 @@ typedef BOOL (WINAPI *DXLOCK)(HANDLE,GLint,HANDLE *);
  X(GetProgramiv,PFNGLGETPROGRAMIVPROC) X(GetProgramInfoLog,PFNGLGETPROGRAMINFOLOGPROC) X(DeleteProgram,PFNGLDELETEPROGRAMPROC) \
  X(UseProgram,PFNGLUSEPROGRAMPROC) X(GetUniformLocation,PFNGLGETUNIFORMLOCATIONPROC) X(Uniform1f,PFNGLUNIFORM1FPROC) X(Uniform2f,PFNGLUNIFORM2FPROC) \
  X(GenFramebuffers,PFNGLGENFRAMEBUFFERSPROC) X(BindFramebuffer,PFNGLBINDFRAMEBUFFERPROC) X(FramebufferTexture2D,PFNGLFRAMEBUFFERTEXTURE2DPROC) \
- X(CheckFramebufferStatus,PFNGLCHECKFRAMEBUFFERSTATUSPROC) X(DeleteFramebuffers,PFNGLDELETEFRAMEBUFFERSPROC) X(ActiveTexture,PFNGLACTIVETEXTUREPROC)
+ X(BlitFramebuffer,PFNGLBLITFRAMEBUFFERPROC) X(CheckFramebufferStatus,PFNGLCHECKFRAMEBUFFERSTATUSPROC) X(DeleteFramebuffers,PFNGLDELETEFRAMEBUFFERSPROC) X(ActiveTexture,PFNGLACTIVETEXTUREPROC)
 typedef struct {
     IUnknown *resource;
     GLuint name;
     HANDLE handle;
-    ID3D11Texture2D *staging;
-    GLenum format,type;
-    unsigned width,height,bytes;
+    int width,height;
     uint64_t used;
 } SharedTexture;
 
@@ -46,8 +45,9 @@ typedef struct {
     GLint sourceSize[6],areaSize[6],origin[6],phase[6];
     uint64_t clock;
     HANDLE device;
-    ID3D11Device *d3d;
-    ID3D11DeviceContext *immediate;
+    int windowWidth,windowHeight;
+    bool visible;
+    IUnknown *presentedResource;
     SharedTexture shared[16];
     DXOPEN dxOpen;DXCLOSE dxClose;DXREGISTER dxRegister;DXUNREGISTER dxUnregister;DXLOCK dxLock,dxUnlock;
 #define FIELD(name,type) type name;
@@ -63,23 +63,28 @@ static void leave(GlEffects *g) { SDL_GL_MakeCurrent(g->priorWindow,g->priorCont
 static void release_texture(GlEffects *g,SharedTexture *t) {
     if(t->handle) g->dxUnregister(g->device,t->handle);
     if(t->name) glDeleteTextures(1,&t->name);
-    if(t->staging) ID3D11Texture2D_Release(t->staging);
     if(t->resource) IUnknown_Release(t->resource);
     memset(t,0,sizeof(*t));
 }
-static void destroy(GlEffects *g) {
+static void destroy(GlEffects *g,bool current) {
     if(!g) return;
     if(g->context) {
-        for(int i=0;i<16;i++) release_texture(g,&g->shared[i]);
+        for(int i=0;i<16;i++) {
+            /* Destroying a lost context also destroys its GL names. Never
+             * delete a name on an unrelated current context. */
+            if(!current) g->shared[i].name=0;
+            release_texture(g,&g->shared[i]);
+        }
         if(g->device) g->dxClose(g->device);
-        for(int i=0;i<6;i++) if(g->program[i]) g->DeleteProgram(g->program[i]);
-        if(g->fbo) g->DeleteFramebuffers(1,&g->fbo);
-        leave(g);
+        if(current) {
+            for(int i=0;i<6;i++) if(g->program[i]) g->DeleteProgram(g->program[i]);
+            if(g->fbo) g->DeleteFramebuffers(1,&g->fbo);
+            leave(g);
+        }
         SDL_GL_DestroyContext(g->context);
     }
     if(g->window) SDL_DestroyWindow(g->window);
     if(g->child) DestroyWindow(g->child);
-    if(g->immediate) ID3D11DeviceContext_Release(g->immediate);
     SDL_free(g);
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
 }
@@ -88,7 +93,7 @@ P5_API int p5_gl_shared_textures(const GlEffects *g) {
     for(int i=0;i<16;i++) if(g->shared[i].handle) ++count;
     return count;
 }
-P5_API void p5_gl_destroy(GlEffects *g) {if(g && enter(g)) destroy(g);}
+P5_API void p5_gl_destroy(GlEffects *g) {if(g) destroy(g,enter(g));}
 static GLuint compile(GlEffects *g,GLenum kind,const char *prefix,const char *body,char *error,int length) {
     GLuint shader=g->CreateShader(kind);
     const char *pieces[]={prefix,body};
@@ -98,12 +103,23 @@ static GLuint compile(GlEffects *g,GLenum kind,const char *prefix,const char *bo
     return shader;
 }
 SDL_Window *p5_gl_hidden_child(HWND parent,HWND *child);
-P5_API GlEffects *p5_gl_create(HWND parent,ID3D11Device *device,const char *body,int allowSharing,char *error,int length) {
+static bool supports_d3d11_interop(void) {
+    WglExtensions query=(WglExtensions)SDL_GL_GetProcAddress("wglGetExtensionsStringARB");
+    const char *extensions=query ? query(wglGetCurrentDC()) : NULL;
+    const char name[]="WGL_NV_DX_interop2";
+    if(!extensions) return false;
+    const char *next=extensions;
+    while((next=strstr(next,name))!=NULL) {
+        const char *end=next+sizeof(name)-1;
+        if((next==extensions || next[-1]==' ') && (!*end || *end==' ')) return true;
+        next=end;
+    }
+    return false;
+}
+P5_API GlEffects *p5_gl_create(HWND parent,ID3D11Device *device,const char *body,char *error,int length) {
     if(!SDL_InitSubSystem(SDL_INIT_VIDEO)) {SDL_strlcpy(error,SDL_GetError(),length);return NULL;}
     GlEffects *g=SDL_calloc(1,sizeof(*g));
     if(!g) {SDL_QuitSubSystem(SDL_INIT_VIDEO);return NULL;}
-    g->d3d=device;
-    ID3D11Device_GetImmediateContext(device,&g->immediate);
     g->priorWindow=SDL_GL_GetCurrentWindow();g->priorContext=SDL_GL_GetCurrentContext();
     g->window=p5_gl_hidden_child(parent,&g->child);
     if(!g->window || !(g->context=SDL_GL_CreateContext(g->window))) {SDL_strlcpy(error,SDL_GetError(),length);goto fail;}
@@ -116,8 +132,13 @@ P5_API GlEffects *p5_gl_create(HWND parent,ID3D11Device *device,const char *body
     g->dxUnregister=(DXUNREGISTER)SDL_GL_GetProcAddress("wglDXUnregisterObjectNV");
     g->dxLock=(DXLOCK)SDL_GL_GetProcAddress("wglDXLockObjectsNV");
     g->dxUnlock=(DXLOCK)SDL_GL_GetProcAddress("wglDXUnlockObjectsNV");
-    if(allowSharing && g->dxOpen && g->dxClose && g->dxRegister && g->dxUnregister && g->dxLock && g->dxUnlock)
+    if(supports_d3d11_interop() && g->dxOpen && g->dxClose && g->dxRegister && g->dxUnregister && g->dxLock && g->dxUnlock)
         g->device=g->dxOpen(device);
+    if(!g->device) {
+        SDL_strlcpy(error,"The OpenGL driver cannot share this playback adapter's GPU textures (WGL_NV_DX_interop2).",length);
+        goto fail;
+    }
+    SDL_GL_SetSwapInterval(0); /* Frame pacing is controlled by the player. */
     GLuint vertex=compile(g,GL_VERTEX_SHADER,"#version 430\n","void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.-1.,0,1);}",error,length);
     if(!vertex) goto fail;
     for(int i=0;i<6;i++) {
@@ -136,54 +157,7 @@ P5_API GlEffects *p5_gl_create(HWND parent,ID3D11Device *device,const char *body
     g->GenFramebuffers(1,&g->fbo);
     leave(g);return g;
 fail:
-    destroy(g);return NULL;
-}
-/* When WGL interop is unavailable (or the driver rejects one texture),
- * transfer only that resource through host-visible D3D staging. Effects
- * still execute on the selected GL device. */
-static bool allocate_transfer(GlEffects *g,SharedTexture *t,IUnknown *resource) {
-    D3D11_TEXTURE2D_DESC desc;
-    ID3D11Texture2D_GetDesc((ID3D11Texture2D *)resource,&desc);
-    GLenum internal;
-    switch(desc.Format) {
-        case DXGI_FORMAT_B8G8R8A8_UNORM:internal=GL_RGBA8;t->format=GL_BGRA;t->type=GL_UNSIGNED_BYTE;t->bytes=4;break;
-        case DXGI_FORMAT_R8G8B8A8_UNORM:internal=GL_RGBA8;t->format=GL_RGBA;t->type=GL_UNSIGNED_BYTE;t->bytes=4;break;
-        case DXGI_FORMAT_R16G16B16A16_FLOAT:internal=GL_RGBA16F;t->format=GL_RGBA;t->type=GL_HALF_FLOAT;t->bytes=8;break;
-        default:return false;
-    }
-    t->width=desc.Width;t->height=desc.Height;
-    desc.Usage=D3D11_USAGE_STAGING;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ|D3D11_CPU_ACCESS_WRITE;
-    desc.BindFlags=0;desc.MiscFlags=0;
-    if(FAILED(ID3D11Device_CreateTexture2D(g->d3d,&desc,NULL,&t->staging))) return false;
-    glBindTexture(GL_TEXTURE_2D,t->name);
-    glTexImage2D(GL_TEXTURE_2D,0,internal,t->width,t->height,0,t->format,t->type,NULL);
-    return glGetError()==GL_NO_ERROR;
-}
-static bool upload(GlEffects *g,SharedTexture *t) {
-    D3D11_MAPPED_SUBRESOURCE map;
-    ID3D11DeviceContext_CopyResource(g->immediate,(ID3D11Resource *)t->staging,(ID3D11Resource *)t->resource);
-    if(FAILED(ID3D11DeviceContext_Map(g->immediate,(ID3D11Resource *)t->staging,0,D3D11_MAP_READ,0,&map))) return false;
-    glBindTexture(GL_TEXTURE_2D,t->name);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH,map.RowPitch/t->bytes);
-    glTexSubImage2D(GL_TEXTURE_2D,0,0,0,t->width,t->height,t->format,t->type,map.pData);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH,0);
-    ID3D11DeviceContext_Unmap(g->immediate,(ID3D11Resource *)t->staging,0);
-    return glGetError()==GL_NO_ERROR;
-}
-static bool download(GlEffects *g,SharedTexture *t,int x,int y,int w,int h,const int *clip) {
-    int r=x+w,b=y+h;
-    if(clip) {x=SDL_max(x,clip[0]);y=SDL_max(y,clip[1]);r=SDL_min(r,clip[0]+clip[2]);b=SDL_min(b,clip[1]+clip[3]);}
-    if(r<=x || b<=y) return true;
-    D3D11_MAPPED_SUBRESOURCE map;
-    if(FAILED(ID3D11DeviceContext_Map(g->immediate,(ID3D11Resource *)t->staging,0,D3D11_MAP_WRITE,0,&map))) return false;
-    glPixelStorei(GL_PACK_ROW_LENGTH,map.RowPitch/t->bytes);
-    glReadPixels(x,y,r-x,b-y,t->format,t->type,(uint8_t *)map.pData+y*map.RowPitch+x*t->bytes);
-    glPixelStorei(GL_PACK_ROW_LENGTH,0);
-    ID3D11DeviceContext_Unmap(g->immediate,(ID3D11Resource *)t->staging,0);
-    if(glGetError()!=GL_NO_ERROR) return false;
-    D3D11_BOX region={x,y,0,r,b,1};
-    ID3D11DeviceContext_CopySubresourceRegion(g->immediate,(ID3D11Resource *)t->resource,0,x,y,0,(ID3D11Resource *)t->staging,0,&region);
-    return true;
+    destroy(g,g->context!=NULL);return NULL;
 }
 static SharedTexture *share(GlEffects *g,IUnknown *resource) {
     SharedTexture *slot=&g->shared[0];
@@ -194,8 +168,12 @@ static SharedTexture *share(GlEffects *g,IUnknown *resource) {
     }
     release_texture(g,slot);
     glGenTextures(1,&slot->name);
-    if(g->device) slot->handle=g->dxRegister(g->device,resource,slot->name,GL_TEXTURE_2D,1); /* WGL_ACCESS_READ_WRITE_NV */
-    if(!slot->handle && !allocate_transfer(g,slot,resource)){release_texture(g,slot);return NULL;}
+    slot->handle=g->dxRegister(g->device,resource,slot->name,GL_TEXTURE_2D,1); /* WGL_ACCESS_READ_WRITE_NV */
+    if(!slot->handle){release_texture(g,slot);return NULL;}
+    D3D11_TEXTURE2D_DESC description;
+    ID3D11Texture2D_GetDesc((ID3D11Texture2D *)resource,&description);
+    slot->width=(int)description.Width;
+    slot->height=(int)description.Height;
     IUnknown_AddRef(resource);slot->resource=resource;slot->used=++g->clock;
     return slot;
 }
@@ -212,7 +190,6 @@ P5_API int p5_gl_draw(GlEffects *g,int effect,IUnknown *output,IUnknown *input,I
         bool duplicate=false;
         for(int j=0;j<count;j++) if(handles[j]==textures[i]->handle) duplicate=true;
         if(textures[i]->handle && !duplicate) handles[count++]=textures[i]->handle;
-        if(i>0 && textures[i]->staging && !upload(g,textures[i])) {SDL_strlcpy(error,"OpenGL texture upload failed.",length);goto done;}
     }
     if(count && !g->dxLock(g->device,count,handles)) {SDL_strlcpy(error,"OpenGL could not lock shared frame textures.",length);goto done;}
     g->BindFramebuffer(GL_FRAMEBUFFER,g->fbo);
@@ -234,11 +211,86 @@ P5_API int p5_gl_draw(GlEffects *g,int effect,IUnknown *output,IUnknown *input,I
     if(clip) glDisable(GL_SCISSOR_TEST);
     GLenum code=glGetError();
     if(code!=GL_NO_ERROR) SDL_snprintf(error,length,"OpenGL effect %d failed (0x%x).",effect,code);
-    else if(textures[0]->staging && !download(g,textures[0],x,y,w,h,clip)) SDL_strlcpy(error,"OpenGL texture readback failed.",length);
     else ok=1;
 unlock:
     g->FramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,0,0);
     if(count && !g->dxUnlock(g->device,count,handles)) {SDL_strlcpy(error,"OpenGL could not release shared frame textures.",length);ok=0;}
+done:
+    leave(g);return ok;
+}
+
+P5_API int p5_gl_resize(GlEffects *g,int width,int height,char *error,int length) {
+    if(width<=0 || height<=0) { SDL_strlcpy(error,"Invalid OpenGL window size.",length);return 0; }
+    if(width==g->windowWidth && height==g->windowHeight) return 1;
+    if(!SetWindowPos(g->child,NULL,0,0,width,height,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE)) {
+        SDL_strlcpy(error,"Could not resize the OpenGL playback window.",length);return 0;
+    }
+    g->windowWidth=width;
+    g->windowHeight=height;
+    return 1;
+}
+
+/* The D3D texture includes the player's overlays. Bind it directly as the GL read
+ * framebuffer and blit into the WGL back buffer. WGL texture row zero holds the
+ * top video scanline; the window framebuffer numbers rows from the bottom. */
+P5_API int p5_gl_present(GlEffects *g,IUnknown *resource,const int *sampleXY,unsigned char *sample,
+                         char *error,int length) {
+    if(!g->windowWidth || !g->windowHeight || !resource) {
+        SDL_strlcpy(error,"Missing OpenGL video frame or window size.",length);return 0;
+    }
+    if(!enter(g)) {SDL_strlcpy(error,SDL_GetError(),length);return 0;}
+    int ok=0;
+    if(g->presentedResource && g->presentedResource!=resource) {
+        for(int i=0;i<16;i++) if(g->shared[i].resource==g->presentedResource) {
+            release_texture(g,&g->shared[i]);break;
+        }
+        g->presentedResource=NULL;
+    }
+    SharedTexture *texture=share(g,resource);
+    if(!texture || !g->dxLock(g->device,1,&texture->handle)) {
+        SDL_strlcpy(error,"Could not share the finished frame with the OpenGL window.",length);goto done;
+    }
+    g->BindFramebuffer(GL_DRAW_FRAMEBUFFER,0);
+    g->BindFramebuffer(GL_READ_FRAMEBUFFER,g->fbo);
+    g->FramebufferTexture2D(GL_READ_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,texture->name,0);
+    if(g->CheckFramebufferStatus(GL_READ_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE) {
+        SDL_strlcpy(error,"OpenGL could not read the shared presentation texture.",length);goto unlock;
+    }
+    int width=g->windowWidth,height=g->windowHeight;
+    if((int64_t)width*texture->height>(int64_t)height*texture->width)
+        width=SDL_max(1,(int)((int64_t)height*texture->width/texture->height));
+    else
+        height=SDL_max(1,(int)((int64_t)width*texture->height/texture->width));
+    int left=(g->windowWidth-width)/2, bottom=(g->windowHeight-height)/2;
+    if(width!=g->windowWidth || height!=g->windowHeight) {
+        glClearColor(0,0,0,1);
+        glClear(GL_COLOR_BUFFER_BIT);
+    }
+    g->BlitFramebuffer(0,0,texture->width,texture->height,left,bottom+height,left+width,bottom,
+                       GL_COLOR_BUFFER_BIT,GL_LINEAR);
+    if(glGetError()!=GL_NO_ERROR) {
+        SDL_strlcpy(error,"OpenGL could not blit into the window back buffer.",length);goto unlock;
+    }
+    g->presentedResource=resource;
+    ok=1;
+unlock:
+    g->FramebufferTexture2D(GL_READ_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,0,0);
+    g->BindFramebuffer(GL_FRAMEBUFFER,0);
+    if(!g->dxUnlock(g->device,1,&texture->handle)) {
+        SDL_strlcpy(error,"OpenGL could not release the presentation texture.",length);ok=0;
+    }
+    if(ok) {
+        /* Only the pixel-verification harness supplies sample coordinates. */
+        if(sampleXY && sample) {
+            glReadBuffer(GL_BACK);
+            glReadPixels(sampleXY[0],g->windowHeight-1-sampleXY[1],1,1,GL_RGBA,GL_UNSIGNED_BYTE,sample);
+            if(glGetError()!=GL_NO_ERROR) {
+                SDL_strlcpy(error,"OpenGL back-buffer pixel verification failed.",length);ok=0;
+            }
+        }
+        if(ok && !SDL_GL_SwapWindow(g->window)) {SDL_strlcpy(error,SDL_GetError(),length);ok=0;}
+        if(ok && !g->visible) {ShowWindow(g->child,SW_SHOWNA);g->visible=true;}
+    }
 done:
     leave(g);return ok;
 }

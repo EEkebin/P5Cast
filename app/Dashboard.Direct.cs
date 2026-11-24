@@ -163,6 +163,8 @@ namespace Cadrivect
             if(!string.IsNullOrEmpty(raw) && raw!="{}") {
                 var snapshot=json.Deserialize<Dictionary<string,object>>(raw);
                 if(source=="Direct") {
+                    if(!firstFrame && Field(snapshot,"estimateGameFps").Equals("true",StringComparison.OrdinalIgnoreCase)!=meter.EstimateGameFps)
+                        engine.SetEstimateGameFps(meter.EstimateGameFps);
                     snapshot["requestedVideoKbps"]=sessionVideoKbps;
                     if(directDiagnostics==null) directDiagnostics=new DirectDiagnostics(Path.Combine(
                         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"P5Cast","diagnostics"));
@@ -247,6 +249,7 @@ namespace Cadrivect
         }
         void Finish(bool clean=true)
         {
+            meter.SetNetworkPlayback(false);
             if(directDiagnostics!=null) {directDiagnostics.Finish(); directDiagnostics=null;}
             EndSwitchTracking();
             if(pendingStop!=null) {
@@ -302,6 +305,7 @@ namespace Cadrivect
         }
         Task<int> RunRenderer(List<string> args)
         {
+            if(meter.EstimateGameFps) args.Add("--estimate-game-fps");
             args.AddRange(new[]{"--surface",surface.Handle.ToInt64().ToString(CultureInfo.InvariantCulture),
                     "--mode",modeIds[mode],"--multiplier",factor.ToString(),"--display","source","--renderer",SelectedRenderer,
                     "--resolution",resolutionIds[UI<ComboBox>("RenderResolution").SelectedIndex],"--hdr",hdrIds[UI<ComboBox>("HdrOutput").SelectedIndex],
@@ -410,6 +414,7 @@ namespace Cadrivect
             preparing=true; stopRequested=false; firstFrame=false; UpdateTransport();
             BeginConnection(pair?"Pairing with a host":"Connecting to host","Preparing the network client…");
             try {
+                meter.SetNetworkPlayback(true);
                 var plan=await PrepareConnection("streaming/Relay.ps1",args.ToArray());
                 if(stopping || closing) {Show("Disconnected"); return;}
                 NetworkPlayer owned=null;

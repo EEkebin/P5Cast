@@ -11,7 +11,7 @@ partial class VerifyHdr
 {
     // Sample the production renderer before Present.
     // A narrow, outlined H appears, holds, and disappears over a camera pan.
-    static void CheckSubtitles(Assembly compiled,string backend,string provider,Size viewport,Screen hdrScreen=null)
+    static void CheckSubtitles(Assembly compiled,string backend,string provider,Size viewport,Screen hdrScreen=null,string mode="open-nr")
     {
         const int w=640,h=360;
         var type=compiled.GetType("Renderer",true);
@@ -20,7 +20,7 @@ partial class VerifyHdr
         using(var window=new Form {ClientSize=viewport,ShowInTaskbar=false,StartPosition=FormStartPosition.Manual,
             Location=hdr ? hdrScreen.WorkingArea.Location : Point.Empty})
         using(var renderer=(IDisposable)Activator.CreateInstance(type,new object[]{window.Handle,viewport,Size.Empty,
-            hdr?"hdr10":"off","open-nr",false,backend})) {
+            hdr?"hdr10":"off",mode,false,backend})) {
             var device=(Device)type.GetProperty("Device").GetValue(renderer,null);
             var receive=type.GetMethod("Receive"); var show=type.GetMethod("Show");
             var count=type.GetProperty("Generated");
@@ -53,8 +53,8 @@ partial class VerifyHdr
                     int before=(int)count.GetValue(renderer,null);
                     float phase=provider=="p5cast" ? (1+n%3)*.25f : .5f;
                     int maxCode=hdr?1023:255;
-                    int midpoint=(int)show.Invoke(renderer,new object[]{"open-nr",phase,true,false})&maxCode;
-                    int real=(int)show.Invoke(renderer,new object[]{"open-nr",1f,true,false})&maxCode;
+                    int midpoint=(int)show.Invoke(renderer,new object[]{mode,phase,true,false})&maxCode;
+                    int real=(int)show.Invoke(renderer,new object[]{mode,1f,true,false})&maxCode;
                     int minimum=hdr ? (size==viewport ? 765 : 710) : (size==viewport ? 250 : 190);
                     if(ink && real<minimum) throw new InvalidDataException("The real subtitle stroke dimmed to "+real+".");
                     if((int)count.GetValue(renderer,null)>before && (hadInk || ink)) {
@@ -67,9 +67,13 @@ partial class VerifyHdr
                     lastReal=real;
                     hadInk=ink;
                 }
-                Console.WriteLine("{0} / OpenDLSS-NR + {1} at {2}: {3} caption frames, {4} transitions, worst stroke error {5}/{6}; {7} distinct scene samples.",backend,provider,viewport,midpoints,transitions,worst,hdr?1023:255,sceneMidpoints);
-                if((int)type.GetProperty("OpenNrEvaluations").GetValue(renderer,null)!=frameCount || midpoints<5 || transitions<2 || sceneMidpoints<1 || worst>3)
-                    throw new InvalidDataException("OpenDLSS-NR / "+provider+" subtitle regression. "+type.GetProperty("FrameGenerationNotice").GetValue(renderer,null));
+                Console.WriteLine("{0} / {8} + {1} at {2}: {3} caption frames, {4} transitions, worst stroke error {5}/{6}; {7} distinct scene samples.",backend,provider,viewport,midpoints,transitions,worst,hdr?1023:255,sceneMidpoints,mode);
+                bool activeFruc=provider!="fruc" || (Equals(type.GetProperty("ActiveFrameGenerationProvider").GetValue(renderer,null),"fruc") &&
+                    (int)type.GetProperty("FrucMidpoints").GetValue(renderer,null)>=midpoints);
+                if(!activeFruc || !Equals(type.GetProperty("EffectivePictureMode").GetValue(renderer,null),mode) ||
+                    (int)type.GetProperty("OpenNrEvaluations").GetValue(renderer,null)!=frameCount ||
+                    midpoints<5 || transitions<2 || sceneMidpoints<1 || worst>3)
+                    throw new InvalidDataException(mode+" / "+provider+" subtitle regression. "+type.GetProperty("FrameGenerationNotice").GetValue(renderer,null));
             }
         }
     }

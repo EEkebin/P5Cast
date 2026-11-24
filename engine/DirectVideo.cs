@@ -51,6 +51,7 @@ internal sealed class DirectVideo : IDisposable
     [DllImport(Dll,CallingConvention=CallingConvention.Cdecl)] static extern void FreePicture(IntPtr decoder,IntPtr frame);
     [DllImport(Dll,CallingConvention=CallingConvention.Cdecl)] static extern void DestroyDecoder(IntPtr decoder);
     readonly object gate=new object();
+    GameCadence cadence;
     readonly NamedPipeServerStream pipe;
     readonly Thread worker;
     readonly string runtime;
@@ -74,6 +75,16 @@ internal sealed class DirectVideo : IDisposable
     }
     public int DecodedFrames { get {return Volatile.Read(ref decodedFrames);} }
     public int ReplacedFrames { get {return Volatile.Read(ref replacedFrames);} }
+    public bool EstimateGameFps {
+        get {return Volatile.Read(ref cadence)!=null;}
+        set {GameCadence.SetEnabled(ref cadence,value);}
+    }
+    public double GameFps {
+        get {
+            var active=Volatile.Read(ref cadence);
+            return active==null ? -1 : active.GameFps(Stopwatch.GetTimestamp()*1000.0/Stopwatch.Frequency);
+        }
+    }
     public bool Closed { get { lock(gate) return closed && pending==IntPtr.Zero; } }
     public string Error { get { return error; } }
     public string CodecName { get { return codec; } }
@@ -105,6 +116,8 @@ internal sealed class DirectVideo : IDisposable
     }
     void DropCorruptUnit(long timestamp)
     {
+        var active=Volatile.Read(ref cadence);
+        if(active!=null) active.Reset();
         Interlocked.Increment(ref corruptUnits);
         if(corruptSince<0) Volatile.Write(ref corruptSince,timestamp);
     }
@@ -154,7 +167,10 @@ internal sealed class DirectVideo : IDisposable
                     if(result==CorruptAccessUnit) {DropCorruptUnit(start); break;}
                     if(result<0) throw new InvalidDataException("Unsupported or damaged console video frame.");
                     if(corruptSince>=0) Volatile.Write(ref corruptSince,-1);
-                    Volatile.Write(ref decodeUs,(int)((Stopwatch.GetTimestamp()-start)*1000000.0/Stopwatch.Frequency));
+                    long decodedAt=Stopwatch.GetTimestamp();
+                    Volatile.Write(ref decodeUs,(int)((decodedAt-start)*1000000.0/Stopwatch.Frequency));
+                    var active=Volatile.Read(ref cadence);
+                    if(active!=null) active.Observe(next.Y,next.YStride,next.Width,next.Height,next.Depth,decodedAt*1000.0/Stopwatch.Frequency);
                     lock(gate) {
                         Interlocked.Increment(ref decodedFrames);
                         if(pending!=IntPtr.Zero) {

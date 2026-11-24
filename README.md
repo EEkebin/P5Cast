@@ -113,7 +113,11 @@ The PS5 sends compressed video. Direct decodes those pixels once before enhancem
 
 Choose one picture mode at a time. Frame generation is a separate choice. With both off, P5Cast shows Original and disables Enhanced, side-by-side and split. Turning on the first effect selects Enhanced. P5Cast tests the chosen device before enabling vendor effects. DLSS and DLAA run through D3D11 or D3D12. NVIDIA optical flow can supply motion on D3D11. Other backends estimate motion on the selected GPU. [NVIDIA DLSS SDK](https://github.com/NVIDIA/DLSS/releases/tag/v310.9.16)
 
+**Apply OpenDLSS-NR first** in **Picture** adds a source-resolution neural rendering pass before your selected picture effect. Choose RTX Video SR, DLSS, DLAA, FSR Temporal, FSR 1, NIS or Sharpen, or use Original to run NR alone. The toggle defaults off. Choose **Model…** to set up the model. For example, a 1080p stream with RTX Video SR and a 1440p target runs NR at 1080p, then RTX Video SR at 1440p. DLAA keeps the source resolution. Each stage must be available on the selected GPU and renderer. Frame generation remains independently selectable.
+
 **Frame generation** is independent of the picture filter. **P5Cast interpolation** estimates motion between captured frames at 2×, 3× or 4×. With DLAA or RTX Video SR it interpolates between enhanced pictures. With NIS it interpolates first and then applies the spatial filter. The frame-rate dial counts intermediate frames actually submitted.
+
+The frame-rate dial shows pictures submitted by P5Cast, split into source and generated pictures. **Stream FPS** counts decoded Direct PS5 pictures, including repeated pictures. **Estimate game FPS** under **Frame rate** samples visible changes before enhancement, frame generation and local frame drops. It defaults off and can be switched during playback. A still scene, startup or interrupted stream shows a dash. The Direct video stream carries no internal game-engine FPS counter. NVIDIA FRUC reports the rate of generated frames submitted for presentation.
 
 Under **Picture → Frame generation → Vendor interpolation**, choose the engine that generates the midpoint between two decoded frames.
 

@@ -25,7 +25,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.30.3.0")]
+[assembly: AssemblyVersion("0.31.0.0")]
 
 namespace Cadrivect
 {
@@ -125,7 +125,8 @@ namespace Cadrivect
                 if(surface.ZoomWheel(e.Delta)) e.Handled=true;
             };
             meter=new PlaybackMeter(delegate(int selectedMode,int multiplier) {
-                pictureSelectionRevision++; mode=selectedMode; factor=multiplier;
+                if(mode!=selectedMode) pictureSelectionRevision++;
+                mode=selectedMode; factor=multiplier;
                 if(rendering!=null && !restoringSwitch) {
                     engine.Configure(mode,factor,meter.FrameGenerationProvider);
                     TrackSwitch(SwitchControl.Picture);
@@ -151,9 +152,15 @@ namespace Cadrivect
             var saveDial=new DispatcherTimer {Interval=TimeSpan.FromMilliseconds(250)};
             saveDial.Tick+=delegate {saveDial.Stop(); SaveSettings();};
             meter.DialMaximumChanged+=delegate {if(window.IsLoaded) {saveDial.Stop();saveDial.Start();}};
+            meter.EstimateGameFps=Field(saved,"estimateGameFps").Equals("true",StringComparison.OrdinalIgnoreCase);
+            meter.EstimateGameFpsChanged+=delegate {
+                if(rendering!=null && engine!=null) engine.SetEstimateGameFps(meter.EstimateGameFps);
+                if(window.IsLoaded) SaveSettings();
+            };
             window.Closed+=delegate {saveDial.Stop();};
             meter.NeuralDownloadRequested+=InstallNeuralRuntime;
             RestoreOpenNrModelDirectory(Field(saved,"openNrModelDirectory"));
+            meter.PreferOpenNrPrepass=Field(saved,"openNrPrepass").Equals("true",StringComparison.OrdinalIgnoreCase);
             meter.UseOpenNr=Field(saved,"useOpenNr").Equals("true",StringComparison.OrdinalIgnoreCase);
             meter.OpenNrProviderChanged+=delegate {pictureSelectionRevision++; if(window.IsLoaded) SaveSettings();};
             meter.OpenNrModelRequested+=delegate {SetUpOpenNrModel(false);};
@@ -414,6 +421,7 @@ namespace Cadrivect
         async Task<bool> ReadGpu(int requested,System.Threading.CancellationToken cancellation=default(System.Threading.CancellationToken),Dictionary<string,object> verified=null)
         {
             int generation=++gpuProbeGeneration, revision=pictureSelectionRevision;
+            int rateRevision=meter.GenerationSelectionRevision;
             string restoreProvider=PlaybackMeter.SavedProvider(meter.FrameGenerationProvider,factor);
             if(!Active && !preparing && restoreProvider!="p5cast") {
                 meter.FrameGenerationProvider="p5cast"; factor=1; meter.Reset(mode,factor);
@@ -425,10 +433,11 @@ namespace Cadrivect
                 meter.SetCapabilities(gpu);
                 completed=true;
                 if(Field(gpu,"presentationError").Length!=0) return false;
-                if(!Active && !preparing && revision==pictureSelectionRevision) {
-                    if(mode==0 && requested>=3 && meter.SupportsSelectedColor(requested) && Field(gpu,modeIds[requested]).Equals("true",StringComparison.OrdinalIgnoreCase))
-                        mode=requested;
-                    if(meter.ProviderAvailable(restoreProvider)) {meter.FrameGenerationProvider=restoreProvider; factor=2;}
+                if(!Active && !preparing) {
+                    if(revision==pictureSelectionRevision && (mode==0 || mode==requested)) mode=meter.AvailablePicture(requested);
+                    if(rateRevision==meter.GenerationSelectionRevision && meter.ProviderAvailable(restoreProvider)) {
+                        meter.FrameGenerationProvider=restoreProvider; factor=2;
+                    }
                     meter.Reset(mode,factor);
                 }
             } catch(IOException) {} catch(UnauthorizedAccessException) {} catch(System.ComponentModel.Win32Exception) {} catch(ArgumentException) {} catch(InvalidOperationException) {}
@@ -680,12 +689,12 @@ namespace Cadrivect
                 var settings = new { dlssQuality=meter.DlssQuality,dlssModelHint=meter.DlssModelHint,wipeHorizontal=meter.WipeHorizontal,sidebarOpen=stats,sidebarWidth=sidebarWidth,settingsOpen=settingsOpen,settingsHeight=settingsHeight,
                     discordPresence=UI<CheckBox>("SharePresence").IsChecked==true,
                     discordGame=UI<CheckBox>("ShareGame").IsChecked==true,discordProject=UI<CheckBox>("ShareProject").IsChecked==true,stopChoices=stopChoices,directMbps=DirectKbps()/1000, relayMbps=networkRates[UI<ComboBox>("NetworkBitrate").SelectedIndex],audioLayout=UI<ComboBox>("NetworkAudio").SelectedIndex,pictureDefaults=1, mode=mode, multiplier=factor-1, frameGenerationProvider=meter.FrameGenerationProvider,
-                    fpsDialMaximum=meter.DialMaximum,streamVolume=volumeLevel,streamMuted=volumeMuted,setupVersion=setupVersion,consoleMac=pendingSetupConsole ?? (console==null?"":console.Mac),consoleAddresses=consoleAddresses,directStreamHeight=DirectStreamHeight(),directFps=UI<ComboBox>("DirectFps").SelectedIndex,
+                    fpsDialMaximum=meter.DialMaximum,estimateGameFps=meter.EstimateGameFps,streamVolume=volumeLevel,streamMuted=volumeMuted,setupVersion=setupVersion,consoleMac=pendingSetupConsole ?? (console==null?"":console.Mac),consoleAddresses=consoleAddresses,directStreamHeight=DirectStreamHeight(),directFps=UI<ComboBox>("DirectFps").SelectedIndex,
                     display=SelectedDisplayName(), uiScale=PreferredScalePercent,theme=themeId, resolution=UI<ComboBox>("RenderResolution").SelectedIndex,hdr=preferredHdr,renderer=SelectedRenderer,
                     directSdrCodec=UI<ComboBox>("DirectSdrCodec").SelectedIndex==1?"h264":"hevc",
                     dualSenseFeedback=UI<CheckBox>("DualSenseFeedback").IsChecked==true,
                     touchpadGestures=UI<ComboBox>("DirectTouchpad").SelectedIndex==1,
-                    useOpenNr=meter.UseOpenNr,openNrModelDirectory=openNrModelDirectory,
+                    useOpenNr=meter.UseOpenNr,openNrPrepass=meter.PreferOpenNrPrepass,openNrModelDirectory=openNrModelDirectory,
                     maximized=(fullscreen?previousWindowState:window.WindowState)==WindowState.Maximized,
                     clientHdr=UI<CheckBox>("ClientHdr").IsChecked==true,hostDisplay=hostTarget==null ? "" : hostTarget.DeviceName,
                     address=UI<TextBox>("HostAddress").Text.Trim(), bind=SelectedIP(), source=source, page=page, quality=UI<ComboBox>("Quality").SelectedIndex };

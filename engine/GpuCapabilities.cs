@@ -171,6 +171,10 @@ internal sealed class GpuCapabilities
     }
     public string Reason(string mode)
     {
+        if(PictureLabels.IsCombined(mode)) {
+            string pictureReason=Reason(PictureLabels.BaseMode(mode));
+            return pictureReason.Length==0 ? openNrReason ?? "" : pictureReason;
+        }
         switch(mode)
         {
             case "nis": return nisReason ?? "";
@@ -210,7 +214,10 @@ internal sealed class GpuCapabilities
         json.Append(",\"frucRuntimeImportAvailable\":").Append(frucRuntimeImportAvailable ? "true":"false");
         json.Append(",\"dlssNeuralRuntimeDownloadAvailable\":").Append(neuralRuntimeDownloadAvailable ? "true":"false");
         json.Append(",\"openNrModelImportAvailable\":").Append(openNrModelImportAvailable ? "true":"false");
-        foreach(string id in new[]{"dlss","dlaa","dlss-nr","open-nr","rtxvideo","fsr-temporal","nis","amdFrameGeneration","frucFrameGeneration","opticalFlow","nativeFrameGeneration"})
+        foreach(string id in PictureLabels.Ids)
+            json.Append(',').Append(Quote(id)).Append(Supports(id) ? ":true" : ":false")
+                .Append(',').Append(Quote(id+"Reason")).Append(':').Append(Quote(Reason(id)));
+        foreach(string id in new[]{"amdFrameGeneration","frucFrameGeneration","opticalFlow","nativeFrameGeneration"})
             json.Append(',').Append(Quote(id)).Append(Supports(id) ? ":true" : ":false")
                 .Append(',').Append(Quote(id+"Reason")).Append(':').Append(Quote(Reason(id)));
         json.Append(",\"presentationDrivers\":[");

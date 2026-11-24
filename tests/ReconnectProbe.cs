@@ -87,6 +87,16 @@ internal static partial class WindowChromeProbe
         try {await Until(playing,"Loopback fixture did not present its first frame.",15000);}
         catch {Note("First-frame diagnostics: "+status()+"; helper launches: "+count());throw;}
         Require(count()==1,"Initial connection launched an unexpected number of helpers.");
+        var session=type.GetField("engine",flags).GetValue(dashboard);
+        var sample=(Func<string>)session.GetType().GetField("Snapshot",flags).GetValue(session);
+        var meter=type.GetField("meter",flags).GetValue(dashboard);
+        var cadence=meter.GetType().GetProperty("EstimateGameFps",flags);
+        Require(sample().Contains("\"estimateGameFps\":false"),"Game FPS sampling should start off.");
+        cadence.SetValue(meter,true,null);
+        await Until(()=>sample().Contains("\"estimateGameFps\":true"),"Live enable did not reach the running decoder.");
+        cadence.SetValue(meter,false,null);
+        await Until(()=>sample().Contains("\"estimateGameFps\":false"),"Live disable did not reach the running decoder.");
+        Require(count()==1,"Toggling game FPS restarted the stream.");
         reject(30);Click("RestartStream");
         await Until(()=>playing() && count()==3,"Restart did not recover from the busy response.",30000);
         var history=File.ReadAllLines(attempts);

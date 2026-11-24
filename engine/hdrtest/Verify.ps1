@@ -1,7 +1,7 @@
 # Run after building the player. This renders into an offscreen HDR10 texture on the active GPU.
 [CmdletBinding()]
 param([string]$PlayerDirectory=(Join-Path $PSScriptRoot '..\bin'), [switch]$Nvidia, [switch]$Fruc, [switch]$FrucSubtitles, [switch]$VulkanSubtitles,
-      [ValidateSet('d3d11','d3d12')][string]$Backend='d3d11',[string]$OpenNrHdrDisplay)
+      [ValidateSet('d3d11','d3d12','vulkan')][string]$Backend='d3d11',[string]$OpenNrHdrDisplay,[string]$NrChainDisplay,[switch]$BenchmarkNrChain)
 $ErrorActionPreference='Stop'
 $bin=(Resolve-Path -LiteralPath $PlayerDirectory).Path
 $id=[Guid]::NewGuid().ToString('N')
@@ -14,14 +14,23 @@ try {
         "/r:$path"
     }
     $compile=Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-    & $compile /nologo /optimize+ /platform:x64 /r:System.Drawing.dll /r:System.Windows.Forms.dll "/out:$testDir\HdrTest.exe" $refs "$PSScriptRoot\Verify.cs" "$PSScriptRoot\VerifyFruc.cs" "$PSScriptRoot\VerifySubtitles.cs" "$PSScriptRoot\VerifyOpenNrHdr.cs" "$PSScriptRoot\VerifyNrPhoto.cs"
+    & $compile /nologo /optimize+ /platform:x64 /r:System.Drawing.dll /r:System.Windows.Forms.dll "/out:$testDir\HdrTest.exe" $refs "$PSScriptRoot\Verify.cs" "$PSScriptRoot\VerifyFruc.cs" "$PSScriptRoot\VerifySubtitles.cs" "$PSScriptRoot\VerifyOpenNrHdr.cs" "$PSScriptRoot\VerifyNrPhoto.cs" "$PSScriptRoot\VerifyNrChain.cs"
     if ($LASTEXITCODE) { throw 'HDR verification did not compile.' }
     $options=@((Join-Path $bin 'CadrivectPlayer.exe'))
     if($OpenNrHdrDisplay){$options+=@('--open-nr-hdr',$OpenNrHdrDisplay,(Join-Path $PSScriptRoot '..\..\app\assets\aurora.jpg'))}
+    if($NrChainDisplay){$options+=@('--nr-chain',$NrChainDisplay)}
+    if($BenchmarkNrChain) {
+        if(!$NrChainDisplay){throw 'BenchmarkNrChain requires NrChainDisplay.'}
+        $options+='--benchmark-nr-chain'
+    }
     if($Fruc){$options+='--fruc'}
     if($FrucSubtitles){$options+='--fruc-subtitles'}
     if($VulkanSubtitles){$options+='--vulkan-subtitles'}
     if($Backend -eq 'd3d12'){$options+='--d3d12'}
+    if($Backend -eq 'vulkan') {
+        if(!$NrChainDisplay -or $BenchmarkNrChain){throw 'Vulkan is supported here only for the NR chain regression.'}
+        $options+='--vulkan'
+    }
     if($Nvidia) {
         Copy-Item -LiteralPath (Join-Path $bin 'nvngx_dlss.dll'), (Join-Path $bin 'Cadrivect.Ngx.dll') -Destination $testDir
         $options+='--nvidia'

@@ -196,12 +196,49 @@ try {
     $caps['rtxvideo']=$true
     $meter.SetCapabilities($caps); $pictureButtons[3].IsChecked=$true
     Require ($meter.ComparisonView -eq 'enhanced') 'Choosing an upscaler from Original previews the new picture'
+    $prepass=$meter.GetType().GetField('nrPrepass',$flags).GetValue($meter)
+    $modelSettings=$meter.GetType().GetField('nrModelSettings',$flags).GetValue($meter)
+    Require (!$prepass.IsChecked -and !$prepass.IsEnabled) 'Neural preprocessing defaults off and waits for combined capability'
+    $modelSettings.IsChecked=$true
+    Require ($openSetup.Visibility -eq 'Visible') 'Model setup is accessible with standalone NVIDIA NR selected as the provider'
+    $modelSettings.IsChecked=$false
+    $ids=$asm.GetType('PictureLabels').GetField('Ids','Static,NonPublic').GetValue($null)
+    foreach($base in 'original','sharp','fsr','rtxvideo','fsr-temporal','dlss','dlaa','nis') {
+        $combined=if($base -eq 'original'){'open-nr'}else{'open-nr-'+$base}
+        $caps[$base]=$true; $caps[$combined]=$true; $meter.SetCapabilities($caps)
+        $baseIndex=[Array]::IndexOf($ids,$base); $pictureButtons[$baseIndex].IsChecked=$true
+        $prepass.IsChecked=$true
+        Require ($prepass.IsEnabled -and $ids[(&$readMode)] -eq $combined -and $pictureButtons[$baseIndex].IsChecked -and $fruc.IsChecked) "Neural preprocessing keeps $base and FRUC selected"
+        $prepass.IsChecked=$false
+        Require ($ids[(&$readMode)] -eq $base -and $pictureButtons[$baseIndex].IsChecked) "Turning the pre-pass off preserves $base"
+    }
+    $pictureButtons[3].IsChecked=$true; $prepass.IsChecked=$true
+    $caps['open-nr-rtxvideo']=$false; $caps['open-nr-rtxvideoReason']='Model is unavailable.'
+    $meter.SetCapabilities($caps)
+    $available=$meter.GetType().GetMethod('AvailablePicture',$flags)
+    $resolved=$available.Invoke($meter,@([Array]::IndexOf($ids,'open-nr-rtxvideo')))
+    Require ($resolved -eq 3 -and $prepass.IsEnabled -and $prepass.ToolTip -eq 'Model is unavailable.') 'An active pre-pass can be turned off if its model disappears, and its saved upscaler can restore independently'
+    $caps['open-nr-rtxvideo']=$true; $meter.SetCapabilities($caps); $prepass.IsChecked=$false
+    $caps['nis']=$false; $meter.SetCapabilities($caps)
     $viewButtons[1].IsChecked=$true
     $pictureButtons[3].RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
     Require ($meter.ComparisonView -eq 'enhanced') 'Clicking an already selected upscaler resumes its preview from Original'
     $viewButtons[2].IsChecked=$true
     $pictureButtons[2].IsChecked=$true; $pictureButtons[3].IsChecked=$true
     Require ($meter.ComparisonView -eq 'side-by-side') 'Switching upscalers preserves a side-by-side comparison'
+    $setNetwork=$meter.GetType().GetMethod('SetNetworkPlayback',$flags)
+    $networkExplanation=$meter.GetType().GetField('networkPictureNotice',$flags).GetValue($meter)
+    $null=$setNetwork.Invoke($meter,@($true))
+    Require (!$fruc.IsEnabled -and !$pictureButtons[3].IsEnabled -and !$viewButtons[2].IsEnabled -and
+        $networkExplanation.Visibility -eq 'Visible') 'Moonlight sessions explain why local picture, FRUC and comparison controls cannot change the stream'
+    $null=$setNetwork.Invoke($meter,@($false))
+    Require ($fruc.IsEnabled -and $fruc.IsChecked -and $pictureButtons[3].IsChecked -and $viewButtons[2].IsChecked -and
+        $networkExplanation.Visibility -eq 'Collapsed') 'Leaving a network session restores the preceding local picture and frame generation choices'
+    $meter.Reset(3,2)
+    $oldSample=[Collections.Generic.Dictionary[string,object]]::new()
+    $oldSample['mode']='original'; $oldSample['multiplier']=1; $oldSample['frameGenerationProvider']='p5cast'
+    $meter.Update($oldSample)
+    Require ($pictureButtons[3].IsChecked -and $fruc.IsChecked -and $provider.GetValue($meter) -eq 'fruc') 'A delayed renderer sample cannot overwrite the requested RTX Video SR and FRUC settings'
     (Widget HdrOutput).SelectedItem='HDR10'
     Require ($fruc.IsEnabled -and $fruc.IsChecked -and $provider.GetValue($meter) -eq 'fruc') 'Requesting HDR10 keeps the NVIDIA FRUC provider selected'
     Require ($pictureButtons[3].IsEnabled -and $pictureButtons[3].IsChecked) 'RTX Video SR stays selected alongside FRUC when HDR10 is requested'
@@ -289,6 +326,7 @@ try {
     Click ReloadTheme
     $scale.Value=355
     $openToggle.IsChecked=$true
+    $meter.SetCapabilities($caps); $pictureButtons[3].IsChecked=$true; $prepass.IsChecked=$true
     $modelPath=Join-Path $tmp 'local model'
     State openNrModelDirectory $modelPath
     $null=$type.GetMethod('SaveSettings',[Reflection.BindingFlags]'Instance,NonPublic').Invoke($dash,@())
@@ -302,10 +340,13 @@ try {
     }
     $themeWindow=ReopenTheme
     $restoredFpsMeter=$themeWindow.FindName('MeterHost').Child
+    Require ($preferences.openNrPrepass -and $ids[$preferences.mode] -eq 'open-nr-rtxvideo' -and
+        $restoredFpsMeter.GetType().GetProperty('PreferOpenNrPrepass',$flags).GetValue($restoredFpsMeter)) 'The independent neural pass and selected upscaler survive reopening'
     Require ($preferences.useOpenNr -and $preferences.openNrModelDirectory -eq $modelPath -and
         $restoredFpsMeter.GetType().GetField('useOpenNr',$flags).GetValue($restoredFpsMeter).IsChecked -and
         $env:P5CAST_OPEN_NR_MODEL -eq $modelPath) 'The implementation choice and user model folder survive reopening independently of the active effect'
     $openToggle.IsChecked=$false
+    $prepass.IsChecked=$false
     Require ($preferences.fpsDialMaximum -eq 355 -and $restoredFpsMeter.GetType().GetField('dialScale','Instance,NonPublic').GetValue($restoredFpsMeter).Value -eq 355) 'Dial maximum survives closing and reopening the app'
     $scale.Value=240
     Require ($themeWindow.FindName('ColorTheme').SelectedItem -eq 'Custom JSON' -and $themeWindow.Background.Color.ToString() -eq '#FF211A1B') 'Reopening loads the saved custom file independently'

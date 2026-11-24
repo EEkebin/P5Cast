@@ -12,6 +12,7 @@ namespace Cadrivect
         internal readonly Action Stop, InvalidateDisplay;
         internal readonly Action<int,int,string> Configure;
         internal readonly Action<string> SetComparison, SetDlssQuality, SetDlssModel;
+        internal readonly Action<bool> SetEstimateGameFps;
         internal readonly Action<float> SetWipePosition;
         internal readonly Action<bool> SetWipeHorizontal;
         internal readonly Action<int,float> SetWipeGrip;
@@ -31,6 +32,7 @@ namespace Cadrivect
             Configure=Method<Action<int,int,string>>(engine,"ConfigureWithGeneration"); SetComparison=Method<Action<string>>(engine,"SetComparison");
             SetDlssQuality=Method<Action<string>>(engine,"SetDlssQuality"); SetDlssModel=Method<Action<string>>(engine,"SetDlssModel");
             SetWipeHorizontal=Method<Action<bool>>(engine,"SetWipeHorizontal");
+            SetEstimateGameFps=Method<Action<bool>>(engine,"SetEstimateGameFps");
             SetWipeGrip=Method<Action<int,float>>(engine,"SetWipeGrip");
             SetLoupe=Method<Action<bool,float,float,int,float>>(engine,"SetLoupe");
             SetWipePosition=Method<Action<float>>(engine,"SetWipePosition");

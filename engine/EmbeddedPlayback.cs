@@ -42,6 +42,7 @@ namespace Cadrivect.Engine
                     int view=Array.IndexOf(args,"--comparison");
                     if(view>=0) session.ComparisonView=ValidateComparison(view+1<args.Length ? args[view+1] : null);
                     session.WipeHorizontal=Array.IndexOf(args,"--wipe-horizontal")>=0;
+                    session.EstimateGameFps=Array.IndexOf(args,"--estimate-game-fps")>=0;
                     int split=Array.IndexOf(args,"--wipe-position");
                     if(split>=0) session.WipePosition=ParseWipePosition(split+1<args.Length ? args[split+1] : null);
                     current=session;
@@ -79,6 +80,10 @@ namespace Cadrivect.Engine
         {
             ValidateDlssQuality(quality);
             lock(Gate) if(current!=null) Interlocked.Exchange(ref current.PendingDlssQuality,quality);
+        }
+        public static void SetEstimateGameFps(bool enabled)
+        {
+            lock(Gate) if(current!=null) current.EstimateGameFps=enabled;
         }
         internal static string ValidateDlssQuality(string quality)
         {
@@ -163,6 +168,7 @@ namespace Cadrivect.Engine
         public volatile string ComparisonView="enhanced";
         public volatile float WipePosition=0.5f;
         public volatile bool WipeHorizontal;
+        public volatile bool EstimateGameFps;
         public volatile int WipeGripState;
         public volatile float WipeGripScale=1;
         public volatile LoupeState Loupe;

@@ -266,9 +266,9 @@ internal static class Player
             int targetFps=targetOption==null ? 0 : int.Parse(targetOption,CultureInfo.InvariantCulture);
             if(targetOption!=null && targetFps!=30 && targetFps!=60) throw new ArgumentException("Choose 30 or 60 for --target-fps.");
             int multiplier=int.Parse(Option(args,"--multiplier",testing ? "3":"1"),CultureInfo.InvariantCulture);
-            bool vendor=Renderer.IsVendor(mode);
+            bool vendor=Renderer.IsVendor(mode) || PictureLabels.HasOpenNr(mode);
             if(Array.IndexOf(PictureLabels.Ids,mode)<0) throw new ArgumentException("Unknown picture mode: "+mode);
-            if(mode=="nis" && !NisScaler.SupportsBackend(backend)) throw new ArgumentException(NisScaler.BackendReason);
+            if(PictureLabels.BaseMode(mode)=="nis" && !NisScaler.SupportsBackend(backend)) throw new ArgumentException(NisScaler.BackendReason);
             string generation=Option(args,"--frame-generation","p5cast").ToLowerInvariant();
             Renderer.ValidateFrameGeneration(generation,multiplier);
             if(host==null && generation=="amd" && backend!="d3d12" && backend!="vulkan") throw new ArgumentException("AMD frame generation requires Direct3D 12 or Vulkan.");
@@ -295,6 +295,7 @@ internal static class Player
                     using(var live=filename==null ? null:new LiveReport(filename))
                     {
                         renderer.SetDlssQuality(dlssQuality);
+                        if(direct) decoded.EstimateGameFps=Array.IndexOf(args,"--estimate-game-fps")>=0;
                         renderer.SetDlssModel(Option(args,"--dlss-model","auto").ToLowerInvariant());
                         string requestedMode=null, settingsNotice=null;
                         int requestedMultiplier=multiplier;
@@ -338,7 +339,9 @@ internal static class Player
                         var pacing=new FramePacing();
                         int drawTick=0;
                         double firstInput=0,lastInput=0,lastRealAge=-1;
-                        double lastSnapshot=0,lastFile=0; int sampleId=0,snapshotInput=0,snapshotPresented=0,snapshotGenerated=0;
+                        double lastSnapshot=0,lastFile=0; int sampleId=0;
+                        var rates=new Queue<RateSample>();
+                        rates.Enqueue(new RateSample());
                         int presentedSettingsRevision=0;
                         WindowsApi.timeBeginPeriod(1);
                         try
@@ -351,6 +354,7 @@ internal static class Player
                                 // by a later iteration, even if a cancel and a switch arrive in the same frame.
                                 int settingsRevision=host==null ? 0 : Volatile.Read(ref host.SettingsRevision);
                                 if(host!=null) host.TakeChanges(hostedChange);
+                                if(host!=null && direct && decoded.EstimateGameFps!=host.EstimateGameFps) decoded.EstimateGameFps=host.EstimateGameFps;
                                 if((window!=null && window.Ended) || (seconds>0 && clock.Elapsed.TotalSeconds>=seconds)) break;
                                 comparisonView=host==null ? window.ComparisonView:host.ComparisonView;
                                 if(comparisonView=="hdr-sdr" && !renderer.HdrEnabled) comparisonView="enhanced";
@@ -380,12 +384,12 @@ internal static class Player
                                 string newModel=host==null ? null : Interlocked.Exchange(ref host.PendingDlssModel,null);
                                 if(newModel!=null && newModel!=renderer.DlssModelHint) {
                                     renderer.SetDlssModel(newModel);
-                                    if(mode=="dlss" || mode=="dlaa") {pacing.Reset(); previousTime=0; redraw=true;}
+                                    if(PictureLabels.BaseMode(mode)=="dlss" || PictureLabels.BaseMode(mode)=="dlaa") {pacing.Reset(); previousTime=0; redraw=true;}
                                 }
                                 string newQuality=host==null ? null : Interlocked.Exchange(ref host.PendingDlssQuality,null);
                                 if(newQuality!=null && newQuality!=renderer.DlssQuality) {
                                     renderer.SetDlssQuality(newQuality);
-                                    if(mode=="dlss") {pacing.Reset(); previousTime=0; redraw=true;}
+                                    if(PictureLabels.BaseMode(mode)=="dlss") {pacing.Reset(); previousTime=0; redraw=true;}
                                 }
                                 string newSize,newHdr;
                                 if(host!=null && host.TakeOutput(out newSize,out newHdr)) {
@@ -408,7 +412,7 @@ internal static class Player
                                             mode=requestedMode; settingsNotice=null;
                                         } catch(InvalidOperationException ex) { settingsNotice=ex.Message; }
                                     }
-                                    multiplier=requestedMultiplier; vendor=Renderer.IsVendor(mode);
+                                    multiplier=requestedMultiplier; vendor=Renderer.IsVendor(mode) || PictureLabels.HasOpenNr(mode);
                                     renderer.ResetFrameHistory(); if(controls!=null) controls.Sync(mode,multiplier);
                                     renderer.SetSideBySide(comparisonView=="side-by-side");
                                     pacing.Reset(); previousTime=0; previousView=comparisonView;
@@ -421,11 +425,17 @@ internal static class Player
                                     controls.UpdateLive(now,renderer,compare,lastRealAge,decoded);
                                 }
                                 if((host!=null || live!=null) && now-lastSnapshot>=(host==null ? 1000:250)) {
-                                    double perSecond=1000/(now-lastSnapshot);
+                                    var sampleRates=new RateSample {Time=now,Input=renderer.Captured,Output=renderer.Presented,Generated=renderer.Generated,Fruc=renderer.FrucPresented,Decoded=direct ? decoded.DecodedFrames : 0};
+                                    while(rates.Count>1 && now-rates.Peek().Time>2000) rates.Dequeue();
+                                    var baseline=rates.Peek();
+                                    double perSecond=1000/(now-baseline.Time);
+                                    rates.Enqueue(sampleRates);
                                     string snapshot=string.Format(CultureInfo.InvariantCulture,
                                         "{{\"captured\":{0},\"presented\":{1},\"generated\":{2},\"sourceFps\":{3:F1},\"submittedFps\":{4:F1},\"generatedFps\":{5:F1}",
-                                        renderer.Captured,renderer.Presented,renderer.Generated,(renderer.Captured-snapshotInput)*perSecond,
-                                        (renderer.Presented-snapshotPresented)*perSecond,(renderer.Generated-snapshotGenerated)*perSecond)
+                                        renderer.Captured,renderer.Presented,renderer.Generated,(renderer.Captured-baseline.Input)*perSecond,
+                                        (renderer.Presented-baseline.Output)*perSecond,(renderer.Generated-baseline.Generated)*perSecond)
+                                        +",\"frucPresentedFps\":"+Number((renderer.FrucPresented-baseline.Fruc)*perSecond)
+                                        +",\"streamFps\":"+Number(direct ? (sampleRates.Decoded-baseline.Decoded)*perSecond : -1)
                                         +",\"repaints\":"+renderer.Repaints+",\"mode\":"+JsonString(mode)+",\"multiplier\":"+multiplier+",\"effectivePictureMode\":"+JsonString(renderer.EffectivePictureMode)
                                         +",\"settingsRevision\":"+presentedSettingsRevision
                                         +",\"settingsError\":"+JsonString(settingsNotice)
@@ -441,8 +451,7 @@ internal static class Player
                                         +Telemetry(renderer,decoded,targetFps,compare ? 1:multiplier,lastRealAge,demo)+"}";
                                     if(host!=null) EmbeddedPlayback.Publish(snapshot);
                                     if(live!=null && now-lastFile>=1000) { live.Update(snapshot); lastFile=now; }
-                                    lastSnapshot=now; snapshotInput=renderer.Captured;
-                                    snapshotPresented=renderer.Presented; snapshotGenerated=renderer.Generated;
+                                    lastSnapshot=now;
                                 }
                                 if(verifyOutput && now>=nextOutputSample)
                                 {
@@ -482,7 +491,9 @@ internal static class Player
                                     if(firstInput==0) firstInput=timestamp;
                                     lastInput=timestamp;
                                     int count=continuous && !compare && string.IsNullOrEmpty(renderer.FrameGenerationNotice) ? multiplier:1;
-                                    pacing.Begin(now,lastDrawStart,period,count);
+                                    // Uploading the decoded image and finishing the previous real frame can
+                                    // consume a midpoint slot on their own. Schedule from the ready image.
+                                    pacing.Begin(clock.Elapsed.TotalMilliseconds,lastDrawStart,period,count);
                                 }
                                 now=clock.Elapsed.TotalMilliseconds;
                                 float phase;
@@ -535,7 +546,7 @@ internal static class Player
                         if(filename!=null) File.WriteAllText(filename,report);
                         Console.WriteLine(report);
                         if(testing && (renderer.Captured<8 || renderer.Presented<8 || samples.Count<5 ||
-                            (multiplier>1 && renderer.Generated<1) || (vendor && renderer.VendorEvaluations+renderer.FsrEvaluations<5))) throw new InvalidOperationException("GPU capture self-test failed. "+report);
+                            (multiplier>1 && renderer.Generated<1) || (vendor && renderer.VendorEvaluations+renderer.FsrEvaluations+renderer.OpenNrEvaluations<5))) throw new InvalidOperationException("GPU capture self-test failed. "+report);
                     }
                 }
             }
@@ -574,6 +585,7 @@ internal static class Player
     {
         return value<0 || double.IsNaN(value) || double.IsInfinity(value) ? "null":value.ToString("0.##",CultureInfo.InvariantCulture);
     }
+    struct RateSample {internal double Time; internal int Input,Output,Generated,Fruc,Decoded;}
     static string Telemetry(Renderer renderer,DirectVideo direct,int targetFps,int factor,double age,bool demo)
     {
         Size input=renderer.InputSize;
@@ -597,6 +609,9 @@ internal static class Player
                +",\"activeFrameGenerationProvider\":"+JsonString(renderer.ActiveFrameGenerationProvider)
                +",\"activeNvidiaEffect\":"+JsonString(renderer.ActiveEffect)+",\"nvidiaEvaluations\":"+renderer.VendorEvaluations
                +",\"openNrEvaluations\":"+renderer.OpenNrEvaluations
+               +",\"estimatedGameFps\":"+Number(direct==null ? -1 : direct.GameFps)+",\"estimateGameFps\":"+(direct!=null && direct.EstimateGameFps ? "true" : "false")
+               +",\"frucPresented\":"+renderer.FrucPresented
+               +",\"openNrProcessingRenderer\":"+JsonString(PictureLabels.HasOpenNr(renderer.EffectivePictureMode) ? "vulkan" : "")
                +",\"frucEvaluations\":"+renderer.FrucEvaluations+",\"frucMidpoints\":"+renderer.FrucMidpoints
                +",\"activeNisFilter\":"+JsonString(renderer.ActiveNisFilter)+",\"nisEvaluations\":"+renderer.NisEvaluations
                +",\"fsrVersion\":"+JsonString(renderer.ActiveFsrVersion)+",\"fsrEvaluations\":"+renderer.FsrEvaluations

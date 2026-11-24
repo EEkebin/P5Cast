@@ -11,15 +11,19 @@ internal sealed partial class Renderer
     GpuImage sdkFrameColor,amdFrameMotion,amdFrameDepth,sdkMidpoint,frucPqMidpoint;
     Size sdkFrameSize;
     int sdkEvaluated=-1;
-    bool sdkNeedsReset,sdkHasMidpoint,frucProducedFrame;
+    bool sdkNeedsReset,sdkHasMidpoint;
+    long lastFrucPresentation;
     internal const string FrucBackendReason="NVIDIA FRUC requires Direct3D 11 or Direct3D 12.";
     internal static bool SupportsFrucBackend(string backend) { return backend=="d3d11" || backend=="d3d12"; }
     public string FrameGenerationProvider {get;private set;}
     public string FrameGenerationNotice {get;private set;}
     public string ActiveFrameGenerationVersion {get {return amdFrames==null?"":amdFrames.ActiveVersion;}}
-    public string ActiveFrameGenerationProvider {get {return frucProducedFrame?"fruc":amdFrames!=null?"amd":"";}}
+    public string ActiveFrameGenerationProvider {get {
+        return lastFrucPresentation!=0 && System.Diagnostics.Stopwatch.GetTimestamp()-lastFrucPresentation<System.Diagnostics.Stopwatch.Frequency*2 ? "fruc" : amdFrames!=null?"amd":"";
+    }}
     public int FrucEvaluations {get;private set;}
     public int FrucMidpoints {get;private set;}
+    public int FrucPresented {get;private set;}
 
     internal static void ValidateFrameGeneration(string provider,int multiplier)
     {
@@ -42,7 +46,7 @@ internal sealed partial class Renderer
         if(frucFrames!=null) {frucFrames.Dispose();frucFrames=null;}
         foreach(var image in new[]{sdkFrameColor,amdFrameMotion,amdFrameDepth,sdkMidpoint,frucPqMidpoint}) if(image!=null) image.Dispose();
         sdkFrameColor=amdFrameMotion=amdFrameDepth=sdkMidpoint=frucPqMidpoint=null;
-        sdkFrameSize=Size.Empty;sdkEvaluated=-1;sdkNeedsReset=true;sdkHasMidpoint=false;frucProducedFrame=false;FrameGenerationNotice="";
+        sdkFrameSize=Size.Empty;sdkEvaluated=-1;sdkNeedsReset=true;sdkHasMidpoint=false;lastFrucPresentation=0;FrameGenerationNotice="";
     }
     void PrepareSdkFrame(bool vendor)
     {
@@ -88,7 +92,7 @@ internal sealed partial class Renderer
                 if(sdkHasMidpoint) {
                     if(HdrEnabled) Draw("FrucHdrMidpoint",sdkMidpoint.Write,area,frucPqMidpoint.Read,
                         vendor?1:0,current,vendor?neuralPrevious.Read:prev.Read);
-                    FrucMidpoints++;frucProducedFrame=true;
+                    FrucMidpoints++;
                 }
             } else {
                 if(continuous) {

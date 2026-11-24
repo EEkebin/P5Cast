@@ -59,6 +59,8 @@ internal sealed partial class Renderer : IDisposable
     Texture2D backBuffer;
     RenderTargetView display;
     GpuImage curr,prev,incoming,motion,mixed,scaled;
+    GpuImage originalCurrent,originalPrevious,protectedMidpoint;
+    bool originalHasPrevious;
     Size srcSize,outSize,screenSize,upscaleTarget;
     Size pendingSize;
     long resizeStartedAt,sizeChangedAt;
@@ -201,7 +203,8 @@ internal sealed partial class Renderer : IDisposable
             long frequency=System.Diagnostics.Stopwatch.Frequency;
             // DLSS and RTX Video rebuild size-dependent resources. Keep the current
             // video running through a short drawer animation, then evaluate at its final size.
-            bool resizingUpscaler=pictureMode=="nis" || pictureMode=="dlss" || pictureMode=="rtxvideo" || pictureMode=="fsr-temporal";
+            string baseMode=PictureLabels.BaseMode(pictureMode);
+            bool resizingUpscaler=baseMode=="nis" || baseMode=="dlss" || baseMode=="rtxvideo" || baseMode=="fsr-temporal";
             long settle=frequency/(resizingUpscaler ? 30 : 60);
             long maximumWait=frequency/(resizingUpscaler ? 5 : 15);
             if(now-sizeChangedAt<settle && now-resizeStartedAt<maximumWait) return false;
@@ -233,7 +236,7 @@ internal sealed partial class Renderer : IDisposable
         {
             // WGC and DirectVideo will deliver the corresponding input format on the next frame.
             ReleaseSource(); srcSize=Size.Empty; ResetFrameHistory(); HdrEnabled=hdr;
-            if(PictureLabels.IsNeuralRendering(failedMode)) {failedMode=null;EffectNotice="";}
+            if(PictureLabels.IsNeuralRendering(failedMode) || PictureLabels.HasOpenNr(failedMode)) {failedMode=null;EffectNotice="";}
         }
     }
     void ConfigureSwapDisplay(Size window,bool hdr,bool resize,bool displayChanged)
@@ -364,6 +367,7 @@ internal sealed partial class Renderer : IDisposable
     }
     Size ProcessingSize(string mode)
     {
+        mode=PictureLabels.BaseMode(mode);
         return mode=="nis" || mode=="fsr" || mode=="fsr-temporal" || mode=="dlss" || mode=="rtxvideo" ? upscaleTarget : srcSize;
     }
     void SetProcessingSize(Size next)
@@ -412,6 +416,8 @@ internal sealed partial class Renderer : IDisposable
     }
     void ReleaseSource()
     {
+        ReleaseOpenNrSource();
+        if(protectedMidpoint!=null) {protectedMidpoint.Dispose(); protectedMidpoint=null;}
         ReleaseNis();
         ReleaseFrameGeneration();
         ReleaseNvidia();
@@ -460,6 +466,10 @@ internal sealed partial class Renderer : IDisposable
     }
     public void ResetFrameHistory()
     {
+        // An explicit settings change may make the size or format usable again.
+        if(!string.IsNullOrEmpty(FrameGenerationNotice)) ReleaseFrameGeneration();
+        lastFrucPresentation=0;
+        ResetOpenNrHistory();
         sdkNeedsReset=true;sdkEvaluated=-1;sdkHasMidpoint=false;
         HasPrevious=false; suppressNextPair=true; motionReady=false; hdrGuideFrame=-1;
         if(optical!=null) optical.ResetHistory();
@@ -467,12 +477,15 @@ internal sealed partial class Renderer : IDisposable
     }
     public void SetPictureMode(string mode)
     {
-        if(!IsVendor(mode) && mode!="original" && mode!="sharp" && mode!="fsr" && mode!="nis") throw new ArgumentException("Unknown picture mode.");
-        if(mode=="nis" && !NisScaler.SupportsBackend(Backend)) throw new InvalidOperationException(NisScaler.BackendReason);
+        if(Array.IndexOf(PictureLabels.Ids,mode)<0) throw new ArgumentException("Unknown picture mode.");
+        bool combined=PictureLabels.IsCombined(mode);
+        string effect=combined ? PictureLabels.BaseMode(mode) : mode;
+        if(combined && !HasVendorBridge(Backend,"open-nr")) throw new InvalidOperationException(NeuralRendering.OpenBackendReason);
+        if(effect=="nis" && !NisScaler.SupportsBackend(Backend)) throw new InvalidOperationException(NisScaler.BackendReason);
         if(mode=="dlss-nr" && HdrEnabled) throw new InvalidOperationException(NeuralRendering.HdrReason);
-        if(mode==pictureMode && failedMode==null && !(mode=="open-nr" && neuralRendering!=null && neuralRendering.OpenModelChanged)) return;
+        if(mode==pictureMode && failedMode==null && !(mode=="open-nr" && neuralRendering!=null && neuralRendering.OpenModelChanged) && !(combined && OpenNrSourceModelChanged)) return;
         // Verify NIS at the current stream and target dimensions before releasing a working effect.
-        if(mode=="nis" && curr!=null) try { EvaluateNis(curr.Read,1,ProcessingSize(mode)); }
+        if(effect=="nis" && curr!=null) try { EvaluateNis(curr.Read,1,ProcessingSize(mode)); }
         catch(Exception error) {
             if(!IsEffectFailure(error)) throw;
             ReleaseNis(); RestoreDrawState();
@@ -481,26 +494,49 @@ internal sealed partial class Renderer : IDisposable
         // NGX initialization and shutdown are scoped to the device. Close the old feature before opening a different one.
         // Keep the captured textures and front buffer intact throughout the switch.
         ReleaseEffects();
-        if(mode!="nis") ReleaseNis();
+        if(!combined) ReleaseOpenNrSource();
+        if(effect!="nis") ReleaseNis();
         ResetFrameHistory();
         try
         {
-            if(IsVendor(mode) && curr!=null) EnhancedFrame(mode,false);
+            if(curr!=null) {
+                if(combined) UseOpenNrSource();
+                try { if(IsVendor(effect)) EnhancedFrame(effect,false); }
+                finally { RestoreOriginalSource(); }
+            }
         }
         catch(Exception error)
         {
             if(!IsEffectFailure(error)) throw;
-            ReleaseEffects(); RestoreDrawState();
+            ReleaseOpenNrSource(); ReleaseEffects(); RestoreDrawState();
             throw new InvalidOperationException("Could not switch picture mode. "+error.Message,error);
         }
         pictureMode=mode; failedMode=null; EffectNotice="";
-        EffectivePictureMode=neuralMode ?? mode;
+        EffectivePictureMode=combined ? PictureLabels.WithOpenNr(neuralMode ?? effect) : neuralMode ?? mode;
+    }
+    void UseOpenNrSource()
+    {
+        PrepareOpenNrSource();
+        originalCurrent=curr; originalPrevious=prev; originalHasPrevious=HasPrevious;
+        curr=openNrCurrent; prev=HasPreviousOpenNrSource ? openNrPrevious : openNrCurrent;
+        HasPrevious=HasPreviousOpenNrSource;
+    }
+    void RestoreOriginalSource()
+    {
+        if(originalCurrent==null) return;
+        curr=originalCurrent; prev=originalPrevious; HasPrevious=originalHasPrevious;
+        originalCurrent=originalPrevious=null;
     }
     public int Show(string mode,float phase,bool samplePixel,bool finishPrevious=false)
     {
         if(curr==null) return 0;
+        int before=Generated;
         int pixel=DrawFrame(mode,phase,samplePixel,finishPrevious);
         Presented++;
+        if(Generated>before && FrameGenerationProvider=="fruc") {
+            FrucPresented++;
+            lastFrucPresentation=System.Diagnostics.Stopwatch.GetTimestamp();
+        }
         return pixel;
     }
     public void Repaint(string mode)
@@ -511,24 +547,31 @@ internal sealed partial class Renderer : IDisposable
     }
     int DrawFrame(string mode,float phase,bool samplePixel,bool finishPrevious)
     {
+        if(mode==failedMode) mode="original";
+        bool combined=PictureLabels.IsCombined(mode);
+        int before=Generated;
+        try {
+            if(combined) UseOpenNrSource();
+            try { return DrawPicture(combined ? PictureLabels.BaseMode(mode) : mode,phase,samplePixel,finishPrevious,combined); }
+            finally { RestoreOriginalSource(); }
+        } catch(Exception error) {
+            if(mode=="original" || !IsEffectFailure(error)) throw;
+            Generated=before;
+            failedMode=mode;
+            EffectNotice="Showing Original. "+error.Message;
+            ReleaseOpenNrSource(); ReleaseNis(); ReleaseEffects(); ReleaseFrameGeneration(); RestoreDrawState();
+            return DrawPicture("original",1,samplePixel,false,false);
+        }
+    }
+    int DrawPicture(string mode,float phase,bool samplePixel,bool finishPrevious,bool combined)
+    {
         finishPrevious=finishPrevious && HasPrevious;
         var source=finishPrevious ? prev.Read:curr.Read;
-        if(mode==failedMode) mode="original";
         SetProcessingSize(ProcessingSize(mode));
         bool vendor=IsVendor(mode);
-        if(vendor)
-        {
-            try { source=EnhancedFrame(mode,finishPrevious); }
-            catch(Exception error)
-            {
-                if(!IsEffectFailure(error)) throw;
-                failedMode=mode; mode="original"; vendor=false;
-                SetProcessingSize(srcSize);
-                EffectNotice="Showing Original. "+error.Message;
-                ReleaseEffects(); RestoreDrawState();
-            }
-        }
-        EffectivePictureMode=vendor ? neuralMode : mode;
+        if(vendor) source=EnhancedFrame(mode,finishPrevious);
+        string applied=vendor ? neuralMode : mode;
+        EffectivePictureMode=combined ? PictureLabels.WithOpenNr(applied) : applied;
         bool sdkGeneration=FrameGenerationProvider!="p5cast",sdkIntermediate=false;
         if(sdkGeneration) {
             PrepareSdkFrame(vendor);
@@ -545,10 +588,25 @@ internal sealed partial class Renderer : IDisposable
         bool holdOriginal=(finishPrevious || (phase<1 && HasPrevious)) && (!vendor || havePriorEnhanced);
         if(!originalViewport.IsEmpty) DrawOriginal(originalViewport,holdOriginal);
         if(sdkIntermediate && vendor) {
-            if(PictureLabels.IsNeuralRendering(mode))
-                Draw(HdrEnabled?"FitNrHdrIntermediate":"FitNrIntermediate",display,viewport,source,1,neuralPrevious.Read,strokeMask.Read);
+            if(combined || PictureLabels.IsNeuralRendering(mode))
+                Draw(HdrEnabled?"FitNrHdrIntermediate":"FitNrIntermediate",display,viewport,source,1,neuralPrevious.Read,combined ? openNrStrokeMask.Read : strokeMask.Read);
             else Draw(HdrEnabled?"HdrToPq":"Original",display,viewport,source,1);
             return Present(samplePixel,holdOriginal);
+        }
+        if(combined && !vendor && phase<1 && HasPrevious && (!sdkGeneration || sdkIntermediate)) {
+            if(!sdkGeneration) {
+                if(HdrEnabled) PrepareHdrMotion(); else PrepareMotion();
+                source=InterpolateSource(curr.Read,prev.Read,phase);
+                Generated++;
+            }
+            HdrScratch(ref protectedMidpoint,srcSize,HdrEnabled ? HdrFloatFormat : Format.B8G8R8A8_UNorm);
+            Draw("FitNrIntermediate",protectedMidpoint.Write,new Rectangle(System.Drawing.Point.Empty,srcSize),source,1,prev.Read,openNrStrokeMask.Read);
+            source=protectedMidpoint.Read;
+            if(HdrEnabled) {
+                DrawHdr(mode,1,false,viewport,sourceOverride:source);
+                return Present(samplePixel,holdOriginal);
+            }
+            phase=1;
         }
         if(HdrEnabled && !vendor)
         {
@@ -560,9 +618,9 @@ internal sealed partial class Renderer : IDisposable
             if(HdrEnabled) PrepareHdrMotion(); else PrepareMotion();
             if(vendor && havePriorEnhanced)
             {
-                if(PictureLabels.IsNeuralRendering(mode)) {
-                    var frame=InterpolateSource(neuralCurrent.Read,neuralPrevious.Read,phase);
-                    Draw(HdrEnabled?"FitNrHdrIntermediate":"FitNrIntermediate",display,viewport,frame,0,neuralPrevious.Read,strokeMask.Read);
+                if(combined || PictureLabels.IsNeuralRendering(mode)) {
+                    var frame=InterpolateSource(neuralCurrent.Read,neuralPrevious.Read,phase,neuralSize);
+                    Draw(HdrEnabled?"FitNrHdrIntermediate":"FitNrIntermediate",display,viewport,frame,0,neuralPrevious.Read,combined ? openNrStrokeMask.Read : strokeMask.Read);
                 } else DrawFinal("Interpolate",neuralCurrent.Read,phase,viewport,neuralPrevious.Read,motion.Read,HdrEnabled);
                 Generated++;
                 return Present(samplePixel,holdOriginal);
@@ -590,15 +648,16 @@ internal sealed partial class Renderer : IDisposable
         else DrawFinal(mode=="sharp" ? "Sharp":"Original",source,phase,viewport,null,null,HdrEnabled && vendor);
         return Present(samplePixel,holdOriginal);
     }
-    ShaderResourceView InterpolateSource(ShaderResourceView current,ShaderResourceView previous,float phase)
+    ShaderResourceView InterpolateSource(ShaderResourceView current,ShaderResourceView previous,float phase,Size size=default(Size))
     {
-        if(mixed==null) mixed=new GpuImage(Device,srcSize.Width,srcSize.Height,HdrEnabled?HdrFloatFormat:Format.B8G8R8A8_UNorm,true);
-        Draw("Interpolate",mixed.Write,new Rectangle(System.Drawing.Point.Empty,srcSize),current,phase,previous,motion.Read);
+        if(size.IsEmpty) size=srcSize;
+        HdrScratch(ref mixed,size,HdrEnabled?HdrFloatFormat:Format.B8G8R8A8_UNorm);
+        Draw("Interpolate",mixed.Write,new Rectangle(System.Drawing.Point.Empty,size),current,phase,previous,motion.Read);
         return mixed.Read;
     }
     void DrawOriginal(Rectangle area,bool holdPrevious,Rectangle? clip=null)
     {
-        Draw(HdrEnabled ? "HdrToPq" : "Original",display,area,holdPrevious ? prev.Read : curr.Read,1,clip:clip);
+        Draw(HdrEnabled ? "HdrToPq" : "Original",display,area,holdPrevious ? (originalPrevious ?? prev).Read : (originalCurrent ?? curr).Read,1,clip:clip);
     }
     void DrawFinal(string shader,ShaderResourceView source,float phase,Rectangle area,ShaderResourceView previous=null,ShaderResourceView flow=null,bool linear2020=false,Rectangle? clip=null)
     {

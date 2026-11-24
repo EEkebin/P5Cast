@@ -61,7 +61,7 @@ namespace Cadrivect
                     ++gpuProbeGeneration; meter.SetCapabilities(gpu);
                 } else await ReadGpu(mode);
                 if(closing) return;
-                if(rendering!=null && modeIds[mode]=="open-nr") {
+                if(rendering!=null && PictureLabels.HasOpenNr(modeIds[mode])) {
                     engine.Configure(mode,factor,meter.FrameGenerationProvider);
                     TrackSwitch(SwitchControl.Picture);
                 }

@@ -43,8 +43,13 @@ namespace Cadrivect
         }
         internal event Action<string> DlssModelChanged;
         readonly StackPanel neuralSetup;
+        readonly StackPanel pictureControls;
+        readonly TextBlock networkPictureNotice;
         readonly Button neuralDownload;
         readonly CheckBox useOpenNr;
+        readonly CheckBox nrPrepass;
+        readonly ToggleButton nrModelSettings;
+        internal bool PreferOpenNrPrepass {get;set;}
         readonly StackPanel openNrSetup;
         readonly TextBlock openNrStatus;
         readonly Button openNrModel,openNrDownload;
@@ -87,7 +92,8 @@ namespace Cadrivect
         {
             neuralSetup.Visibility=!UseOpenNr && (CanDownloadNeural || neuralSetupBusy) ? Visibility.Visible : Visibility.Collapsed;
             neuralDownload.IsEnabled=CanDownloadNeural && !neuralSetupBusy;
-            openNrSetup.Visibility=UseOpenNr ? Visibility.Visible : Visibility.Collapsed;
+            nrModelSettings.Visibility=UseOpenNr ? Visibility.Collapsed : Visibility.Visible;
+            openNrSetup.Visibility=UseOpenNr || nrModelSettings.IsChecked==true ? Visibility.Visible : Visibility.Collapsed;
             openNrModel.IsEnabled=!openNrChecking;
             openNrModel.Content=openNrChecking ? "Checking model…" : Flag(gpu,"open-nr")==true ? "Change model…" : "Choose model…";
             openNrDownload.IsEnabled=!openNrChecking;
@@ -108,6 +114,7 @@ namespace Cadrivect
         internal event Action FrucImportRequested,FrucSdkRequested;
         internal string FrucAvailabilityReason {get {return (string)frucGeneration.ToolTip;}}
         internal string FrameGenerationProvider {get;set;}
+        internal int GenerationSelectionRevision {get;private set;}
         internal static string SavedProvider(string provider,int factor)
         {
             return factor==2 && (provider=="amd" || provider=="fruc") ? provider : "p5cast";
@@ -137,17 +144,20 @@ namespace Cadrivect
         readonly Slider dialScale;
         readonly TextBox dialScaleInput;
         internal event Action DialMaximumChanged;
+        readonly CheckBox estimateGameFps=new CheckBox {Content="Estimate game FPS",Margin=new Thickness(0,5,0,2),
+            ToolTip="Sample motion in the Direct PS5 video. Still scenes and uncertain readings show a dash."};
+        internal bool EstimateGameFps {get {return estimateGameFps.IsChecked==true;} set {estimateGameFps.IsChecked=value;}}
+        internal event Action EstimateGameFpsChanged;
         internal int DialMaximum {
             get {return (int)dialScale.Value;}
             set {dialScale.Value=Math.Max(MinDialMaximum,Math.Min(MaxDialMaximum,value));}
         }
         Dictionary<string,object> gpu;
-        int selectedMode,selectedFactor=1;
+        int selectedMode,selectedBase,selectedFactor=1;
         bool syncing,hdr,directSelected;
         int requestedVideoKbps;
         string liveFsrVersion;
         long lastSample=-1;
-        DateTime pendingSettings;
 
         public PlaybackMeter(Action<int,int> change,Action<string> compare)
         {
@@ -166,8 +176,17 @@ namespace Cadrivect
             heading.Children.Add(targetValue); heading.Children.Add(title); fixedMeter.Children.Add(heading);
             dial.Height=133; dial.Margin=new Thickness(0,2,0,6); fixedMeter.Children.Add(dial);
             var legend=new UniformGrid {Rows=1,Columns=2}; fixedMeter.Children.Add(legend);
-            sourceValue=RateReadout(legend,Label("Source",Muted,11,FontWeights.Normal),"Theme.Source","Source frames submitted for display each second, including redraws.");
+            sourceValue=RateReadout(legend,Label("Source",Muted,11,FontWeights.Normal),"Theme.Source","Presentations of real source pictures per second. Moving the comparison divider does not count.");
             generatedValue=RateReadout(legend,Label("Generated",Muted,11,FontWeights.Normal),Amber,"Interpolated frames submitted for display each second.");
+            AutomationProperties.SetAutomationId(estimateGameFps,"EstimateGameFps");
+            RoutedEventHandler cadenceChanged=delegate {
+                values["gameFps"].Text=EstimateGameFps ? "—" : "Off";
+                if(EstimateGameFpsChanged!=null) EstimateGameFpsChanged();
+            };
+            fixedMeter.Children.Add(estimateGameFps);
+            AddMetric(fixedMeter,"gameFps","Game FPS (est.)","Visible picture changes per second in Direct PS5 video. Frame generation is excluded.");
+            values["gameFps"].Text="Off";
+            estimateGameFps.Checked+=cadenceChanged; estimateGameFps.Unchecked+=cadenceChanged;
             var scaleRow=new DockPanel {Margin=new Thickness(0,6,0,0)};
             var scaleTitle=Label("Dial max",Muted,11,FontWeights.SemiBold);
             DockPanel.SetDock(scaleTitle,Dock.Left); scaleRow.Children.Add(scaleTitle);
@@ -198,7 +217,14 @@ namespace Cadrivect
             };
             scaleRow.Children.Add(dialScale); fixedMeter.Children.Add(scaleRow);
             Separator(fixedMeter);
-            var picture=AddGroup(sections,"Picture","PictureGroup");
+            var pictureGroup=AddGroup(sections,"Picture","PictureGroup");
+            networkPictureNotice=Label("Network playback uses Moonlight. Local picture effects, comparisons and frame generation are available in Direct, Sony Remote Play and Demo.",Muted,12,FontWeights.Normal);
+            networkPictureNotice.TextWrapping=TextWrapping.Wrap;
+            networkPictureNotice.Visibility=Visibility.Collapsed;
+            AutomationProperties.SetAutomationId(networkPictureNotice,"NetworkPictureNotice");
+            pictureGroup.Children.Add(networkPictureNotice);
+            var picture=pictureControls=new StackPanel();
+            pictureGroup.Children.Add(picture);
             string group=Guid.NewGuid().ToString("N");
             for(int i=0;i<modes.Length;i++)
             {
@@ -209,7 +235,9 @@ namespace Cadrivect
                 if(index!=0) button.Click+=PreviewSelectedEffect;
                 button.Checked+=delegate {
                     if(syncing) return;
-                    selectedMode=index==NeuralMode && UseOpenNr ? OpenNeuralMode : index;
+                    if(index==NeuralMode) PreferOpenNrPrepass=false;
+                    selectedBase=index;
+                    selectedMode=PictureWithPreference(index);
                     RefreshQualityChoice(); SendSettings(index!=0);
                 };
             }
@@ -223,11 +251,24 @@ namespace Cadrivect
             AddPictureRow(modeGroup,"Spatial upscaling","nis","fsr");
             AddPictureRow(modeGroup,"Video & temporal upscaling","rtxvideo","fsr-temporal");
             AddPictureRow(modeGroup,"NVIDIA DLSS","dlss","dlaa","dlss-nr");
-            useOpenNr=new CheckBox {Content="Use open source",Margin=new Thickness(4,5,0,2),
+            useOpenNr=new CheckBox {Content="Use open source for DLSS 5 NR",Margin=new Thickness(4,5,0,2),
                 ToolTip="Use OpenDLSS-NR with SDR or HDR10 on Direct3D 11, Direct3D 12 or Vulkan. HDR playback applies the model’s color and shading changes to the original HDR picture."};
             AutomationProperties.SetAutomationId(useOpenNr,"UseOpenNr");
             useOpenNr.Checked+=ChangeNeuralProvider; useOpenNr.Unchecked+=ChangeNeuralProvider;
             modeGroup.Children.Add(useOpenNr);
+            var nrOptions=new DockPanel {Margin=new Thickness(0,8,0,2)};
+            nrModelSettings=new ToggleButton {Content="Model…",Template=ChipTemplate,MinWidth=56,Padding=new Thickness(6,2,6,2),
+                ToolTip="Show or hide the OpenDLSS-NR model settings."};
+            AutomationProperties.SetName(nrModelSettings,"OpenDLSS-NR model settings");
+            AutomationProperties.SetAutomationId(nrModelSettings,"OpenNrModelSettings");
+            nrModelSettings.Checked+=delegate {UpdateNeuralSetup();};
+            nrModelSettings.Unchecked+=delegate {UpdateNeuralSetup();};
+            DockPanel.SetDock(nrModelSettings,Dock.Right); nrOptions.Children.Add(nrModelSettings);
+            nrPrepass=new CheckBox {Content="Apply OpenDLSS-NR first",VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(4,0,4,0)};
+            ToolTipService.SetShowOnDisabled(nrPrepass,true);
+            AutomationProperties.SetAutomationId(nrPrepass,"OpenNrPrepass");
+            nrPrepass.Checked+=ChangePrepass; nrPrepass.Unchecked+=ChangePrepass;
+            nrOptions.Children.Add(nrPrepass); modeGroup.Children.Add(nrOptions);
             openNrSetup=new StackPanel {Margin=new Thickness(4,2,0,3),Visibility=Visibility.Collapsed};
             openNrStatus=Label("",Muted,11,FontWeights.Normal); openNrStatus.TextWrapping=TextWrapping.Wrap;
             openNrSetup.Children.Add(openNrStatus);
@@ -307,8 +348,12 @@ namespace Cadrivect
                 AutomationProperties.SetName(button,i==0 ? "Frame generation off" : "P5Cast interpolation "+factor+"×");
                 button.ToolTip=i==0 ? "Present captured frames only." : "P5Cast uses motion estimated from the video to present up to "+factor+" frames per source frame.";
                 if(factor>1) button.Click+=PreviewSelectedEffect;
+                // During a hardware probe Off is temporarily checked. Clicking it
+                // still means the user wants to keep generation off.
+                if(factor==1) button.Click+=delegate {GenerationSelectionRevision++;};
                 button.Checked+=delegate {
                     if(syncing) return;
+                    GenerationSelectionRevision++;
                     selectedFactor=factor; FrameGenerationProvider="p5cast"; SendSettings(factor>1);
                 };
                 factorGrid.Children.Add(button);
@@ -391,7 +436,7 @@ namespace Cadrivect
             AddMetric(diagnostics,"surface","Playback area","Size of the player surface in screen pixels, including any black bars.");
             AddMetric(diagnostics,"refresh","Display refresh","Active Windows display mode in Hz. The FPS dial counts submitted frames.");
             AddMetric(diagnostics,"renderer","Effects and output API","Graphics API running picture effects and presenting the video.");
-            AddMetric(diagnostics,"incomingFps","Source FPS","Source frames accepted by the renderer each second. Duplicate filtering and skipped decoded frames can lower this number.");
+            AddMetric(diagnostics,"incomingFps","Stream FPS","Decoded PS5 pictures per second, including repeated images. Measured before local enhancement or frame generation.");
             AddMetric(diagnostics,"videoLoss","Lost video frames","Cumulative video frames the Direct receiver reports missing before decode.");
             AddMetric(diagnostics,"localSkips","Skipped after decode","Decoded pictures replaced by newer pictures before the player could render them.");
             AddMetric(diagnostics,"slowHandoffs","Slow decoder handoffs","Video callbacks that spent at least 15 ms handing compressed video to the local decoder. These can also delay audio delivery.");
@@ -417,8 +462,14 @@ namespace Cadrivect
         public void SetSource(string source)
         {
             directSelected=source=="Direct";
+            estimateGameFps.IsEnabled=directSelected;
             submitLabel.Text=directSelected ? "Receive → submit" : source=="Sony" ? "Capture → submit" : "Frame → submit";
             ShowRequested(directSelected);
+        }
+        internal void SetNetworkPlayback(bool network)
+        {
+            pictureControls.IsEnabled=!network;
+            networkPictureNotice.Visibility=network ? Visibility.Visible : Visibility.Collapsed;
         }
         public void SetRequestedVideoKbps(int kbps) {requestedVideoKbps=Math.Max(0,kbps); ShowRequested(directSelected);}
         void ShowRequested(bool direct) {values["requested"].Text=direct && requestedVideoKbps>0 ? Metric(requestedVideoKbps/1000.0," Mb/s","0.##") : "—";}
@@ -576,7 +627,6 @@ namespace Cadrivect
         }
         void SendSettings(bool previewEffect)
         {
-            pendingSettings=DateTime.UtcNow.AddSeconds(2);
             int before=selectedView;
             RefreshComparison(previewEffect && selectedView==1 ? (int?)0 : null);
             if(change!=null) change(selectedMode,selectedFactor);
@@ -591,7 +641,7 @@ namespace Cadrivect
         {
             if(syncing) return;
             RefreshAvailability();
-            if(selectedMode==NeuralMode || selectedMode==OpenNeuralMode) {
+            if(selectedBase==NeuralMode) {
                 int next=modes[NeuralMode].IsEnabled ? (UseOpenNr ? OpenNeuralMode : NeuralMode) : 0;
                 syncing=true;
                 try {SyncPictureChoice(next);}
@@ -600,15 +650,40 @@ namespace Cadrivect
             }
             if(OpenNrProviderChanged!=null) OpenNrProviderChanged();
         }
+        void ChangePrepass(object sender,RoutedEventArgs e)
+        {
+            if(syncing) return;
+            PreferOpenNrPrepass=nrPrepass.IsChecked==true;
+            selectedMode=PictureWithPreference(selectedBase);
+            RefreshQualityChoice(); SendSettings(selectedMode!=0);
+        }
         void SyncPictureChoice(int index)
         {
             selectedMode=index;
-            if(index==NeuralMode || index==OpenNeuralMode) {
+            if(index==NeuralMode || (index==OpenNeuralMode && !PreferOpenNrPrepass)) {
+                selectedBase=NeuralMode;
                 bool open=index==OpenNeuralMode;
                 if(UseOpenNr!=open) {UseOpenNr=open;RefreshAvailability();}
-                modes[NeuralMode].IsChecked=true;
-            } else modes[index].IsChecked=true;
+            } else {
+                selectedBase=Array.IndexOf(ModeIds,PictureLabels.BaseMode(ModeIds[index]));
+                if(PictureLabels.HasOpenNr(ModeIds[index])) PreferOpenNrPrepass=true;
+            }
+            modes[selectedBase].IsChecked=true;
             RefreshQualityChoice();
+        }
+        int PictureWithPreference(int baseIndex)
+        {
+            if(baseIndex==NeuralMode) return UseOpenNr ? OpenNeuralMode : NeuralMode;
+            string combined=PictureLabels.WithOpenNr(ModeIds[baseIndex]);
+            return PreferOpenNrPrepass && Flag(gpu,combined)==true ? Array.IndexOf(ModeIds,combined) : baseIndex;
+        }
+        internal int AvailablePicture(int requested)
+        {
+            if(requested==NeuralMode || (requested==OpenNeuralMode && !PreferOpenNrPrepass))
+                return SupportsSelectedColor(requested) && Flag(gpu,ModeIds[requested])==true ? requested : 0;
+            int baseIndex=Array.IndexOf(ModeIds,PictureLabels.BaseMode(ModeIds[requested]));
+            if(baseIndex>=3 && Flag(gpu,ModeIds[baseIndex])!=true) return 0;
+            return PictureWithPreference(baseIndex);
         }
         RadioButton AddGenerationProvider(Panel parent,string group,string provider,string label,string id)
         {
@@ -617,6 +692,7 @@ namespace Cadrivect
             button.Click+=PreviewSelectedEffect;
             button.Checked+=delegate {
                 if(syncing) return;
+                GenerationSelectionRevision++;
                 FrameGenerationProvider=provider; selectedFactor=2; SendSettings(true);
             };
             parent.Children.Add(button); return button;
@@ -656,7 +732,6 @@ namespace Cadrivect
                 SyncPictureChoice(picture>=0 && picture<ModeIds.Length ? picture : 0); SyncGenerationChoice();
                 int index=Array.IndexOf(ViewIds,view);
                 RefreshComparison(index>=0 ? (int?)index : null);
-                pendingSettings=DateTime.MinValue;
             } finally {syncing=false;}
         }
         internal Dictionary<string,object> Capabilities { get {return gpu;} }
@@ -680,11 +755,12 @@ namespace Cadrivect
             syncing=true;
             try {SyncPictureChoice(Math.Max(0,Math.Min(ModeIds.Length-1,modeIndex))); SyncGenerationChoice(); RefreshComparison();}
             finally {syncing=false;}
-            liveFsrVersion=null; lastSample=-1; pendingSettings=DateTime.MinValue; dial.SetRates(double.NaN,double.NaN,double.NaN,double.NaN);
+            liveFsrVersion=null; lastSample=-1; dial.SetRates(double.NaN,double.NaN,double.NaN,double.NaN);
             sourceValue.Text=generatedValue.Text="—"; targetValue.Text="Target —";
             pictureSize.Text="Waiting for video"; pictureScale.Text=""; activeQuality.Text="";
             displayedSize.Visibility=Visibility.Collapsed;
             foreach(var label in values.Values) label.Text="—";
+            if(!EstimateGameFps) values["gameFps"].Text="Off";
             values["format"].ToolTip=null;
             ShowRequested(directSelected);
             notice.Visibility=Visibility.Collapsed; RefreshAvailability();
@@ -729,10 +805,21 @@ namespace Cadrivect
         }
         void RefreshQualityChoice()
         {
-            modelGroup.Visibility=selectedMode==4 || selectedMode==5 ? Visibility.Visible : Visibility.Collapsed;
-            modelChoice.IsEnabled=(selectedMode==4 || selectedMode==5) && modes[selectedMode].IsEnabled;
-            qualityGroup.Visibility=selectedMode==4 ? Visibility.Visible : Visibility.Collapsed;
-            qualityChoice.IsEnabled=selectedMode==4 && modes[4].IsEnabled;
+            bool hasBase=selectedBase!=NeuralMode;
+            string combined=hasBase ? PictureLabels.WithOpenNr(ModeIds[selectedBase]) : null;
+            bool wasSyncing=syncing; syncing=true;
+            try {nrPrepass.IsChecked=hasBase && PictureLabels.HasOpenNr(ModeIds[selectedMode]);}
+            finally {syncing=wasSyncing;}
+            bool supported=hasBase && Flag(gpu,combined)==true;
+            nrPrepass.IsEnabled=supported || nrPrepass.IsChecked==true;
+            string detail=!hasBase ? "The selected picture mode already applies neural rendering." :
+                supported ? "Apply neural rendering at the stream resolution before the selected picture effect." :
+                Text(gpu,combined+"Reason") ?? Text(gpu,"open-nrReason") ?? Text(gpu,"probeFailure") ?? "Checking GPU and model support.";
+            nrPrepass.ToolTip=detail; AutomationProperties.SetHelpText(nrPrepass,detail);
+            modelGroup.Visibility=selectedBase==4 || selectedBase==5 ? Visibility.Visible : Visibility.Collapsed;
+            modelChoice.IsEnabled=(selectedBase==4 || selectedBase==5) && modes[selectedBase].IsEnabled;
+            qualityGroup.Visibility=selectedBase==4 ? Visibility.Visible : Visibility.Collapsed;
+            qualityChoice.IsEnabled=selectedBase==4 && modes[4].IsEnabled;
         }
         static object Field(Dictionary<string,object> data,string key)
         {
@@ -774,7 +861,7 @@ namespace Cadrivect
             pictureSize.Text=Dimensions(iw,ih)+" → "+Dimensions(ow,oh);
             bool native=iw==ow && ih==oh;
             if(native) {
-                string mode=Text(data,"effectivePictureMode");
+                string mode=PictureLabels.BaseMode(Text(data,"effectivePictureMode"));
                 pictureScale.Text=mode=="dlaa" ? "1× · DLAA" : mode=="nis" ? "1× · NIS sharpen" : "1× · Native";
             }
             else pictureScale.Text=Metric(ow/iw,"×","0.##")+(ow>iw ? " upscale" : " downscale");
@@ -794,7 +881,8 @@ namespace Cadrivect
             sourceValue.Text=Metric(originals,"","0.#");
             generatedValue.Text=Metric(generated,"","0.#");
             dial.SetRates(target,originals,output,generated);
-            values["incomingFps"].Text=Metric(waiting ? double.NaN : Number(snapshot,"sourceFps"),"","0.#");
+            values["incomingFps"].Text=Metric(Number(snapshot,"streamFps"),"","0.#");
+            values["gameFps"].Text=EstimateGameFps ? Metric(Number(snapshot,"estimatedGameFps"),"","0") : "Off";
             UpdatePictureSize(snapshot);
             values["surface"].Text=Dimensions(Number(snapshot,"surfaceWidth"),Number(snapshot,"surfaceHeight"));
             values["refresh"].Text=Metric(Number(snapshot,"displayRefreshHz")," Hz","0.##");
@@ -802,6 +890,8 @@ namespace Cadrivect
             values["renderer"].Text=Dashboard.RendererName(renderer ?? processing);
             if(processing!=null && renderer!=null && processing!=renderer)
                 values["renderer"].Text+=" · "+Dashboard.RendererName(processing)+" processing";
+            if(PictureLabels.IsCombined(Text(snapshot,"effectivePictureMode")) && renderer!="vulkan")
+                values["renderer"].Text+=" · Vulkan NR";
             string codec=Text(snapshot,"codec"); bool? hdrFlag=Flag(snapshot,"presenterHdr10") ?? Flag(snapshot,"hdrEnabled");
             string color=hdrFlag.HasValue ? (hdrFlag.Value ? "HDR10":"SDR") : "";
             values["format"].Text=string.IsNullOrEmpty(codec) ? (color.Length==0 ? "—":color) : codec+(color.Length==0 ? "" : " · "+color);
@@ -836,33 +926,29 @@ namespace Cadrivect
                 RefreshAvailability();
             }
             string requested=Text(snapshot,"mode"), effective=Text(snapshot,"effectivePictureMode");
-            string fsrVersion=effective=="fsr-temporal" ? Text(snapshot,"fsrVersion") : null;
+            string fsrVersion=PictureLabels.BaseMode(effective)=="fsr-temporal" ? Text(snapshot,"fsrVersion") : null;
             if(fsrVersion!=liveFsrVersion) {
                 liveFsrVersion=fsrVersion;
                 modes[6].Content=PictureLabels.TemporalFsr(liveFsrVersion ?? Text(gpu,"fsrVersion"));
             }
-            int mode=Array.IndexOf(ModeIds,requested); double factor=Number(snapshot,"multiplier"); bool? comparing=Flag(snapshot,"compare");
+            int mode=Array.IndexOf(ModeIds,requested); bool? comparing=Flag(snapshot,"compare");
             int priorView=selectedView;
-            syncing=true;
-            try {
-                if(DateTime.UtcNow>=pendingSettings || (mode==selectedMode && factor==selectedFactor && Text(snapshot,"frameGenerationProvider")==FrameGenerationProvider)) {
-                    if(mode>=0 && mode!=selectedMode) SyncPictureChoice(mode);
-                    if(factor>=1 && factor<=4) {
-                        selectedFactor=(int)factor;
-                        FrameGenerationProvider=Text(snapshot,"frameGenerationProvider"); SyncGenerationChoice();
-                    }
-                    RefreshComparison();
-                    pendingSettings=DateTime.MinValue;
-                }
-            } finally {syncing=false;}
+            // The dashboard owns the requested settings. Only a rejected, acknowledged
+            // switch restores those controls; older telemetry can arrive after a new click.
+            RefreshComparison();
             if(priorView!=selectedView && compare!=null) compare(ComparisonView);
             int quality=Array.IndexOf(QualityIds,Text(snapshot,"activeDlssQuality"));
-            activeQuality.Text=requested=="dlss" && effective=="dlaa" ? "Native · DLAA" :
-                effective=="dlss" && quality>0 ? "Active · "+QualityLabels[quality] : "";
+            string requestedBase=PictureLabels.BaseMode(requested),effectiveBase=PictureLabels.BaseMode(effective);
+            activeQuality.Text=requestedBase=="dlss" && effectiveBase=="dlaa" ? "Native · DLAA" :
+                effectiveBase=="dlss" && quality>0 ? "Active · "+QualityLabels[quality] : "";
             string message=Text(snapshot,"effectNotice");
             string fgVersion=Text(snapshot,"activeFrameGenerationVersion");
-            if(Text(snapshot,"activeFrameGenerationProvider")=="fruc" && comparing!=true && string.IsNullOrEmpty(message))
-                message="NVIDIA FRUC · 2×";
+            if(Text(snapshot,"frameGenerationProvider")=="fruc" && comparing!=true && string.IsNullOrEmpty(message)) {
+                double rate=Number(snapshot,"frucPresentedFps");
+                message=Text(snapshot,"activeFrameGenerationProvider")=="fruc" && rate>0
+                    ? "NVIDIA FRUC · "+Metric(rate," generated FPS","0.#")
+                    : "NVIDIA FRUC selected · waiting for a generated frame to present";
+            }
             if(comparing!=true && !string.IsNullOrEmpty(fgVersion) && string.IsNullOrEmpty(Text(snapshot,"effectNotice")))
                 message=(string.IsNullOrEmpty(message) ? "" : message+" · ")+"AMD frame generation "+fgVersion;
             int active=Array.IndexOf(ModeIds,effective);

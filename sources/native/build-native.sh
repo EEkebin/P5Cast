@@ -57,7 +57,8 @@ for sub in nanopb gf-complete jerasure; do
 done
 # Include the sources of this executable, including the exact upstream modules
 # statically linked into it, next to the distributed native binary.
-tar --exclude=.git --exclude=__pycache__ --exclude='*.pyc' -czf "$stage/Direct-source.tar.gz" \
+tar --format=gnu --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+    --exclude=.git --exclude=__pycache__ --exclude='*.pyc' -czf "$stage/Direct-source.tar.gz" \
     -C "$src" Audio.c Direct.c Direct.h Gamepad.c Haptics.c Haptics.h HapticsVerify.c Register.c Rest.c Verify.c Video.c CMakeLists.txt \
         Build.ps1 build-native.sh packages.sha256 chiaki-reconnect.patch LICENSE.txt README.md \
     -C "$work" upstream/.gitmodules upstream/CMakeLists.txt upstream/COPYING upstream/LICENSES \

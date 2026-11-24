@@ -76,7 +76,10 @@ float4 HdrNrReconstruct(Vertex v) : SV_Target {
                                 abs(image.SampleLevel(linearClamp,v.uv-dy,0).rgb-original)));
     float scene=smoothstep(0.001,0.015,NrPeak(variation)/max(peak,0.05));
     float strength=scene*(1-StrokeFootprint(v.uv))*(1-smoothstep(12.5,125,NrPeak(color)));
-    return float4(clamp(color+strength*delta,0,125),1);
+    float3 reconstructed=clamp(color+strength*delta,0,125);
+    // The prepass returns capture-space scRGB for another effect; standalone NR
+    // hands its BT.2020 result directly to the vendor presentation path.
+    return float4(phase>0 ? reconstructed : Linear2020ToScRgb(reconstructed),1);
 }
 float4 FitNrHdrIntermediate(Vertex v) : SV_Target {
     // The SDK midpoint is scRGB; built-in interpolation and the real neural

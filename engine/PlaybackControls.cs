@@ -16,6 +16,8 @@ internal sealed class PlaybackControls : Form
     static readonly string[] Names=PictureLabels.Modes;
     static readonly int nrIndex=Array.IndexOf(Modes,"dlss-nr");
     readonly CheckBox openNr=new CheckBox {Text="Use open source",ForeColor=TextColor,BackColor=Surface,Enabled=false};
+    readonly CheckBox nrPrepass=new CheckBox {Text="Apply OpenDLSS-NR first",ForeColor=TextColor,BackColor=Surface,Enabled=false};
+    bool preferNrPrepass;
     Dictionary<string,object> capabilities;
     static readonly Color Surface=Color.FromArgb(19,30,35), Idle=Color.FromArgb(31,45,51),
         Edge=Color.FromArgb(63,81,87), TextColor=Color.FromArgb(235,244,243),
@@ -77,8 +79,11 @@ internal sealed class PlaybackControls : Form
         tips.SetToolTip(videoTime,"Video timing · 0–100 ms"); tips.SetToolTip(audioTime,"Audio queue · 0–100 ms");
         Add(Label("Picture",TextColor),16,255,185,20,14);
         for(int i=0;i<modes.Length;i++) {
-            if(Modes[i]=="open-nr") continue;
-            int index=i; var button=MakeButton(Names[i],delegate { Request(index==nrIndex && openNr.Checked ? "open-nr" : Modes[index],-1); });
+            if(PictureLabels.HasOpenNr(Modes[i])) continue;
+            int index=i; var button=MakeButton(Names[i],delegate {
+                if(index==nrIndex) preferNrPrepass=false;
+                Request(ChosenMode(Modes[index]),-1);
+            });
             button.AccessibleName="Picture: "+Names[i];
             if(Modes[i]=="nis") {
                 button.Enabled=false;
@@ -90,20 +95,26 @@ internal sealed class PlaybackControls : Form
         Add(openNr,126,385,170,24,12);
         openNr.Click+=delegate {
             RefreshNr();
-            if(PictureLabels.IsNeuralRendering(selection))
+            if(SelectedBase()=="dlss-nr")
                 Request(modes[nrIndex].Enabled ? (openNr.Checked ? "open-nr" : "dlss-nr") : "original",-1);
         };
-        Add(Label("Frame generation",TextColor),16,415,220,20,14);
+        Add(nrPrepass,16,411,324,24,12);
+        nrPrepass.Click+=delegate {
+            string baseMode=SelectedBase();
+            preferNrPrepass=nrPrepass.Checked;
+            Request(ChosenMode(baseMode),-1);
+        };
+        Add(Label("Frame generation",TextColor),16,441,220,20,14);
         for(int i=0;i<4;i++) {
             int factor=i+1; var button=MakeButton(i==0 ? "Off":factor+"×",delegate { Request(null,factor); });
             button.AccessibleName=i==0 ? "Frame generation off":"Frame generation "+factor+" times";
-            Add(button,16+i*83,442,77,30,13); factors[i]=button;
+            Add(button,16+i*83,468,77,30,13); factors[i]=button;
         }
         pin=MakeButton("Pin stats",delegate { pinned=!pinned; Mark(pin,pinned); pin.Text=pinned ? "Unpin stats":"Pin stats"; });
-        pin.AccessibleName="Pin live stats"; Add(pin,16,486,105,29,12);
+        pin.AccessibleName="Pin live stats"; Add(pin,16,512,105,29,12);
         var hint=Label("Ctrl+Alt+O   ·   Show or hide",Muted); hint.TextAlign=ContentAlignment.MiddleRight;
-        Add(hint,128,486,212,29,12);
-        notice=Label("",Color.FromArgb(255,214,149)); notice.AutoEllipsis=true; Add(notice,16,519,324,43,12);
+        Add(hint,128,512,212,29,12);
+        notice=Label("",Color.FromArgb(255,214,149)); notice.AutoEllipsis=true; Add(notice,16,545,324,43,12);
         Sync(mode,multiplier);
     }
     Label Metric(string caption,int x,Color color)
@@ -136,12 +147,30 @@ internal sealed class PlaybackControls : Form
     {
         if(SettingChanged!=null) SettingChanged(mode,factor);
     }
+    string SelectedBase()
+    {
+        return selection=="open-nr" && !preferNrPrepass ? "dlss-nr" : PictureLabels.BaseMode(selection);
+    }
+    bool Supports(string id)
+    {
+        object value;
+        return capabilities!=null && capabilities.TryGetValue(id,out value) && Equals(value,true);
+    }
+    string ChosenMode(string baseMode)
+    {
+        if(baseMode=="dlss-nr") return openNr.Checked ? "open-nr" : baseMode;
+        string combined=PictureLabels.WithOpenNr(baseMode);
+        return preferNrPrepass && Supports(combined) ? combined : baseMode;
+    }
     public void Sync(string mode,int factor)
     {
         selection=mode; multiplier=factor;
-        if(PictureLabels.IsNeuralRendering(mode)) openNr.Checked=mode=="open-nr";
+        if(PictureLabels.IsCombined(mode)) preferNrPrepass=true;
+        string baseMode=SelectedBase();
+        if(baseMode=="dlss-nr") openNr.Checked=mode=="open-nr";
+        nrPrepass.Checked=baseMode!="dlss-nr" && PictureLabels.HasOpenNr(mode);
         for(int i=0;i<modes.Length;i++) if(modes[i]!=null)
-            Mark(modes[i],i==nrIndex ? PictureLabels.IsNeuralRendering(mode) : Modes[i]==mode);
+            Mark(modes[i],Modes[i]==baseMode);
         RefreshNr();
         for(int i=0;i<factors.Length;i++) Mark(factors[i],i+1==factor);
     }
@@ -157,13 +186,20 @@ internal sealed class PlaybackControls : Form
         expanded=true; panel.Visible=true; chip.Visible=false; Position();
         if(!Visible) Show();
         Activate();
-        int i=selection=="open-nr" ? nrIndex : Array.IndexOf(Modes,selection); if(i>=0) modes[i].Focus();
+        int i=Array.IndexOf(Modes,SelectedBase()); if(i>=0) modes[i].Focus();
         if(!probing) { probing=true; ThreadPool.QueueUserWorkItem(delegate { ProbeCapabilities(); }); }
     }
     void RefreshNr()
     {
         if(capabilities==null) return;
         object supported,reason;
+        string baseMode=SelectedBase(),combined=PictureLabels.WithOpenNr(baseMode);
+        bool supportedPair=baseMode!="dlss-nr" && Supports(combined);
+        nrPrepass.Enabled=supportedPair || nrPrepass.Checked;
+        string detail=baseMode=="dlss-nr" ? "The selected picture mode already applies neural rendering." :
+            supportedPair ? "Apply neural rendering at stream resolution before the selected picture effect." :
+            capabilities.TryGetValue(combined+"Reason",out reason) ? Convert.ToString(reason) : "OpenDLSS-NR unavailable";
+        nrPrepass.AccessibleDescription=detail; tips.SetToolTip(nrPrepass,detail);
         string id=openNr.Checked ? "open-nr" : "dlss-nr";
         modes[nrIndex].Enabled=capabilities.TryGetValue(id,out supported) && Equals(supported,true);
         tips.SetToolTip(modes[nrIndex],capabilities.TryGetValue(id+"Reason",out reason) ? reason as string : "");
@@ -252,7 +288,7 @@ internal sealed class PlaybackControls : Form
     {
         var monitor=Screen.FromHandle(player.Handle).Bounds;
         int dpi=(int)GetDpiForWindow(player.Handle); if(dpi<72) dpi=96;
-        int logicalHeight=expanded ? lastNotice.Length>0 ? 569 : 529 : pinned ? 86 : 36;
+        int logicalHeight=expanded ? lastNotice.Length>0 ? 595 : 555 : pinned ? 86 : 36;
         int logicalWidth=expanded ? 356 : pinned ? 255 : 222;
         dpi=Math.Max(48,Math.Min(dpi,Math.Min(96*(monitor.Width-4)/logicalWidth,96*(monitor.Height-4)/logicalHeight)));
         float scale=dpi/96f;

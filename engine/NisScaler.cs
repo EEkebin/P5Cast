@@ -197,7 +197,7 @@ internal sealed partial class Renderer
     Size nisCachedSize;
     bool nisCachedHdr;
     public int NisEvaluations {get {return nisPriorEvaluations+(nis==null?0:nis.Evaluations);}}
-    public string ActiveNisFilter {get {return EffectivePictureMode=="nis" && nis!=null ? nis.Filter : "";}}
+    public string ActiveNisFilter {get {return PictureLabels.BaseMode(EffectivePictureMode)=="nis" && nis!=null ? nis.Filter : "";}}
     void ReleaseNis() {
         if(nis!=null) {nisPriorEvaluations+=nis.Evaluations;nis.Dispose();nis=null;}
         nisCachedFrame=-1;
@@ -217,16 +217,7 @@ internal sealed partial class Renderer
         nisCachedFrame=Captured;nisCachedPhase=phase;nisCachedInput=input;nisCachedSize=target;nisCachedHdr=HdrEnabled;
     }
     void DrawNis(ShaderResourceView source,float phase,Rectangle area,Rectangle? clip=null) {
-        try {
-            EvaluateNis(source,phase,outSize);
-        } catch(Exception error) {
-            if(!IsEffectFailure(error)) throw;
-            failedMode="nis";EffectivePictureMode="original";
-            EffectNotice="Showing Original. "+error.Message;
-            ReleaseNis(); RestoreDrawState(); SetProcessingSize(srcSize);
-            Draw(HdrEnabled?"HdrToPq":"Original",display,area,source,1,clip:clip);
-            return;
-        }
+        EvaluateNis(source,phase,outSize);
         Draw("Original",display,area,nis.Output,1,clip:clip);
     }
 }

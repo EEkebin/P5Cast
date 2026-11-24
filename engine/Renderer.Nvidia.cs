@@ -13,7 +13,7 @@ internal sealed partial class Renderer
     NgxVideo ngx;
     NeuralRendering neuralRendering;
     FsrUpscaler temporalFsr;
-    public string ActiveFsrVersion { get {return temporalFsr!=null && EffectivePictureMode=="fsr-temporal" ? temporalFsr.ActiveVersion : "";} }
+    public string ActiveFsrVersion { get {return temporalFsr!=null && PictureLabels.BaseMode(EffectivePictureMode)=="fsr-temporal" ? temporalFsr.ActiveVersion : "";} }
     public int FsrEvaluations {get;private set;}
     GpuImage neuralCurrent, neuralPrevious, rgba, vectors, depth, strokeMask, ngxOutput;
     Size neuralSize;
@@ -27,7 +27,7 @@ internal sealed partial class Renderer
     public int VendorEvaluations { get; private set; }
     public int OpenNrEvaluations { get; private set; }
     public int HardwareMotionPairs { get; private set; }
-    public string ActiveEffect { get { return IsVendor(EffectivePictureMode) && EffectivePictureMode!="fsr-temporal" && EffectivePictureMode!="open-nr" ? neuralMode ?? "" : ""; } }
+    public string ActiveEffect { get { string effect=PictureLabels.BaseMode(EffectivePictureMode); return IsVendor(effect) && effect!="fsr-temporal" ? neuralMode ?? "" : ""; } }
 
     public string DlssQuality { get { return dlssQuality; } }
     public string ActiveDlssQuality { get { return ngx!=null && (ActiveEffect=="dlss" || ActiveEffect=="dlaa") ? ngx.ActiveQuality : ""; } }
@@ -37,19 +37,19 @@ internal sealed partial class Renderer
         if(dlssModelHint==key) return;
         DlssModel.Apply(Device,key);
         dlssModelHint=key;
-        if(failedMode=="dlss" || failedMode=="dlaa") {failedMode=null; EffectNotice="";}
+        if(PictureLabels.BaseMode(failedMode)=="dlss" || PictureLabels.BaseMode(failedMode)=="dlaa") {failedMode=null; EffectNotice="";}
     }
     public void SetDlssQuality(string key)
     {
         NgxVideo.QualityValue(key);
         if(dlssQuality==key) return;
         dlssQuality=key;
-        if(failedMode=="dlss") { failedMode=null; EffectNotice=""; }
+        if(PictureLabels.BaseMode(failedMode)=="dlss") { failedMode=null; EffectNotice=""; }
     }
 
     public void SetFrameTiming(double delta,bool continuous)
     {
-        if(!continuous) sdkNeedsReset=true;
+        if(!continuous) {sdkNeedsReset=true;ResetOpenNrHistory();}
         resetHistory=!continuous;
         if(!continuous && optical!=null) optical.ResetHistory();
         frameMilliseconds=continuous ? (float)Math.Max(1,Math.Min(120,delta)) : 16.67f;
@@ -79,6 +79,17 @@ internal sealed partial class Renderer
         finally { if(hardware) context.PixelShader.SetShaderResource(3,null); }
         if(hardware) HardwareMotionPairs++;
         motionReady=true;
+    }
+
+    void PrepareVendorGuidance(GpuImage field,GpuImage mask,bool continuous)
+    {
+        if(continuous) {
+            // The prepass and the upscaler share the captured frame's motion
+            // field. The estimate stays anchored to the actual console frames.
+            if(HdrEnabled) PrepareHdrMotion(); else PrepareMotion();
+        }
+        Draw("NgxVectors",field.Write,new Rectangle(Point.Empty,srcSize),curr.Read,continuous ? 1 : 0,
+            continuous ? prev.Read : curr.Read,continuous ? motion.Read : null,auxiliary:mask.Write);
     }
 
     ShaderResourceView EnhancedFrame(string mode,bool previous)
@@ -139,12 +150,7 @@ internal sealed partial class Renderer
             Draw(HdrEnabled ? pack : "Original",rgba.Write,area,curr.Read,1);
             if(ngx!=null || temporalFsr!=null || neuralRendering!=null)
             {
-                if(havePriorEnhanced)
-                {
-                    if(HdrEnabled) PrepareHdrMotion(); else PrepareMotion();
-                }
-                Draw("NgxVectors",vectors.Write,area,curr.Read,havePriorEnhanced ? 1 : 0,
-                     havePriorEnhanced ? prev.Read : curr.Read,havePriorEnhanced ? motion.Read : null,auxiliary:strokeMask.Write);
+                PrepareVendorGuidance(vectors,strokeMask,havePriorEnhanced);
                 // The console's camera jitter is unknown. Do not invent offsets for captured pixels.
                 if(temporalFsr!=null)
                     temporalFsr.Evaluate(context,rgba.Texture,vectors.Texture,depth.Texture,ngxOutput.Texture,frameMilliseconds,!havePriorEnhanced,strokeMask.Texture);

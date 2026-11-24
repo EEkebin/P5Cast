@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.20)
 project(CadrivectDirect LANGUAGES C CXX)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+# Keep assertion and diagnostic filenames useful without embedding the builder's profile.
+add_compile_options("-ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=sources/native"
+    "-ffile-prefix-map=${CHIAKI_SOURCE}=upstream" "-ffile-prefix-map=${CMAKE_BINARY_DIR}=build")
 foreach(option TESTS CLI GUI BOREALIS STEAMDECK_NATIVE SETSU SPEEX FFMPEG_DECODER PI_DECODER STEAM_SHORTCUT)
     set(CHIAKI_ENABLE_${option} OFF CACHE BOOL "" FORCE)
 endforeach()

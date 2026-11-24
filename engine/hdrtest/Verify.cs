@@ -55,6 +55,28 @@ partial class VerifyHdr
                 CheckOpenNrHdr(compiled,args[display+1]);return 0;
             }
             bool d3d12=Array.IndexOf(args,"--d3d12")>=0;
+            int chain=Array.IndexOf(args,"--nr-chain");
+            if(chain>=0) {
+                var screen=Array.Find(System.Windows.Forms.Screen.AllScreens,s=>s.DeviceName==args[chain+1]);
+                if(screen==null) throw new ArgumentException("Missing display "+args[chain+1]);
+                string backend=Array.IndexOf(args,"--vulkan")>=0 ? "vulkan" : d3d12 ? "d3d12" : "d3d11";
+                foreach(bool hdr in new[]{false,true}) {
+                    if(Array.IndexOf(args,"--benchmark-nr-chain")>=0) {
+                        BenchmarkNrChain(compiled,backend,screen,hdr);
+                        continue;
+                    }
+                    CheckNrChain(compiled,backend,screen,hdr);
+                    if(backend=="vulkan") {
+                        foreach(string provider in new[]{"amd","p5cast"})
+                            CheckSubtitles(compiled,backend,provider,new System.Drawing.Size(960,540),hdr ? screen : null,"open-nr-fsr-temporal");
+                        continue;
+                    }
+                    foreach(string provider in d3d12 ? new[]{"fruc","p5cast","amd"} : new[]{"fruc","p5cast"})
+                        CheckSubtitles(compiled,backend,provider,new System.Drawing.Size(960,540),hdr ? screen : null,"open-nr-rtxvideo");
+                    CheckSubtitles(compiled,backend,"fruc",new System.Drawing.Size(960,540),hdr ? screen : null,"open-nr-dlss");
+                }
+                return 0;
+            }
             bool vulkanSubtitles=Array.IndexOf(args,"--vulkan-subtitles")>=0;
             if(vulkanSubtitles || Array.IndexOf(args,"--fruc-subtitles")>=0) {
                 string backend=vulkanSubtitles ? "vulkan" : d3d12 ? "d3d12" : "d3d11";

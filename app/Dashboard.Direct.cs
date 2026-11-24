@@ -117,9 +117,18 @@ namespace Cadrivect
             UI<TextBlock>("RendererHint").Text=sdr
                 ? "OpenGL uses SDR on Windows. Choose Direct3D or Vulkan for HDR10."
                 : "Auto color uses HDR10 when the playback display and driver support it.";
+            SyncIdleColor();
+        }
+        void SyncIdleColor()
+        {
+            if(rendering!=null || meter==null) return;
+            int choice=UI<ComboBox>("HdrOutput").SelectedIndex;
+            var display=UI<ComboBox>("PlaybackDisplay").SelectedItem as DisplayTarget;
+            meter.SetIdleHdr(choice==2 || (choice==0 && display!=null && display.AdvancedColorEnabled));
         }
         void UpdateOutput()
         {
+            SyncIdleColor();
             if(rendering!=null && !restoringSwitch) {
                 // The worker may not have installed the session when the user changes output.
                 if(!firstFrame) {outputChangedBeforeFirstFrame=true; return;}
@@ -215,6 +224,7 @@ namespace Cadrivect
             if(!requestingRest) closeAfterStop=false;
             DismissStopPrompt();
             meter.Reset(mode,factor);
+            SyncIdleColor();
             meter.SetRequestedVideoKbps(source=="Direct"?DirectKbps():0); surface.Clear(); UpdateTransport();
             if(closing) QueueWindowClose();
         }

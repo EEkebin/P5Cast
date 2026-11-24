@@ -1,0 +1,40 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#include "video.glsl"
+layout(std430,binding=3) writeonly buffer Features { vec4 features[]; };
+
+// Upstream OpenDLSS-NR's seeded Gaussian inputs (MIT, see open-nr/licenses/OpenDLSS-NR-LICENSE.txt).
+float uniformNoise(uint value) {
+    uint v=((value >> ((value>>28u)+4u))^value)*0x108ef2d9u;
+    return float(((v>>30u)^(v>>8u))+1u)*uintBitsToFloat(0x33800000u);
+}
+vec3 noiseAt(uvec2 p) {
+    uint base=(p.x*0x8da6b343u)^(p.y*0xd8163841u)^(seed*0x9e3779b9u)^0x243f6a88u;
+    base=((base>>((base>>28u)+4u))^base)*0x108ef2d9u;
+    base=(base>>22u)^base;
+    float radius=sqrt(-2.*log(uniformNoise(base*0x2c9277b5u+0xac564b05u)));
+    float angle=6.2831853*uniformNoise(base*0xfa6dc5f9u+0x4712a88eu);
+    float radius2=sqrt(-2.*log(uniformNoise(base*0xcaa5b80du+0x21dd796bu)));
+    float angle2=6.2831853*uniformNoise(base*0x83232c31u+0x3463e0acu);
+    return vec3(roundF16(radius*cos(angle)),roundF16(radius*sin(angle)),roundF16(radius2*cos(angle2)));
+}
+vec3 centered(vec3 v) {
+    return vec3(roundF16(roundF16(v.x-.5)*.125),roundF16(roundF16(v.y-.5)*.125),roundF16(roundF16(v.z-.5)*.125));
+}
+void main() {
+    uvec2 id=gl_GlobalInvocationID.xy;
+    if(id.x>=fullWidth || id.y>=fullHeight)return;
+    ivec2 size=ivec2(width,height);
+    ivec2 p=max(min(ivec2(id),2*size-ivec2(id)-2),ivec2(0));
+    // The last valid source pixel maps to itself; reflect only outside the valid field.
+    p=ivec2(id.x<width?int(id.x):p.x,id.y<height?int(id.y):p.y);
+    vec3 now=centered(clamp(rgb(color[uint(p.y)*width+uint(p.x)]),0.,1.));
+    vec3 past;
+    if(reproject(p,past)) past=centered(past); else past=now;
+    uint at=(id.y*fullWidth+id.x)*4u;
+    features[at]=vec4(noiseAt(id),1);
+    features[at+1]=vec4(now,past.r);
+    // Natural intensity, independent local tone/structure and automatic skin mask.
+    features[at+2]=vec4(past.gb,0.,1.);
+    features[at+3]=vec4(1.,1.,1.,0.);
+}

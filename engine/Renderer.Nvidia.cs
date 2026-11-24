@@ -25,8 +25,9 @@ internal sealed partial class Renderer
     bool havePriorEnhanced, resetHistory;
     float frameMilliseconds = 16.67f;
     public int VendorEvaluations { get; private set; }
+    public int OpenNrEvaluations { get; private set; }
     public int HardwareMotionPairs { get; private set; }
-    public string ActiveEffect { get { return IsVendor(EffectivePictureMode) && EffectivePictureMode!="fsr-temporal" ? neuralMode ?? "" : ""; } }
+    public string ActiveEffect { get { return IsVendor(EffectivePictureMode) && EffectivePictureMode!="fsr-temporal" && EffectivePictureMode!="open-nr" ? neuralMode ?? "" : ""; } }
 
     public string DlssQuality { get { return dlssQuality; } }
     public string ActiveDlssQuality { get { return ngx!=null && (ActiveEffect=="dlss" || ActiveEffect=="dlaa") ? ngx.ActiveQuality : ""; } }
@@ -82,8 +83,9 @@ internal sealed partial class Renderer
 
     ShaderResourceView EnhancedFrame(string mode,bool previous)
     {
-        if(mode=="dlss-nr" && Backend!="vulkan") throw new InvalidOperationException(NeuralRendering.BackendReason);
-        if(mode=="dlss-nr" && HdrEnabled) throw new InvalidOperationException(NeuralRendering.HdrReason);
+        bool nr=PictureLabels.IsNeuralRendering(mode);
+        if(nr && !HasVendorBridge(Backend,mode)) throw new InvalidOperationException(mode=="open-nr" ? NeuralRendering.OpenBackendReason : NeuralRendering.BackendReason);
+        if(nr && HdrEnabled) throw new InvalidOperationException(NeuralRendering.HdrReason);
         if(!HasVendorBridge(Backend,mode))
             throw new InvalidOperationException("The selected graphics API has no native bridge for this effect.");
         // With no enlargement the NGX native-resolution feature is the appropriate configuration.
@@ -101,12 +103,12 @@ internal sealed partial class Renderer
             neuralSize=target;
             neuralMode=effective;
             configuredQuality=quality; configuredModel=model;
-            if(mode=="dlss-nr") neuralRendering=new NeuralRendering(Device,srcSize.Width,srcSize.Height);
+            if(nr) neuralRendering=new NeuralRendering(Device,srcSize.Width,srcSize.Height,mode=="open-nr");
             var format=HdrEnabled ? Format.R16G16B16A16_Float : Format.R8G8B8A8_UNorm;
             neuralCurrent=new GpuImage(Device,target.Width,target.Height,format,true,true);
             neuralPrevious=new GpuImage(Device,target.Width,target.Height,format,true,true);
             // RTX Video SDK 1.1 accepts 8-bit video. HDR uses its result as a luminance detail guide.
-            var vendorFormat=mode=="rtxvideo" ? Format.R8G8B8A8_UNorm : mode=="dlss-nr" ? Format.R16G16B16A16_Float : format;
+            var vendorFormat=mode=="rtxvideo" ? Format.R8G8B8A8_UNorm : nr ? Format.R16G16B16A16_Float : format;
             rgba=new GpuImage(Device,srcSize.Width,srcSize.Height,vendorFormat,true);
             if(mode=="rtxvideo") {
                 if(video==null) video=new RtxVideo(Device.NativePointer);
@@ -156,7 +158,8 @@ internal sealed partial class Renderer
                 curr.Read,1,ngxOutput.Read,rgba.Read);
             if(ngx!=null || temporalFsr!=null || neuralRendering!=null) Draw("PreserveNgxStrokes",neuralCurrent.Write,new Rectangle(Point.Empty,neuralSize),
                 ngxOutput.Read,HdrEnabled ? 1 : 0,rgba.Read,strokeMask.Read);
-            if(temporalFsr==null) VendorEvaluations++; else FsrEvaluations++;
+            if(mode=="open-nr") OpenNrEvaluations++;
+            else if(temporalFsr==null) VendorEvaluations++; else FsrEvaluations++;
             evaluatedFrame=Captured;
             resetHistory=false;
         }

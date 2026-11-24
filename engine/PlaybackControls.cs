@@ -14,6 +14,9 @@ internal sealed class PlaybackControls : Form
 {
     internal static readonly string[] Modes=PictureLabels.Ids;
     static readonly string[] Names=PictureLabels.Modes;
+    static readonly int nrIndex=Array.IndexOf(Modes,"dlss-nr");
+    readonly CheckBox openNr=new CheckBox {Text="Use open source",ForeColor=TextColor,BackColor=Surface,Enabled=false};
+    Dictionary<string,object> capabilities;
     static readonly Color Surface=Color.FromArgb(19,30,35), Idle=Color.FromArgb(31,45,51),
         Edge=Color.FromArgb(63,81,87), TextColor=Color.FromArgb(235,244,243),
         Muted=Color.FromArgb(174,193,195), Mint=Color.FromArgb(146,232,209);
@@ -74,7 +77,8 @@ internal sealed class PlaybackControls : Form
         tips.SetToolTip(videoTime,"Video timing · 0–100 ms"); tips.SetToolTip(audioTime,"Audio queue · 0–100 ms");
         Add(Label("Picture",TextColor),16,255,185,20,14);
         for(int i=0;i<modes.Length;i++) {
-            int index=i; var button=MakeButton(Names[i],delegate { Request(Modes[index],-1); });
+            if(Modes[i]=="open-nr") continue;
+            int index=i; var button=MakeButton(Names[i],delegate { Request(index==nrIndex && openNr.Checked ? "open-nr" : Modes[index],-1); });
             button.AccessibleName="Picture: "+Names[i];
             if(Modes[i]=="nis") {
                 button.Enabled=false;
@@ -82,17 +86,24 @@ internal sealed class PlaybackControls : Form
             }
             Add(button,16+(i%3)*110,283+(i/3)*35,104,30,13); modes[i]=button;
         }
-        Add(Label("Frame generation",TextColor),16,396,220,20,14);
+        openNr.Checked=mode=="open-nr";
+        Add(openNr,126,385,170,24,12);
+        openNr.Click+=delegate {
+            RefreshNr();
+            if(PictureLabels.IsNeuralRendering(selection))
+                Request(modes[nrIndex].Enabled ? (openNr.Checked ? "open-nr" : "dlss-nr") : "original",-1);
+        };
+        Add(Label("Frame generation",TextColor),16,415,220,20,14);
         for(int i=0;i<4;i++) {
             int factor=i+1; var button=MakeButton(i==0 ? "Off":factor+"×",delegate { Request(null,factor); });
             button.AccessibleName=i==0 ? "Frame generation off":"Frame generation "+factor+" times";
-            Add(button,16+i*83,423,77,30,13); factors[i]=button;
+            Add(button,16+i*83,442,77,30,13); factors[i]=button;
         }
         pin=MakeButton("Pin stats",delegate { pinned=!pinned; Mark(pin,pinned); pin.Text=pinned ? "Unpin stats":"Pin stats"; });
-        pin.AccessibleName="Pin live stats"; Add(pin,16,467,105,29,12);
+        pin.AccessibleName="Pin live stats"; Add(pin,16,486,105,29,12);
         var hint=Label("Ctrl+Alt+O   ·   Show or hide",Muted); hint.TextAlign=ContentAlignment.MiddleRight;
-        Add(hint,128,467,212,29,12);
-        notice=Label("",Color.FromArgb(255,214,149)); notice.AutoEllipsis=true; Add(notice,16,500,324,43,12);
+        Add(hint,128,486,212,29,12);
+        notice=Label("",Color.FromArgb(255,214,149)); notice.AutoEllipsis=true; Add(notice,16,519,324,43,12);
         Sync(mode,multiplier);
     }
     Label Metric(string caption,int x,Color color)
@@ -128,7 +139,10 @@ internal sealed class PlaybackControls : Form
     public void Sync(string mode,int factor)
     {
         selection=mode; multiplier=factor;
-        for(int i=0;i<modes.Length;i++) Mark(modes[i],Modes[i]==mode);
+        if(PictureLabels.IsNeuralRendering(mode)) openNr.Checked=mode=="open-nr";
+        for(int i=0;i<modes.Length;i++) if(modes[i]!=null)
+            Mark(modes[i],i==nrIndex ? PictureLabels.IsNeuralRendering(mode) : Modes[i]==mode);
+        RefreshNr();
         for(int i=0;i<factors.Length;i++) Mark(factors[i],i+1==factor);
     }
     public void SetNotice(string message)
@@ -143,8 +157,19 @@ internal sealed class PlaybackControls : Form
         expanded=true; panel.Visible=true; chip.Visible=false; Position();
         if(!Visible) Show();
         Activate();
-        int i=Array.IndexOf(Modes,selection); if(i>=0) modes[i].Focus();
+        int i=selection=="open-nr" ? nrIndex : Array.IndexOf(Modes,selection); if(i>=0) modes[i].Focus();
         if(!probing) { probing=true; ThreadPool.QueueUserWorkItem(delegate { ProbeCapabilities(); }); }
+    }
+    void RefreshNr()
+    {
+        if(capabilities==null) return;
+        object supported,reason;
+        string id=openNr.Checked ? "open-nr" : "dlss-nr";
+        modes[nrIndex].Enabled=capabilities.TryGetValue(id,out supported) && Equals(supported,true);
+        tips.SetToolTip(modes[nrIndex],capabilities.TryGetValue(id+"Reason",out reason) ? reason as string : "");
+        openNr.Enabled=openNr.Checked || (capabilities.TryGetValue("open-nr",out supported) && Equals(supported,true));
+        tips.SetToolTip(openNr,openNr.Enabled ? "Use the OpenDLSS-NR model" :
+            capabilities.TryGetValue("open-nrReason",out reason) ? reason as string : "OpenDLSS-NR unavailable");
     }
     void ProbeCapabilities()
     {
@@ -163,6 +188,7 @@ internal sealed class PlaybackControls : Form
                 if(IsDisposed || !IsHandleCreated) return;
                 BeginInvoke((Action)delegate {
                     if(IsDisposed) return;
+                    capabilities=values; RefreshNr();
                     object provider;
                     if(values.TryGetValue("fsrVersion",out provider)) {
                         modes[6].Text=PictureLabels.TemporalFsr(provider as string);
@@ -170,6 +196,7 @@ internal sealed class PlaybackControls : Form
                         tips.SetToolTip(modes[6],"AMD temporal upscaling · "+modes[6].Text);
                     }
                     for(int i=3;i<modes.Length;i++) {
+                        if(i==nrIndex || modes[i]==null) continue;
                         string mode=Modes[i]; object supported,reason;
                         if(!values.TryGetValue(mode,out supported) || !(supported is bool)) continue;
                         if(mode=="nis" && (bool)supported) {
@@ -225,7 +252,7 @@ internal sealed class PlaybackControls : Form
     {
         var monitor=Screen.FromHandle(player.Handle).Bounds;
         int dpi=(int)GetDpiForWindow(player.Handle); if(dpi<72) dpi=96;
-        int logicalHeight=expanded ? lastNotice.Length>0 ? 550 : 510 : pinned ? 86 : 36;
+        int logicalHeight=expanded ? lastNotice.Length>0 ? 569 : 529 : pinned ? 86 : 36;
         int logicalWidth=expanded ? 356 : pinned ? 255 : 222;
         dpi=Math.Max(48,Math.Min(dpi,Math.Min(96*(monitor.Width-4)/logicalWidth,96*(monitor.Height-4)/logicalHeight)));
         float scale=dpi/96f;

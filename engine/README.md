@@ -25,6 +25,7 @@ Choose a renderer before starting a session with `--renderer auto`, `d3d11`, `d3
 | `--mode fsr` | FidelityFX Super Resolution 1 EASU for enlargement and RCAS sharpening. Native-size input goes directly to RCAS. |
 | `--mode fsr-temporal` | AMD FSR temporal reconstruction through the AMD FSR SDK 2.4 on D3D12 or Vulkan. The active provider reports its version after context creation. |
 | `--mode dlss-nr` | Experimental native-size NVIDIA DLSS 5 neural rendering. Requires Vulkan, SDR, a supported GPU and the optional provider. The runtime must pass an image test before processing the stream. |
+| `--mode open-nr` | OpenDLSS-NR at source resolution. Direct3D 11, Direct3D 12 and Vulkan presentation use Vulkan inference on the selected GPU. Requires SDR, a compatible driver and 310.8.0 model weights. The model directory comes from the app selection (`P5CAST_OPEN_NR_MODEL`), `DLSS5VK_MODEL`, or `%LOCALAPPDATA%\P5Cast\providers\open-nr\model`, in that order. |
 | `--mode rtxvideo` | NVIDIA RTX Video Super Resolution at High quality on SDR, or HDR10 detail enhancement using a PQ luminance guide. |
 | `--dlss-quality auto\|quality\|balanced\|performance\|ultra-performance` | Select the NGX quality mode for DLSS enlargement. Auto chooses by scale ratio. Native-size processing uses DLAA. |
 | `--dlss-model auto\|k\|m\|l` | Request the driver default, DLSS 4 K or a DLSS 4.5 M/L preset. The snapshot reports the requested hint. |

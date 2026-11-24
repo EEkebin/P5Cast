@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$Version = '0.24.4',[string]$BuildDir=$PSScriptRoot)
+param([string]$Version = '0.25.0',[string]$BuildDir=$PSScriptRoot)
 $ErrorActionPreference = 'Stop'
 if ($Version -notmatch '^\d+\.\d+\.\d+(-[a-z0-9.-]+)?$') { throw 'Invalid version.' }
 $dist = Join-Path $PSScriptRoot 'dist'
@@ -16,12 +16,13 @@ try {
         Copy-Item -LiteralPath (Join-Path $sourceRoot $file) -Destination (Join-Path $bundle $file)
     }
     foreach ($file in 'sources\Get-SourceStatus.ps1','sources\Install-DlssNeural.ps1','sources\Install-Fruc.ps1',
+             'sources\Install-OpenNrModel.ps1','sources\OpenNrModelData.cs',
              'sources\Prepare-Decoder.ps1','sources\SignalRun.cs','sources\SourceTools.ps1','sources\Start-Source.ps1',
              'streaming\HostApi.cs','streaming\Relay.ps1','streaming\SunshineDisplay.cs','streaming\packages.json') {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination (Join-Path $bundle $file)
     }
     $runtimeFiles = @('CadrivectPlayer.exe','SharpDX.dll','SharpDX.Direct3D11.dll','SharpDX.DXGI.dll','SharpDX-LICENSE.txt','FSR-LICENSE.txt','NVIDIA-NIS-LICENSE.txt',
-        'P5Cast.NeuralVk.dll','NVIDIA-NEURAL-RENDERING-LICENSE.txt','Cadrivect.Ngx.dll','nvngx_dlss.dll','NVIDIA-RTX-LICENSE.txt','Cadrivect.RtxVideo.dll','nvngx_vsr.dll',
+        'P5Cast.NeuralVk.dll','P5Cast.OpenNr.dll','NVIDIA-NEURAL-RENDERING-LICENSE.txt','Cadrivect.Ngx.dll','nvngx_dlss.dll','NVIDIA-RTX-LICENSE.txt','Cadrivect.RtxVideo.dll','nvngx_vsr.dll',
         'NVIDIA_RTX_Video_SDK_License.pdf','NVIDIA-OPTICAL-FLOW-LICENSE.txt','P5Cast.Fruc.dll','P5Cast.FrucHost.exe','Cadrivect.Decoder.dll','FFmpeg-LICENSE.txt',
         'P5Cast.Fsr.dll','amd_fidelityfx_loader_dx12.dll','amd_fidelityfx_upscaler_dx12.dll','amd_fidelityfx_framegeneration_dx12.dll','AMD-FSR-LICENSE.md','AMD-FSR-NOTICES.md',
         'P5Cast.FsrVk.dll','amd_fidelityfx_loader_vk.dll','amd_fidelityfx_upscaler_vk.dll','amd_fidelityfx_framegeneration_vk.dll',
@@ -30,6 +31,15 @@ try {
         Copy-Item -LiteralPath (Join-Path $BuildDir "engine\bin\$file") -Destination (Join-Path $bundle "engine\bin\$file")
     }
     Copy-Item -Recurse -LiteralPath (Join-Path $BuildDir 'engine\bin\direct') -Destination (Join-Path $bundle 'engine\bin\direct')
+    # The open provider ships code and notices. A model is downloaded separately for each user.
+    foreach ($part in 'shaders','ptx','licenses') {
+        $source=Join-Path $BuildDir "engine\bin\open-nr\$part"
+        $target=[IO.Directory]::CreateDirectory((Join-Path $bundle "engine\bin\open-nr\$part")).FullName
+        $pattern=switch ($part) {'shaders' {'*.spv'} 'ptx' {'*.ptx'} 'licenses' {'*.txt'}}
+        $assets=@(Get-ChildItem -LiteralPath $source -File -Filter $pattern)
+        if (!$assets.Count) {throw "Missing OpenDLSS-NR $part."}
+        $assets | Copy-Item -Destination $target
+    }
     $files = @(Get-ChildItem -LiteralPath $bundle -Recurse -File | Sort-Object FullName | ForEach-Object {
         [ordered]@{path=$_.FullName.Substring($bundle.Length+1); sha256=(Get-FileHash -LiteralPath $_.FullName).Hash}
     })

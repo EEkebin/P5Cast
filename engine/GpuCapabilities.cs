@@ -26,6 +26,8 @@ internal sealed class GpuCapabilities
     string dlssReason,dlaaReason,rtxReason,flowReason;
     string neuralRenderingReason=NeuralRendering.BackendReason;
     bool neuralRuntimeDownloadAvailable;
+    string openNrReason=NeuralRendering.OpenBackendReason;
+    bool openNrModelImportAvailable;
 
     public static GpuCapabilities Probe() { return ProbeForBackend("d3d11"); }
 
@@ -59,6 +61,14 @@ internal sealed class GpuCapabilities
                             result.neuralRuntimeDownloadAvailable=true;
                         } catch(Exception error) { result.neuralRenderingReason=error.Message; }
                     }
+                    if(Renderer.HasVendorBridge(backend,"open-nr")) {
+                        try {
+                            using(var neural=new NeuralRendering(device,W,H,true)) {result.openNrReason=null;}
+                        } catch(NeuralRendering.RuntimeMissingException error) {
+                            result.openNrReason=error.Message;
+                            result.openNrModelImportAvailable=true;
+                        } catch(Exception error) { result.openNrReason=error.Message; }
+                    }
                     string unavailable="This NVIDIA effect has no native bridge for "+backend+".";
                     result.dlssReason=Renderer.HasVendorBridge(backend,"dlss") ? result.CheckVideo(device,"dlss",backend) : unavailable;
                     result.dlaaReason=Renderer.HasVendorBridge(backend,"dlaa") ? result.CheckVideo(device,"dlaa",backend) : unavailable;
@@ -76,7 +86,7 @@ internal sealed class GpuCapabilities
         catch(Exception e) { result.AllUnavailable(e.Message);result.nisReason=result.fsrReason=result.fgReason=e.Message; }
         return result;
     }
-    void AllUnavailable(string message) { dlssReason=dlaaReason=rtxReason=flowReason=neuralRenderingReason=frucReason=message;neuralRuntimeDownloadAvailable=frucRuntimeImportAvailable=false; }
+    void AllUnavailable(string message) { dlssReason=dlaaReason=rtxReason=flowReason=neuralRenderingReason=openNrReason=frucReason=message;neuralRuntimeDownloadAvailable=openNrModelImportAvailable=frucRuntimeImportAvailable=false; }
 
     // Evaluate and read one center texel to catch runtimes that accept creation but produce no picture.
     string CheckVideo(Device device,string mode,string backend)
@@ -162,6 +172,7 @@ internal sealed class GpuCapabilities
             case "dlss": return dlssReason ?? "";
             case "dlaa": return dlaaReason ?? "";
             case "dlss-nr": return neuralRenderingReason ?? "";
+            case "open-nr": return openNrReason ?? "";
             case "rtxvideo": return rtxReason ?? "";
             case "amdFrameGeneration": return fgReason ?? "";
             case "frucFrameGeneration": return frucReason ?? "";
@@ -192,7 +203,8 @@ internal sealed class GpuCapabilities
         json.Append(",\"frucRuntimeInstalled\":").Append(frucRuntimeInstalled ? "true":"false");
         json.Append(",\"frucRuntimeImportAvailable\":").Append(frucRuntimeImportAvailable ? "true":"false");
         json.Append(",\"dlssNeuralRuntimeDownloadAvailable\":").Append(neuralRuntimeDownloadAvailable ? "true":"false");
-        foreach(string id in new[]{"dlss","dlaa","dlss-nr","rtxvideo","fsr-temporal","nis","amdFrameGeneration","frucFrameGeneration","opticalFlow","nativeFrameGeneration"})
+        json.Append(",\"openNrModelImportAvailable\":").Append(openNrModelImportAvailable ? "true":"false");
+        foreach(string id in new[]{"dlss","dlaa","dlss-nr","open-nr","rtxvideo","fsr-temporal","nis","amdFrameGeneration","frucFrameGeneration","opticalFlow","nativeFrameGeneration"})
             json.Append(',').Append(Quote(id)).Append(Supports(id) ? ":true" : ":false")
                 .Append(',').Append(Quote(id+"Reason")).Append(':').Append(Quote(Reason(id)));
         json.Append(",\"presentationDrivers\":[");

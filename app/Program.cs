@@ -25,7 +25,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.24.4.0")]
+[assembly: AssemblyVersion("0.25.0.0")]
 
 namespace Cadrivect
 {
@@ -153,6 +153,11 @@ namespace Cadrivect
             meter.DialMaximumChanged+=delegate {if(window.IsLoaded) {saveDial.Stop();saveDial.Start();}};
             window.Closed+=delegate {saveDial.Stop();};
             meter.NeuralDownloadRequested+=InstallNeuralRuntime;
+            RestoreOpenNrModelDirectory(Field(saved,"openNrModelDirectory"));
+            meter.UseOpenNr=Field(saved,"useOpenNr").Equals("true",StringComparison.OrdinalIgnoreCase);
+            meter.OpenNrProviderChanged+=delegate {pictureSelectionRevision++; if(window.IsLoaded) SaveSettings();};
+            meter.OpenNrModelRequested+=delegate {SetUpOpenNrModel(false);};
+            meter.OpenNrDownloadRequested+=delegate {SetUpOpenNrModel(true);};
             meter.FrucImportRequested+=ImportFrucRuntime;
             meter.FrucSdkRequested+=delegate {
                 try {Process.Start(new ProcessStartInfo("https://developer.nvidia.com/opticalflow/download"){UseShellExecute=true});}
@@ -193,7 +198,7 @@ namespace Cadrivect
             UI<CheckBox>("ClientHdr").IsChecked=string.Equals(Field(saved,"clientHdr"),"True",StringComparison.OrdinalIgnoreCase);
             output.DropDownOpened += delegate { RefreshDisplays(SelectedDisplayName()); };
             output.SelectionChanged += delegate {
-                if(!refreshingDisplays && window.IsLoaded) MoveDashboard();
+                if(!refreshingDisplays && window.IsLoaded) {MoveDashboard(); SyncIdleColor();}
             };
             UI<ComboBox>("HdrOutput").ItemsSource=new[]{"Auto","SDR","HDR10"};
             preferredHdr=ParseIndex(saved,"hdr",0,hdrIds.Length);
@@ -401,21 +406,13 @@ namespace Cadrivect
                 meter.FrameGenerationProvider="p5cast"; factor=1; meter.Reset(mode,factor);
             }
             bool completed=false;
-            string file=Path.Combine(Path.GetTempPath(),"cadrivect-gpu-"+Guid.NewGuid().ToString("N")+".json");
             try {
-                var info=new ProcessStartInfo(Path.Combine(Program.Root,"engine","bin","CadrivectPlayer.exe"),"--capabilities --renderer "+SelectedRenderer+" --report "+Quote(file))
-                    {UseShellExecute=false,CreateNoWindow=true};
-                using(var proc=Process.Start(info))
-                using(cancellation.Register(()=>StopOwned(proc))) {
-                    if(!await Task.Run(()=>proc.WaitForExit(40000))) {StopOwned(proc); return false;}
-                    if(cancellation.IsCancellationRequested || proc.ExitCode!=0 || !File.Exists(file)) return false;
-                }
-                var gpu=json.Deserialize<Dictionary<string,object>>(File.ReadAllText(file));
+                var gpu=await ProbeGpuReport(SelectedRenderer,null,cancellation);
                 if(gpu==null || closing || generation!=gpuProbeGeneration) return false;
                 meter.SetCapabilities(gpu);
                 completed=true;
                 if(!Active && !preparing && revision==pictureSelectionRevision) {
-                    if(mode==0 && requested>=3 && Field(gpu,modeIds[requested]).Equals("true",StringComparison.OrdinalIgnoreCase))
+                    if(mode==0 && requested>=3 && meter.SupportsSelectedColor(requested) && Field(gpu,modeIds[requested]).Equals("true",StringComparison.OrdinalIgnoreCase))
                         mode=requested;
                     if(meter.ProviderAvailable(restoreProvider)) {meter.FrameGenerationProvider=restoreProvider; factor=2;}
                     meter.Reset(mode,factor);
@@ -424,9 +421,26 @@ namespace Cadrivect
             finally {
                 if(!completed && !closing && generation==gpuProbeGeneration)
                     meter.SetCapabilities(new Dictionary<string,object> {{"probeFailure","GPU support check could not finish for this graphics API."}});
-                try {File.Delete(file);} catch(IOException) {} catch(UnauthorizedAccessException) {}
             }
             return completed;
+        }
+
+        async Task<Dictionary<string,object>> ProbeGpuReport(string renderer,string modelDirectory,System.Threading.CancellationToken cancellation)
+        {
+            string file=Path.Combine(Path.GetTempPath(),"cadrivect-gpu-"+Guid.NewGuid().ToString("N")+".json");
+            try {
+                var info=new ProcessStartInfo(Path.Combine(Program.Root,"engine","bin","CadrivectPlayer.exe"),"--capabilities --renderer "+renderer+" --report "+Quote(file))
+                    {UseShellExecute=false,CreateNoWindow=true};
+                if(modelDirectory!=null) info.EnvironmentVariables["P5CAST_OPEN_NR_MODEL"]=modelDirectory;
+                using(var proc=Process.Start(info))
+                using(cancellation.Register(()=>StopOwned(proc))) {
+                    if(!await Task.Run(()=>proc.WaitForExit(40000))) {StopOwned(proc); return null;}
+                    if(cancellation.IsCancellationRequested || proc.ExitCode!=0 || !File.Exists(file)) return null;
+                }
+                return json.Deserialize<Dictionary<string,object>>(File.ReadAllText(file));
+            } finally {
+                try {File.Delete(file);} catch(IOException) {} catch(UnauthorizedAccessException) {}
+            }
         }
 
         string SelectedIP() { return Convert.ToString(UI<ComboBox>("BindIP").SelectedItem); }
@@ -457,6 +471,7 @@ namespace Cadrivect
                 picker.ItemsSource=targets;
                 picker.SelectedItem=targets.FirstOrDefault(d=>d.DeviceName==requested) ?? targets.FirstOrDefault(d=>d.Primary) ?? targets.FirstOrDefault();
             } finally { refreshingDisplays=false; }
+            SyncIdleColor();
         }
         public sealed class Peer
         {
@@ -655,6 +670,7 @@ namespace Cadrivect
                     discordGame=UI<CheckBox>("ShareGame").IsChecked==true,discordProject=UI<CheckBox>("ShareProject").IsChecked==true,stopChoices=stopChoices,directMbps=DirectKbps()/1000, relayMbps=networkRates[UI<ComboBox>("NetworkBitrate").SelectedIndex],audioLayout=UI<ComboBox>("NetworkAudio").SelectedIndex,pictureDefaults=1, mode=mode, multiplier=factor-1, frameGenerationProvider=meter.FrameGenerationProvider,
                     fpsDialMaximum=meter.DialMaximum,streamVolume=volumeLevel,streamMuted=volumeMuted,setupVersion=setupVersion,consoleMac=pendingSetupConsole ?? (console==null?"":console.Mac),consoleAddresses=consoleAddresses,directStreamHeight=DirectStreamHeight(),directFps=UI<ComboBox>("DirectFps").SelectedIndex,
                     display=SelectedDisplayName(), uiScale=PreferredScalePercent,theme=themeId, resolution=UI<ComboBox>("RenderResolution").SelectedIndex,hdr=preferredHdr,renderer=SelectedRenderer,
+                    useOpenNr=meter.UseOpenNr,openNrModelDirectory=openNrModelDirectory,
                     maximized=(fullscreen?previousWindowState:window.WindowState)==WindowState.Maximized,
                     clientHdr=UI<CheckBox>("ClientHdr").IsChecked==true,hostDisplay=hostTarget==null ? "" : hostTarget.DeviceName,
                     address=UI<TextBox>("HostAddress").Text.Trim(), bind=SelectedIP(), source=source, page=page, quality=UI<ComboBox>("Quality").SelectedIndex };

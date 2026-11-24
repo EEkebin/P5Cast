@@ -15,7 +15,7 @@ namespace Cadrivect
             "sourceFps submittedFps decodeMs lastPcSubmitMs requestedVideoKbps bitrateMbps videoFramesLost slowVideoHandoffs " +
             "audioQueueMs audioTargetMs audioUnderruns audioConcealments audioQueueTrims audioFrameGapMaxMs audioCallbackGapMaxMs " +
             "multiplier targetPresentedFps generatedFps displayRefreshHz inputWidth inputHeight outputWidth outputHeight " +
-            "displayedWidth displayedHeight nvidiaEvaluations nisEvaluations fsrEvaluations frucEvaluations frucMidpoints").Split(' ');
+            "displayedWidth displayedHeight nvidiaEvaluations openNrEvaluations nisEvaluations fsrEvaluations frucEvaluations frucMidpoints").Split(' ');
         // Only renderer identifiers belong in a trace. Unknown values and free-form messages stay out.
         static readonly string[] providers={"p5cast","amd","fruc"};
         static readonly KeyValuePair<string,string[]>[] identifiers={

@@ -1,0 +1,261 @@
+--- a/vk_context.h
++++ b/vk_context.h
+@@ -5,6 +5,7 @@
+ #include <volk.h>
+ 
+ #include <array>
++#include <map>
+ #include <cstdint>
+ #include <cstdio>
+ #include <stdexcept>
+@@ -168,6 +169,10 @@
+   bool owned_ = true;
+   std::string deviceName_;
+   void initCommon();   // properties, memory types, command pool, layouts, pools, staging
++  // Some upstream call sites upload before the receiving model/activation takes ownership.
++  // Retain handles for cleanup if a constructor or upload fails in that interval.
++  std::map<VkBuffer, Buffer> liveBuffers_;
++  void destroyCommon();
+   Buffer dummy_;
+   Buffer staging_;
+   std::vector<VkShaderModule> modules_;
+--- a/vk_context.cpp
++++ b/vk_context.cpp
+@@ -4,6 +4,7 @@
+ #include <atomic>
+ #include <cstring>
+ #include <fstream>
++#include <filesystem>
+ 
+ namespace vk {
+ 
+@@ -178,7 +179,12 @@
+   timestampPeriod_ = properties.properties.limits.timestampPeriod;
+   maxSharedMemory_ = properties.properties.limits.maxComputeSharedMemorySize;
+   vkGetPhysicalDeviceMemoryProperties(physical_, &memoryProperties_);
+-  initCommon();
++  try {
++    initCommon();
++  } catch (...) {
++    destroyCommon();
++    throw;
++  }
+ }
+ 
+ DeviceRequirements::DeviceRequirements() {
+@@ -277,7 +283,17 @@
+ 
+ Context::~Context() {
+   if (!device_) return;
+-  vkDeviceWaitIdle(device_);
++  // The adopter synchronizes its queue before releasing this context.
++  if (owned_) vkDeviceWaitIdle(device_);
++  destroyCommon();
++  if (owned_) {
++    vkDestroyDevice(device_, nullptr);
++    if (messenger_) vkDestroyDebugUtilsMessengerEXT(instance_, messenger_, nullptr);
++    vkDestroyInstance(instance_, nullptr);
++  }
++}
++
++void Context::destroyCommon() {
+   for (VkShaderModule module : modules_) vkDestroyShaderModule(device_, module, nullptr);
+   destroyBuffer(dummy_);
+   destroyBuffer(staging_);
+@@ -285,10 +301,9 @@
+   vkDestroyPipelineLayout(device_, pipelineLayout_, nullptr);
+   vkDestroyDescriptorSetLayout(device_, setLayout_, nullptr);
+   vkDestroyCommandPool(device_, commandPool_, nullptr);
+-  if (owned_) {
+-    vkDestroyDevice(device_, nullptr);
+-    if (messenger_) vkDestroyDebugUtilsMessengerEXT(instance_, messenger_, nullptr);
+-    vkDestroyInstance(instance_, nullptr);
++  while (!liveBuffers_.empty()) {
++    Buffer orphan = liveBuffers_.begin()->second;
++    destroyBuffer(orphan);
+   }
+ }
+ 
+@@ -312,24 +327,31 @@
+                VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | extra;
+   info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+   VK_CHECK(vkCreateBuffer(device_, &info, nullptr, &result.buffer));
+-  VkMemoryRequirements requirements;
+-  vkGetBufferMemoryRequirements(device_, result.buffer, &requirements);
+-  VkMemoryAllocateFlagsInfo allocateFlags{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO};
+-  allocateFlags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+-  VkMemoryAllocateInfo allocateInfo{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+-  allocateInfo.pNext = &allocateFlags;
+-  allocateInfo.allocationSize = requirements.size;
+-  allocateInfo.memoryTypeIndex = findMemoryType(
+-      requirements.memoryTypeBits,
+-      hostVisible ? (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+-                  : VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+-  VK_CHECK(vkAllocateMemory(device_, &allocateInfo, nullptr, &result.memory));
+-  VK_CHECK(vkBindBufferMemory(device_, result.buffer, result.memory, 0));
+-  if (hostVisible) VK_CHECK(vkMapMemory(device_, result.memory, 0, VK_WHOLE_SIZE, 0, &result.mapped));
++  try {
++    VkMemoryRequirements requirements;
++    vkGetBufferMemoryRequirements(device_, result.buffer, &requirements);
++    VkMemoryAllocateFlagsInfo allocateFlags{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO};
++    allocateFlags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
++    VkMemoryAllocateInfo allocateInfo{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
++    allocateInfo.pNext = &allocateFlags;
++    allocateInfo.allocationSize = requirements.size;
++    allocateInfo.memoryTypeIndex = findMemoryType(
++        requirements.memoryTypeBits,
++        hostVisible ? (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
++                    : VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
++    VK_CHECK(vkAllocateMemory(device_, &allocateInfo, nullptr, &result.memory));
++    VK_CHECK(vkBindBufferMemory(device_, result.buffer, result.memory, 0));
++    if (hostVisible) VK_CHECK(vkMapMemory(device_, result.memory, 0, VK_WHOLE_SIZE, 0, &result.mapped));
++    liveBuffers_.emplace(result.buffer, result);
++  } catch (...) {
++    destroyBuffer(result);
++    throw;
++  }
+   return result;
+ }
+ 
+ void Context::destroyBuffer(Buffer& buffer) {
++  liveBuffers_.erase(buffer.buffer);
+   if (buffer.mapped) vkUnmapMemory(device_, buffer.memory);
+   if (buffer.buffer) vkDestroyBuffer(device_, buffer.buffer, nullptr);
+   if (buffer.memory) vkFreeMemory(device_, buffer.memory, nullptr);
+@@ -374,7 +396,7 @@
+ }
+ 
+ VkShaderModule Context::loadShaderModule(const std::string& spvPath) {
+-  std::ifstream file(spvPath, std::ios::binary | std::ios::ate);
++  std::ifstream file(std::filesystem::u8path(spvPath), std::ios::binary | std::ios::ate);
+   if (!file) throw std::runtime_error("missing shader " + spvPath);
+   std::streamsize size = file.tellg();
+   file.seekg(0);
+@@ -385,7 +407,8 @@
+   info.pCode = words.data();
+   VkShaderModule module;
+   VK_CHECK(vkCreateShaderModule(device_, &info, nullptr, &module));
+-  modules_.push_back(module);
++  try { modules_.push_back(module); }
++  catch (...) { vkDestroyShaderModule(device_, module, nullptr); throw; }
+   return module;
+ }
+ 
+--- a/kernels.cpp
++++ b/kernels.cpp
+@@ -1,6 +1,7 @@
+ #include "kernels.h"
+ 
+ #include <fstream>
++#include <filesystem>
+ #include <sstream>
+ 
+ #include <cstdlib>
+@@ -40,7 +41,7 @@
+ }  // namespace
+ 
+ Kernels::Kernels(vk::Context& context, const std::string& shaderDirectory) : context_(context) {
+-  ptxDirectory_ = getenv("DLSS5VK_PTX_DIR") ? getenv("DLSS5VK_PTX_DIR") : shaderDirectory + "/../ptx";
++  ptxDirectory_ = shaderDirectory + "/../ptx";
+   for (const char* name : {"gemm_fp8", "gemm_f16", "ops", "window_normalize", "window_attend", "global_normalize",
+                            "global_attend", "preprocess", "fused_block32", "qkv_attention", "gemm_mlp", "global_attention", "gemm_reduce"}) {
+     modules_[name] = context_.loadShaderModule(shaderDirectory + "/" + name + ".spv");
+@@ -71,9 +72,9 @@
+   for (uint32_t value : constants.data) key += ":" + std::to_string(value);
+   auto it = pipelines_.find(key);
+   if (it != pipelines_.end()) return it->second.pipeline;
+-  vk::Pipeline created = context_.createComputePipeline(modules_.at(shader), constants, shader, requiredSubgroupSize);
+-  pipelines_[key] = created;
+-  return created.pipeline;
++  auto& slot = pipelines_[key];
++  slot = context_.createComputePipeline(modules_.at(shader), constants, shader, requiredSubgroupSize);
++  return slot.pipeline;
+ }
+ 
+ void Kernels::beginProfile(VkCommandBuffer commands, uint32_t maxDispatches) {
+@@ -254,7 +255,7 @@
+     const uint32_t vflags = (a.residual ? 1u : 0u) | (a.silu ? 2u : 0u) | ((a.quantize || a.dualOutput) ? 4u : 0u) | (a.quantize ? 0u : 8u);
+     const std::string entry = "gemmv_e4m3_K" + std::to_string(a.K) + "_f" + std::to_string(vflags) + "_s" + std::to_string(vsplits) +
+                               (bm != 192 ? "_m" + std::to_string(bm) : "");
+-    std::ifstream probe(ptxDirectory_ + "/" + entry + ".ptx");
++    std::ifstream probe(std::filesystem::u8path(ptxDirectory_ + "/" + entry + ".ptx"));
+     const VkDeviceSize partialBytes = (VkDeviceSize)vsplits * rowGroups * colGroups * warps * 48 * 128;   // fragment-order slices
+     if (probe.good() && rowGroups <= 65535) {
+       PtxKernel& kernel = ptxKernel(entry + ".ptx", entry);
+@@ -303,7 +304,7 @@
+     const uint32_t gflags = (a.residual ? 1u : 0u) | (tsplits == 1 ? outFlags : 0u);
+     const std::string entry = "gemmt_e4m3_K" + std::to_string(a.K) + "_f" + std::to_string(gflags) + "_p" + std::to_string(partSteps) +
+                               "_s" + std::to_string(tsplits);
+-    std::ifstream probe(ptxDirectory_ + "/" + entry + ".ptx");
++    std::ifstream probe(std::filesystem::u8path(ptxDirectory_ + "/" + entry + ".ptx"));
+     if (probe.good()) {
+       check(!a.chainWaitRows && !a.chainWaitBands && !a.chainSignal && !a.chained,
+             "the tall-tile PTX GEMM does not implement counter chaining");
+@@ -708,16 +709,16 @@
+ Kernels::PtxKernel& Kernels::ptxKernel(const std::string& file, const std::string& entry) {
+   auto it = ptxKernels_.find(file);
+   if (it != ptxKernels_.end()) return it->second;
+-  std::ifstream in(ptxDirectory_ + "/" + file);
++  std::ifstream in(std::filesystem::u8path(ptxDirectory_ + "/" + file));
+   if (!in) throw std::runtime_error("cannot read PTX kernel " + ptxDirectory_ + "/" + file);
+   std::stringstream buffer; buffer << in.rdbuf();
+-  PtxKernel kernel;
++  PtxKernel& kernel = ptxKernels_[file];
+   const std::string text = buffer.str();
+   if (size_t at = text.find("// dynamic_shared "); at != std::string::npos) kernel.dynamicShared = (uint32_t)atoi(text.c_str() + at + 18);
+   if (size_t at = text.find("// threads "); at != std::string::npos) kernel.threads = (uint32_t)atoi(text.c_str() + at + 11);
+   kernel.module = context_.createCudaModule(text);
+   kernel.function = context_.createCudaFunction(kernel.module, entry.c_str());
+-  return ptxKernels_[file] = kernel;
++  return kernel;
+ }
+ 
+ std::vector<uint32_t> Kernels::mlpHiddenPermutation(uint32_t hidden) {
+@@ -922,8 +923,8 @@
+   static const int mode = getenv("DLSS5VK_ATTN_STREAM") ? atoi(getenv("DLSS5VK_ATTN_STREAM")) : -1;
+   if (!ptxGlobalAttentionEnabled() || mode == 0) return false;
+   if (mode < 0 && paddedTokens <= 256) return false;
+-  static const bool available = std::ifstream(ptxDirectory_ + "/global_attention_stream_e4m3.ptx").good() &&
+-                                std::ifstream(ptxDirectory_ + "/global_normalize_e4m3.ptx").good();
++  static const bool available = std::ifstream(std::filesystem::u8path(ptxDirectory_ + "/global_attention_stream_e4m3.ptx")).good() &&
++                                std::ifstream(std::filesystem::u8path(ptxDirectory_ + "/global_normalize_e4m3.ptx")).good();
+   return available;
+ }
+ 
+--- a/nr_model.cpp
++++ b/nr_model.cpp
+@@ -2,6 +2,7 @@
+ 
+ #include <cassert>
+ #include <fstream>
++#include <filesystem>
+ #include <sstream>
+ 
+ #include "json.h"
+@@ -35,7 +36,7 @@
+ 
+ namespace {
+ std::string readText(const std::string& path) {
+-  std::ifstream file(path, std::ios::binary);
++  std::ifstream file(std::filesystem::u8path(path), std::ios::binary);
+   if (!file) throw std::runtime_error("cannot read " + path);
+   std::stringstream stream;
+   stream << file.rdbuf();
+@@ -43,7 +44,7 @@
+ }
+ 
+ std::vector<uint8_t> readBinary(const std::string& path) {
+-  std::ifstream file(path, std::ios::binary | std::ios::ate);
++  std::ifstream file(std::filesystem::u8path(path), std::ios::binary | std::ios::ate);
+   if (!file) throw std::runtime_error("cannot read " + path);
+   std::streamsize size = file.tellg();
+   file.seekg(0);
+@@ -83,7 +84,7 @@
+       throw std::runtime_error("stage size mismatch: " + loaded.id);
+     if (verifyHashes) {
+       std::string digest = sha256Hex(loaded.bytes.data(), loaded.bytes.size());
+-      if (digest != stage["sha256"].str()) throw std::runtime_error("stage SHA-256 mismatch: " + loaded.id);
++      if (_stricmp(digest.c_str(), stage["sha256"].str().c_str()) != 0) throw std::runtime_error("stage SHA-256 mismatch: " + loaded.id);
+     }
+     stages_.push_back(std::move(loaded));
+   }

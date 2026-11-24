@@ -11,6 +11,7 @@ if($PSVersionTable.PSEdition -eq 'Core' -or [threading.thread]::CurrentThread.Ap
 $id='P5Cast-settings-'+[guid]::NewGuid().ToString('N')
 $tmp=Join-Path ([IO.Path]::GetTempPath()) $id
 $oldLocal=$env:LOCALAPPDATA
+$oldOpenNrModel=$env:P5CAST_OPEN_NR_MODEL
 try {
     $env:LOCALAPPDATA=$tmp
     [void][IO.Directory]::CreateDirectory($tmp)
@@ -110,6 +111,33 @@ try {
     Require ($pictureButtons[4].Parent -eq $pictureButtons[5].Parent -and $pictureButtons[5].Parent -eq $pictureButtons[7].Parent) 'The DLSS family shares a group'
     $pictureGroup=$pictureButtons[0].GroupName
     Require ($pictureButtons.Count -eq 9 -and $pictureGroup -and @($pictureButtons | Where-Object {$_.GroupName -ne $pictureGroup}).Count -eq 0) 'Every picture method belongs to the same single-choice radio group'
+    (Widget HdrOutput).SelectedItem='SDR'
+    $openToggle=$meter.GetType().GetField('useOpenNr',$flags).GetValue($meter)
+    $openSetup=$meter.GetType().GetField('openNrSetup',$flags).GetValue($meter)
+    $openStatus=$meter.GetType().GetField('openNrStatus',$flags).GetValue($meter)
+    $openDownload=$meter.GetType().GetField('openNrDownload',$flags).GetValue($meter)
+    $readMode={ $type.GetField('mode',$flags).GetValue($dash) }
+    Require (!$openToggle.IsChecked -and $openSetup.Visibility -eq 'Collapsed') 'The NVIDIA neural provider is the default'
+    $pictureButtons[1].IsChecked=$true
+    $openToggle.IsChecked=$true
+    Require ((&$readMode) -eq 1 -and $openSetup.Visibility -eq 'Visible') 'Selecting an NR implementation preserves Sharpen'
+    $caps['open-nrReason']='Choose a compatible model.'; $caps['openNrModelImportAvailable']=$true
+    $meter.SetCapabilities($caps)
+    Require (!$pictureButtons[7].IsEnabled -and $openDownload.Visibility -eq 'Visible' -and $openStatus.Text -eq $caps['open-nrReason']) 'A missing model explains eligibility and offers setup'
+    $caps['dlss-nr']=$false; $caps['open-nr']=$true; $caps['openNrModelImportAvailable']=$false
+    $meter.SetCapabilities($caps); $pictureButtons[7].IsChecked=$true
+    Require ($pictureButtons[7].IsEnabled -and (&$readMode) -eq 9 -and @($pictureButtons|Where-Object IsChecked).Count -eq 1) 'A compatible open provider uses the single DLSS 5 NR row independently of NVIDIA eligibility'
+    $openToggle.IsChecked=$false
+    Require ((&$readMode) -eq 0 -and $pictureButtons[0].IsChecked -and !$pictureButtons[7].IsEnabled) 'Switching to unavailable NVIDIA NR safely restores Original'
+    $caps['dlss-nr']=$true; $meter.SetCapabilities($caps); $pictureButtons[7].IsChecked=$true
+    $openToggle.IsChecked=$true
+    Require ((&$readMode) -eq 9 -and $pictureButtons[7].IsChecked) 'Changing provider sends the alternate mode when NR was active'
+    (Widget HdrOutput).SelectedItem='HDR10'
+    Require ((&$readMode) -eq 0 -and !$pictureButtons[7].IsEnabled -and $openStatus.Text -like '*SDR*') 'HDR masks OpenDLSS-NR before connection and releases the active choice'
+    (Widget HdrOutput).SelectedItem='SDR'
+    $pictureButtons[7].IsChecked=$true
+    $openToggle.IsChecked=$false
+    Require ((&$readMode) -eq 7 -and $pictureButtons[7].IsChecked) 'Returning to NVIDIA keeps NR selected'
     foreach($index in 1,2,7,0) {
         $pictureButtons[$index].IsChecked=$true
         Require ($pictureButtons[$index].IsChecked -and @($pictureButtons | Where-Object {$_.IsChecked}).Count -eq 1) 'Selecting a picture method clears the previous selection across categories'
@@ -242,6 +270,9 @@ try {
     Set-Content -LiteralPath $themeFile -Value '{"base":"ember","Source":"#00EE88"}'
     Click ReloadTheme
     $scale.Value=355
+    $openToggle.IsChecked=$true
+    $modelPath=Join-Path $tmp 'local model'
+    State openNrModelDirectory $modelPath
     $null=$type.GetMethod('SaveSettings',[Reflection.BindingFlags]'Instance,NonPublic').Invoke($dash,@())
     $preferences=Get-Content (Join-Path $tmp 'LumaRelay\dashboard.json') -Raw|ConvertFrom-Json
     Require ($preferences.theme -eq 'custom') 'Custom selection persists with dashboard preferences'
@@ -253,6 +284,10 @@ try {
     }
     $themeWindow=ReopenTheme
     $restoredFpsMeter=$themeWindow.FindName('MeterHost').Child
+    Require ($preferences.useOpenNr -and $preferences.openNrModelDirectory -eq $modelPath -and
+        $restoredFpsMeter.GetType().GetField('useOpenNr',$flags).GetValue($restoredFpsMeter).IsChecked -and
+        $env:P5CAST_OPEN_NR_MODEL -eq $modelPath) 'The implementation choice and user model folder survive reopening independently of the active effect'
+    $openToggle.IsChecked=$false
     Require ($preferences.fpsDialMaximum -eq 355 -and $restoredFpsMeter.GetType().GetField('dialScale','Instance,NonPublic').GetValue($restoredFpsMeter).Value -eq 355) 'Dial maximum survives closing and reopening the app'
     $scale.Value=240
     Require ($themeWindow.FindName('ColorTheme').SelectedItem -eq 'Custom JSON' -and $themeWindow.Background.Color.ToString() -eq '#FF211A1B') 'Reopening loads the saved custom file independently'
@@ -491,6 +526,7 @@ if($Action -eq 'InstallHost'){Start-Sleep -Milliseconds 200}
     'Passed startup failure recovery, bounded status history, grouped controls, bitrate defaults, Stop and close prompts, and per-console preferences. No console session opened.'
 } finally {
     $env:LOCALAPPDATA=$oldLocal
+    $env:P5CAST_OPEN_NR_MODEL=$oldOpenNrModel
     if([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($tmp)) -eq [IO.Path]::GetTempPath().TrimEnd('\') -and (Split-Path $tmp -Leaf) -eq $id -and (Test-Path -LiteralPath $tmp)) {
         Remove-Item -LiteralPath $tmp -Recurse -Force
     }

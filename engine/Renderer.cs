@@ -173,6 +173,7 @@ internal sealed partial class Renderer : IDisposable
     internal static bool HasVendorBridge(string backend,string mode)
     {
         if(mode=="dlss-nr") return backend=="vulkan";
+        if(mode=="open-nr") return backend=="d3d11" || backend=="d3d12" || backend=="vulkan";
         if(mode=="fsr-temporal") return backend=="d3d12" || backend=="vulkan";
         return backend=="d3d11" || backend=="d3d12";
     }
@@ -230,7 +231,7 @@ internal sealed partial class Renderer : IDisposable
         {
             // WGC and DirectVideo will deliver the corresponding input format on the next frame.
             ReleaseSource(); srcSize=Size.Empty; ResetFrameHistory(); HdrEnabled=hdr;
-            if(failedMode=="dlss-nr") {failedMode=null;EffectNotice="";}
+            if(PictureLabels.IsNeuralRendering(failedMode)) {failedMode=null;EffectNotice="";}
         }
     }
     bool ConfigurePortableDisplay(Size window,bool hdr,bool allowSdr,bool displayChanged)
@@ -440,7 +441,7 @@ internal sealed partial class Renderer : IDisposable
         context.PixelShader.SetShaderResources(0,unbind);
         context.OutputMerger.ResetTargets();
     }
-    internal static bool IsVendor(string mode) { return mode=="fsr-temporal" || mode=="dlss" || mode=="dlaa" || mode=="rtxvideo" || mode=="dlss-nr"; }
+    internal static bool IsVendor(string mode) { return mode=="fsr-temporal" || mode=="dlss" || mode=="dlaa" || mode=="rtxvideo" || PictureLabels.IsNeuralRendering(mode); }
     static bool IsEffectFailure(Exception error)
     {
         var dx=error as SharpDXException;
@@ -461,8 +462,8 @@ internal sealed partial class Renderer : IDisposable
     {
         if(!IsVendor(mode) && mode!="original" && mode!="sharp" && mode!="fsr" && mode!="nis") throw new ArgumentException("Unknown picture mode.");
         if(mode=="nis" && !NisScaler.SupportsBackend(Backend)) throw new InvalidOperationException(NisScaler.BackendReason);
-        if(mode=="dlss-nr" && HdrEnabled) throw new InvalidOperationException(NeuralRendering.HdrReason);
-        if(mode==pictureMode && failedMode==null) return;
+        if(PictureLabels.IsNeuralRendering(mode) && HdrEnabled) throw new InvalidOperationException(NeuralRendering.HdrReason);
+        if(mode==pictureMode && failedMode==null && !(mode=="open-nr" && neuralRendering!=null && neuralRendering.OpenModelChanged)) return;
         // Verify NIS at the current stream and target dimensions before releasing a working effect.
         if(mode=="nis" && curr!=null) try { EvaluateNis(curr.Read,1,ProcessingSize(mode)); }
         catch(Exception error) {
@@ -572,7 +573,7 @@ internal sealed partial class Renderer : IDisposable
             }
             DrawFinal("Rcas",source,phase,viewport);
         }
-        else if((mode=="dlss" || mode=="dlaa" || mode=="dlss-nr" || mode=="fsr-temporal") && neuralSize!=viewport.Size)
+        else if((mode=="dlss" || mode=="dlaa" || PictureLabels.IsNeuralRendering(mode) || mode=="fsr-temporal") && neuralSize!=viewport.Size)
             Draw("FitNgxFrame",display,viewport,source,HdrEnabled ? 1 : 0,finishPrevious && havePriorEnhanced ? prev.Read : curr.Read);
         else DrawFinal(mode=="sharp" ? "Sharp":"Original",source,phase,viewport,null,null,HdrEnabled && vendor);
         return Present(samplePixel,holdOriginal);

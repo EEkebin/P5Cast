@@ -1,0 +1,2 @@
+# Unified diff context lines keep their leading space, including on empty source lines.
+engine/open-nr/upstream.patch text eol=lf whitespace=-blank-at-eol

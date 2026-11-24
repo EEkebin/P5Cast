@@ -591,11 +591,12 @@ internal static class Player
                +",\"activeFrameGenerationVersion\":"+JsonString(renderer.ActiveFrameGenerationVersion)
                +",\"activeFrameGenerationProvider\":"+JsonString(renderer.ActiveFrameGenerationProvider)
                +",\"activeNvidiaEffect\":"+JsonString(renderer.ActiveEffect)+",\"nvidiaEvaluations\":"+renderer.VendorEvaluations
+               +",\"openNrEvaluations\":"+renderer.OpenNrEvaluations
                +",\"frucEvaluations\":"+renderer.FrucEvaluations+",\"frucMidpoints\":"+renderer.FrucMidpoints
                +",\"activeNisFilter\":"+JsonString(renderer.ActiveNisFilter)+",\"nisEvaluations\":"+renderer.NisEvaluations
                +",\"fsrVersion\":"+JsonString(renderer.ActiveFsrVersion)+",\"fsrEvaluations\":"+renderer.FsrEvaluations
                +",\"dlssModelHint\":"+JsonString(renderer.DlssModelHint)+",\"dlssQuality\":"+JsonString(renderer.DlssQuality)+",\"activeDlssQuality\":"+JsonString(renderer.ActiveDlssQuality)
-               +",\"renderer\":"+JsonString(renderer.Backend)+",\"processingRenderer\":"+JsonString(renderer.Backend)+",\"inputWidth\":"+input.Width+",\"inputHeight\":"+input.Height+",\"targetFps\":"+Number(targetFps==0 ? -1:targetFps)
+               +",\"renderer\":"+JsonString(renderer.Backend)+",\"processingRenderer\":"+JsonString(renderer.EffectivePictureMode=="open-nr" ? "vulkan" : renderer.Backend)+",\"inputWidth\":"+input.Width+",\"inputHeight\":"+input.Height+",\"targetFps\":"+Number(targetFps==0 ? -1:targetFps)
                +",\"targetPresentedFps\":"+Number(targetFps==0 ? -1:targetFps*factor)+",\"lastPcSubmitMs\":"+Number(age)
                +",\"sourceKind\":"+JsonString(demo ? "demo":direct==null ? "window":"direct")
                +",\"audioQueueMs\":"+Number(audio==null ? -1:audio.QueueMs)+",\"audioTargetMs\":"+Number(audio==null ? -1:audio.TargetMs)

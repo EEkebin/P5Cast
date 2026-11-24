@@ -60,6 +60,7 @@ Copy-Item -LiteralPath "$PSScriptRoot\third_party\nis\LICENSE.txt" -Destination 
 & "$PSScriptRoot\vulkan\Build.ps1" -OutDir $OutDir
 & "$PSScriptRoot\nvidia\Build.ps1" -OutDir $OutDir
 & "$PSScriptRoot\nvidia\neural\Build.ps1" -OutDir $OutDir
+& "$PSScriptRoot\open-nr\Build.ps1" -OutDir $OutDir
 & "$PSScriptRoot\rtxvideo\Build.ps1" -OutDir $OutDir
 & "$PSScriptRoot\direct\Build.ps1" -OutDir $OutDir
 & "$PSScriptRoot\presentation\Build.ps1" -OutDir $OutDir

@@ -18,6 +18,7 @@ namespace Cadrivect
     {
         static readonly string[] ModeIds=PictureLabels.Ids;
         static readonly string[] ModeLabels=PictureLabels.Modes;
+        static readonly int NeuralMode=Array.IndexOf(ModeIds,"dlss-nr"),OpenNeuralMode=Array.IndexOf(ModeIds,"open-nr");
         static readonly string[] Descriptions={"Display the source picture.","Sharpen edges at the source resolution.","AMD FSR 1 enlarges and sharpens each decoded frame independently.",
             "NVIDIA RTX Video Super Resolution for SDR and HDR10 playback.","Experimental DLSS with motion estimated from the stream.","Experimental DLAA at the source resolution.","AMD temporal upscaling. The SDK selects a provider supported by the GPU.","Experimental DLSS 5 neural rendering at source resolution. Uses motion estimated from the PS5 video. Requires Vulkan, SDR and a compatible RTX GPU.",
             "NVIDIA Image Scaling. Enlarges and sharpens each frame independently, or sharpens at native resolution."};
@@ -42,6 +43,30 @@ namespace Cadrivect
         internal event Action<string> DlssModelChanged;
         readonly StackPanel neuralSetup;
         readonly Button neuralDownload;
+        readonly CheckBox useOpenNr;
+        readonly StackPanel openNrSetup;
+        readonly TextBlock openNrStatus;
+        readonly Button openNrModel,openNrDownload;
+        bool openNrChecking;
+        internal event Action OpenNrProviderChanged,OpenNrModelRequested,OpenNrDownloadRequested;
+        internal bool UseOpenNr {get {return useOpenNr.IsChecked==true;} set {useOpenNr.IsChecked=value;}}
+        bool idleHdr;
+        internal void SetIdleHdr(bool enabled)
+        {
+            idleHdr=enabled;
+            if(hdr!=enabled) {hdr=enabled;RefreshAvailability();}
+            if(hdr && (selectedMode==OpenNeuralMode || selectedMode==NeuralMode))
+                modes[0].IsChecked=true;
+        }
+        internal bool SupportsSelectedColor(int picture)
+        {
+            return !hdr || (picture!=NeuralMode && picture!=OpenNeuralMode);
+        }
+        internal void SetOpenNrChecking(bool checking)
+        {
+            openNrChecking=checking;
+            UpdateNeuralSetup();
+        }
         bool neuralSetupBusy;
         internal event Action NeuralDownloadRequested,NeuralLicenseRequested;
         internal bool CanDownloadNeural {get {return Flag(gpu,"dlssNeuralRuntimeDownloadAvailable")==true;}}
@@ -55,8 +80,16 @@ namespace Cadrivect
         }
         void UpdateNeuralSetup()
         {
-            neuralSetup.Visibility=CanDownloadNeural || neuralSetupBusy ? Visibility.Visible : Visibility.Collapsed;
+            neuralSetup.Visibility=!UseOpenNr && (CanDownloadNeural || neuralSetupBusy) ? Visibility.Visible : Visibility.Collapsed;
             neuralDownload.IsEnabled=CanDownloadNeural && !neuralSetupBusy;
+            openNrSetup.Visibility=UseOpenNr ? Visibility.Visible : Visibility.Collapsed;
+            openNrModel.IsEnabled=!openNrChecking;
+            openNrModel.Content=openNrChecking ? "Checking model…" : Flag(gpu,"open-nr")==true ? "Change model…" : "Choose model…";
+            openNrDownload.IsEnabled=!openNrChecking;
+            openNrDownload.Visibility=Flag(gpu,"openNrModelImportAvailable")==true ? Visibility.Visible : Visibility.Collapsed;
+            openNrStatus.Text=Flag(gpu,"open-nr")==true
+                  ? (hdr ? "OpenDLSS-NR requires SDR output." : "OpenDLSS-NR · Model ready · Native resolution")
+                : Text(gpu,"open-nrReason") ?? Text(gpu,"probeFailure") ?? "Checking OpenDLSS-NR support.";
         }
         readonly StackPanel qualityGroup;
         readonly TextBlock activeQuality;
@@ -88,7 +121,8 @@ namespace Cadrivect
         bool comparisonsAvailable=true;
         readonly TextBlock comparisonGuide;
         public string ComparisonView {get {return ViewIds[selectedView];}}
-        readonly RadioButton[] modes=new RadioButton[ModeIds.Length], factors=new RadioButton[4];
+        // The two neural providers share one visible picture choice.
+        readonly RadioButton[] modes=new RadioButton[Descriptions.Length], factors=new RadioButton[4];
         readonly TextBlock sourceValue,generatedValue,targetValue;
         readonly Dictionary<string,TextBlock> values=new Dictionary<string,TextBlock>();
         readonly TextBlock submitLabel,notice,pictureScale,pictureSize,displayedSize;
@@ -170,7 +204,8 @@ namespace Cadrivect
                 if(index!=0) button.Click+=PreviewSelectedEffect;
                 button.Checked+=delegate {
                     if(syncing) return;
-                    selectedMode=index; RefreshQualityChoice(); SendSettings(index!=0);
+                    selectedMode=index==NeuralMode && UseOpenNr ? OpenNeuralMode : index;
+                    RefreshQualityChoice(); SendSettings(index!=0);
                 };
             }
             var modeGroup=new StackPanel();
@@ -183,6 +218,25 @@ namespace Cadrivect
             AddPictureRow(modeGroup,"Spatial upscaling","nis","fsr");
             AddPictureRow(modeGroup,"Video & temporal upscaling","rtxvideo","fsr-temporal");
             AddPictureRow(modeGroup,"NVIDIA DLSS","dlss","dlaa","dlss-nr");
+            useOpenNr=new CheckBox {Content="Use open source",Margin=new Thickness(4,5,0,2),
+                ToolTip="Use OpenDLSS-NR for DLSS 5 NR. Supports SDR with Direct3D 11, Direct3D 12 or Vulkan on a compatible GPU."};
+            AutomationProperties.SetAutomationId(useOpenNr,"UseOpenNr");
+            useOpenNr.Checked+=ChangeNeuralProvider; useOpenNr.Unchecked+=ChangeNeuralProvider;
+            modeGroup.Children.Add(useOpenNr);
+            openNrSetup=new StackPanel {Margin=new Thickness(4,2,0,3),Visibility=Visibility.Collapsed};
+            openNrStatus=Label("",Muted,11,FontWeights.Normal); openNrStatus.TextWrapping=TextWrapping.Wrap;
+            openNrSetup.Children.Add(openNrStatus);
+            openNrModel=new Button {Content="Choose model…",Margin=new Thickness(0,4,0,0),
+                ToolTip="Select manifest.json from an OpenDLSS-NR model folder."};
+            AutomationProperties.SetAutomationId(openNrModel,"ChooseOpenNrModel");
+            openNrModel.Click+=delegate {if(OpenNrModelRequested!=null) OpenNrModelRequested();};
+            openNrDownload=new Button {Content="Download model",Margin=new Thickness(0,4,4,0),
+                ToolTip="Download the NVIDIA package (368 MB) and prepare the compatible model in your user folder."};
+            AutomationProperties.SetAutomationId(openNrDownload,"DownloadOpenNrModel");
+            openNrDownload.Click+=delegate {if(OpenNrDownloadRequested!=null) OpenNrDownloadRequested();};
+            var modelActions=new WrapPanel();
+            modelActions.Children.Add(openNrDownload); modelActions.Children.Add(openNrModel);
+            openNrSetup.Children.Add(modelActions); modeGroup.Children.Add(openNrSetup);
             qualityGroup=new StackPanel {Margin=new Thickness(0,7,0,0)};
             picture.Children.Add(qualityGroup);
             var qualityHeader=new DockPanel {Margin=new Thickness(0,0,0,3)};
@@ -526,6 +580,29 @@ namespace Cadrivect
             // Clicking the already checked effect doesn't raise Checked.
             if(!syncing && selectedView==1) views[0].IsChecked=true;
         }
+        void ChangeNeuralProvider(object sender,RoutedEventArgs e)
+        {
+            if(syncing) return;
+            RefreshAvailability();
+            if(selectedMode==NeuralMode || selectedMode==OpenNeuralMode) {
+                int next=modes[NeuralMode].IsEnabled ? (UseOpenNr ? OpenNeuralMode : NeuralMode) : 0;
+                syncing=true;
+                try {SyncPictureChoice(next);}
+                finally {syncing=false;}
+                SendSettings(next!=0);
+            }
+            if(OpenNrProviderChanged!=null) OpenNrProviderChanged();
+        }
+        void SyncPictureChoice(int index)
+        {
+            selectedMode=index;
+            if(index==NeuralMode || index==OpenNeuralMode) {
+                bool open=index==OpenNeuralMode;
+                if(UseOpenNr!=open) {UseOpenNr=open;RefreshAvailability();}
+                modes[NeuralMode].IsChecked=true;
+            } else modes[index].IsChecked=true;
+            RefreshQualityChoice();
+        }
         RadioButton AddGenerationProvider(Panel parent,string group,string provider,string label,string id)
         {
             var button=new RadioButton {GroupName="Rate"+group,Content=label,Template=ChipTemplate};
@@ -565,8 +642,8 @@ namespace Cadrivect
         {
             syncing=true;
             try {
-                selectedMode=picture; selectedFactor=multiplier; FrameGenerationProvider=provider;
-                modes[picture].IsChecked=true; SyncGenerationChoice(); RefreshQualityChoice();
+                selectedFactor=multiplier; FrameGenerationProvider=provider;
+                SyncPictureChoice(picture>=0 && picture<ModeIds.Length ? picture : 0); SyncGenerationChoice();
                 int index=Array.IndexOf(ViewIds,view);
                 RefreshComparison(index>=0 ? (int?)index : null);
                 pendingSettings=DateTime.MinValue;
@@ -585,11 +662,11 @@ namespace Cadrivect
         }
         public void Reset(int modeIndex,int multiplier)
         {
-            selectedMode=Math.Max(0,Math.Min(modes.Length-1,modeIndex)); selectedFactor=Math.Max(1,Math.Min(4,multiplier));
+            selectedFactor=Math.Max(1,Math.Min(4,multiplier));
             syncing=true;
-            try {modes[selectedMode].IsChecked=true; SyncGenerationChoice(); RefreshComparison();}
+            try {SyncPictureChoice(Math.Max(0,Math.Min(ModeIds.Length-1,modeIndex))); SyncGenerationChoice(); RefreshComparison();}
             finally {syncing=false;}
-            liveFsrVersion=null; hdr=false; lastSample=-1; pendingSettings=DateTime.MinValue; dial.SetRates(double.NaN,double.NaN,double.NaN,double.NaN);
+            liveFsrVersion=null; hdr=idleHdr; lastSample=-1; pendingSettings=DateTime.MinValue; dial.SetRates(double.NaN,double.NaN,double.NaN,double.NaN);
             sourceValue.Text=generatedValue.Text="—"; targetValue.Text="Target —";
             pictureSize.Text="Waiting for video"; pictureScale.Text=""; activeQuality.Text="";
             displayedSize.Visibility=Visibility.Collapsed;
@@ -609,11 +686,12 @@ namespace Cadrivect
             for(int i=0;i<modes.Length;i++)
             {
                 bool vendor=i>=3;
-                bool available=i==0 || (!noAdapter && (!vendor || Flag(gpu,ModeIds[i])==true));
-                string reason=Descriptions[i];
-                if(!available) reason=gpu==null ? "Checking GPU support." : Text(gpu,ModeIds[i]+"Reason") ?? Text(gpu,"probeFailure") ?? "This mode is unavailable on the active GPU.";
-                if(hdr && ModeIds[i]=="dlss-nr" && available) {
-                    available=false; reason=ModeLabels[i]+" requires SDR output.";
+                string id=i==NeuralMode && UseOpenNr ? "open-nr" : ModeIds[i];
+                bool available=i==0 || (!noAdapter && (!vendor || Flag(gpu,id)==true));
+                string reason=id=="open-nr" ? "OpenDLSS-NR at source resolution using the selected model." : Descriptions[i];
+                if(!available) reason=gpu==null ? "Checking GPU support." : Text(gpu,id+"Reason") ?? Text(gpu,"probeFailure") ?? "This mode is unavailable on the active GPU.";
+                if(hdr && i==NeuralMode && available) {
+                    available=false; reason=(UseOpenNr ? "OpenDLSS-NR" : ModeLabels[i])+" requires SDR output.";
                 }
                 if(ModeIds[i]=="fsr-temporal" && available && !string.IsNullOrEmpty(Text(gpu,"fsrVersion")))
                     reason="AMD temporal upscaling · "+Text(gpu,"fsrVersion");
@@ -706,7 +784,10 @@ namespace Cadrivect
             UpdatePictureSize(snapshot);
             values["surface"].Text=Dimensions(Number(snapshot,"surfaceWidth"),Number(snapshot,"surfaceHeight"));
             values["refresh"].Text=Metric(Number(snapshot,"displayRefreshHz")," Hz","0.##");
-            values["renderer"].Text=Dashboard.RendererName(Text(snapshot,"processingRenderer") ?? Text(snapshot,"renderer"));
+            string renderer=Text(snapshot,"renderer"),processing=Text(snapshot,"processingRenderer");
+            values["renderer"].Text=Dashboard.RendererName(renderer ?? processing);
+            if(processing!=null && renderer!=null && processing!=renderer)
+                values["renderer"].Text+=" · "+Dashboard.RendererName(processing)+" processing";
             string codec=Text(snapshot,"codec"); bool? hdrFlag=Flag(snapshot,"presenterHdr10") ?? Flag(snapshot,"hdrEnabled");
             string color=hdrFlag.HasValue ? (hdrFlag.Value ? "HDR10":"SDR") : "";
             values["format"].Text=string.IsNullOrEmpty(codec) ? (color.Length==0 ? "—":color) : codec+(color.Length==0 ? "" : " · "+color);
@@ -751,7 +832,7 @@ namespace Cadrivect
             syncing=true;
             try {
                 if(DateTime.UtcNow>=pendingSettings || (mode==selectedMode && factor==selectedFactor && Text(snapshot,"frameGenerationProvider")==FrameGenerationProvider)) {
-                    if(mode>=0 && mode!=selectedMode) {selectedMode=mode; modes[mode].IsChecked=true; RefreshQualityChoice();}
+                    if(mode>=0 && mode!=selectedMode) SyncPictureChoice(mode);
                     if(factor>=1 && factor<=4) {
                         selectedFactor=(int)factor;
                         FrameGenerationProvider=Text(snapshot,"frameGenerationProvider"); SyncGenerationChoice();

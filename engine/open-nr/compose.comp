@@ -1,0 +1,25 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#include "video.glsl"
+layout(std430,binding=3) readonly buffer Head { vec4 head[]; };
+void main() {
+    uvec2 id=gl_GlobalInvocationID.xy;
+    if(id.x>=width||id.y>=height)return;
+    uint pixel=id.y*width+id.x;
+    vec4 prediction=head[id.y*fullWidth+id.x];
+    vec3 original=clamp(rgb(color[pixel]),0.,1.);
+    vec3 enhanced=clamp(original+0.25*prediction.rgb,0.,1.);
+    vec3 prior;
+    if(reproject(ivec2(id),prior)) {
+        float weight=clamp(blendScale/(1.+exp(-prediction.a)),0.,1.);
+        enhanced=mix(enhanced,prior,weight);
+    }
+    // Preserve neutral black and white in video-range menus and HUD glyphs.
+    // Taper the residual near either endpoint to avoid a hard transition in gradients.
+    float blackDistance=max(original.r,max(original.g,original.b));
+    float whiteDistance=1.-min(original.r,min(original.g,original.b));
+    enhanced=mix(original,enhanced,smoothstep(0.,0.06,min(blackDistance,whiteDistance)));
+    uvec2 result=packRgb(vec3(truncateHalf(enhanced.r),truncateHalf(enhanced.g),truncateHalf(enhanced.b)));
+    history[parity*width*height+pixel]=result;
+    outputPixels[pixel]=result;
+}

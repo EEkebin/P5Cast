@@ -10,14 +10,17 @@ using Device=SharpDX.Direct3D11.Device;
 // DLSS Neural Rendering uses display-referred SDR in FP16 at the source dimensions.
 internal sealed class NeuralRendering : IDisposable
 {
-    const string Bridge="P5Cast.NeuralVk.dll";
+    const string Bridge="P5Cast.NeuralVk.dll", OpenBridge="P5Cast.OpenNr.dll";
     const int MissingRuntime=2;
     const DllImportSearchPath Search=DllImportSearchPath.AssemblyDirectory|DllImportSearchPath.System32;
     readonly StringBuilder reason=new StringBuilder(768);
     IntPtr state;
     GpuImage control;
+    readonly bool openSource;
+    readonly string loadedModel;
     public const string BackendReason="DLSS Neural Rendering requires Vulkan.";
-    public const string HdrReason="DLSS Neural Rendering processes SDR. Select SDR to use it.";
+    public const string OpenBackendReason="OpenDLSS-NR supports Direct3D 11, Direct3D 12 or Vulkan playback with Vulkan compute.";
+    public const string HdrReason="Neural Rendering requires SDR output.";
 
     [DefaultDllImportSearchPaths(Search),DllImport(Bridge,ExactSpelling=true,CallingConvention=CallingConvention.Cdecl,CharSet=CharSet.Unicode)]
     static extern int P5NrOpen(IntPtr device,string runtimeDirectory,string appData,int width,int height,out IntPtr state,StringBuilder reason,int reasonChars);
@@ -26,21 +29,45 @@ internal sealed class NeuralRendering : IDisposable
     [DefaultDllImportSearchPaths(Search),DllImport(Bridge,ExactSpelling=true,CallingConvention=CallingConvention.Cdecl)]
     static extern void P5NrClose(IntPtr state);
 
+    [DefaultDllImportSearchPaths(Search),DllImport(OpenBridge,ExactSpelling=true,CallingConvention=CallingConvention.Cdecl,CharSet=CharSet.Unicode)]
+    static extern int P5OpenNrOpen(IntPtr device,string modelDirectory,int width,int height,out IntPtr state,StringBuilder reason,int reasonChars);
+    [DefaultDllImportSearchPaths(Search),DllImport(OpenBridge,ExactSpelling=true,CallingConvention=CallingConvention.Cdecl,CharSet=CharSet.Unicode)]
+    static extern int P5OpenNrEvaluate(IntPtr state,IntPtr color,IntPtr motion,IntPtr output,int reset,StringBuilder reason,int reasonChars);
+    [DefaultDllImportSearchPaths(Search),DllImport(OpenBridge,ExactSpelling=true,CallingConvention=CallingConvention.Cdecl)]
+    static extern void P5OpenNrClose(IntPtr state);
+
+    static string OpenModelDirectory()
+    {
+        string directory=Environment.GetEnvironmentVariable("P5CAST_OPEN_NR_MODEL");
+        if(string.IsNullOrWhiteSpace(directory)) directory=Environment.GetEnvironmentVariable("DLSS5VK_MODEL");
+        return string.IsNullOrWhiteSpace(directory)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"P5Cast","providers","open-nr","model")
+            : directory;
+    }
+    internal bool OpenModelChanged { get { return openSource && !string.Equals(loadedModel,OpenModelDirectory(),StringComparison.OrdinalIgnoreCase); } }
+
     public sealed class RuntimeMissingException : InvalidOperationException
     {
         internal RuntimeMissingException(string message) : base(message) {}
     }
 
-    public NeuralRendering(Device device,int width,int height)
+    public NeuralRendering(Device device,int width,int height) : this(device,width,height,false) {}
+
+    internal NeuralRendering(Device device,int width,int height,bool useOpenSource)
     {
+        openSource=useOpenSource;
+        if(openSource) loadedModel=OpenModelDirectory();
         string app=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"P5Cast");
-        string provider=Path.Combine(app,"providers","dlss-nr","310.9.16");
-        int result=P5NrOpen(device.NativePointer,provider,Path.Combine(app,"NGX"),width,height,out state,reason,reason.Capacity);
         try {
+            int result=openSource
+                ? P5OpenNrOpen(device.NativePointer,loadedModel,width,height,out state,reason,reason.Capacity)
+                : P5NrOpen(device.NativePointer,Path.Combine(app,"providers","dlss-nr","310.9.16"),Path.Combine(app,"NGX"),width,height,out state,reason,reason.Capacity);
             if(result==MissingRuntime) throw new RuntimeMissingException(reason.ToString());
             Check(result);
-            control=new GpuImage(device,width,height,Format.R8G8B8A8_UNorm,true);
-            device.ImmediateContext.ClearRenderTargetView(control.Write,new RawColor4(1,1,1,1));
+            if(!openSource) {
+                control=new GpuImage(device,width,height,Format.R8G8B8A8_UNorm,true);
+                device.ImmediateContext.ClearRenderTargetView(control.Write,new RawColor4(1,1,1,1));
+            }
             VerifyOutput(device,width,height);
         } catch {Dispose();throw;}
     }
@@ -49,13 +76,16 @@ internal sealed class NeuralRendering : IDisposable
     {
         if(state==IntPtr.Zero) throw new ObjectDisposedException("NeuralRendering");
         reason.Clear();
-        Check(P5NrEvaluate(state,color.NativePointer,motion.NativePointer,depth.NativePointer,control.Texture.NativePointer,
-            output.NativePointer,reset?1:0,reason,reason.Capacity));
+        int result=openSource
+            ? P5OpenNrEvaluate(state,color.NativePointer,motion.NativePointer,output.NativePointer,reset?1:0,reason,reason.Capacity)
+            : P5NrEvaluate(state,color.NativePointer,motion.NativePointer,depth.NativePointer,control.Texture.NativePointer,
+                output.NativePointer,reset?1:0,reason,reason.Capacity);
+        Check(result);
     }
 
     void Check(int result)
     {
-        if(result!=0) throw new InvalidOperationException(reason.Length==0 ? "The DLSS Neural Rendering provider failed." : reason.ToString());
+        if(result!=0) throw new InvalidOperationException(reason.Length==0 ? "The Neural Rendering provider failed." : reason.ToString());
     }
 
     // Probe the actual native session. This also protects direct CLI launches and newly
@@ -125,7 +155,8 @@ internal sealed class NeuralRendering : IDisposable
             double actual=Half((ushort)Marshal.ReadInt16(map.DataPointer,offset));
             double expected=side==scene?0:1;
             if(double.IsNaN(actual) || Math.Abs(expected-actual)>.045)
-                throw new InvalidOperationException("The Vulkan Neural Rendering output failed the SDR black and white check.");
+                throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "The Neural Rendering SDR calibration expected {0} and received {1:F3} in the {2} channel.",expected,actual,"RGB"[channel]));
         }
         int changed=0,samples=0;
         double totalError=0;
@@ -146,7 +177,10 @@ internal sealed class NeuralRendering : IDisposable
 
     public void Dispose()
     {
-        if(state!=IntPtr.Zero) {P5NrClose(state);state=IntPtr.Zero;}
+        if(state!=IntPtr.Zero) {
+            if(openSource) P5OpenNrClose(state); else P5NrClose(state);
+            state=IntPtr.Zero;
+        }
         if(control!=null) {control.Dispose();control=null;}
     }
 }

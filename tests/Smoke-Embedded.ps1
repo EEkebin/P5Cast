@@ -1,10 +1,10 @@
 [CmdletBinding()]
 param([string]$PlayerExe,[string]$DirectRuntime,[string]$OutputDirectory,
-      [ValidateSet('auto','d3d11','d3d12','vulkan','opengl')][string]$Renderer='auto',[string]$HdrDisplay,[switch]$CheckComparison,[switch]$CheckNeuralRendering,[switch]$CheckFruc)
+      [ValidateSet('auto','d3d11','d3d12','vulkan','opengl')][string]$Renderer='auto',[string]$HdrDisplay,[switch]$CheckComparison,[switch]$CheckNeuralRendering,[switch]$CheckFruc,[switch]$CheckOpenNr)
 $ErrorActionPreference='Stop'
 $repo=Split-Path $PSScriptRoot
 if (!$PlayerExe) { $PlayerExe=Join-Path $repo 'engine\bin\CadrivectPlayer.exe' }
-if (!$DirectRuntime -and !$CheckNeuralRendering -and (!$CheckFruc -or $HdrDisplay)) {
+if (!$DirectRuntime -and !$CheckNeuralRendering -and !$CheckOpenNr -and (!$CheckFruc -or $HdrDisplay)) {
     $runtime=& "$repo\sources\Prepare-Decoder.ps1" | ConvertFrom-Json
     if (!$runtime.ok) { throw $runtime.error }
     $DirectRuntime=$runtime.runtime
@@ -32,8 +32,10 @@ if ($CheckFruc -and !$HdrDisplay) {
     if($LASTEXITCODE){throw 'Embedded FRUC playback verification failed.'}
     return
 }
-if ($CheckNeuralRendering) {
-    & $probe $PlayerExe unused unused unused "$OutputDirectory\neural.json" vulkan --neural
+if ($CheckNeuralRendering -or $CheckOpenNr) {
+    if($Renderer -eq 'auto'){$Renderer='vulkan'}
+    $mode=if($CheckOpenNr){'open-nr'}else{'dlss-nr'}
+    & $probe $PlayerExe $mode unused unused "$OutputDirectory\neural.json" $Renderer --neural
     if ($LASTEXITCODE) {throw "Embedded Neural Rendering verification failed. Inspect $OutputDirectory"}
     return
 }

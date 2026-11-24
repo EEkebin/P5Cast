@@ -50,9 +50,14 @@ partial class VerifyHdr
         try {
             var compiled=Assembly.LoadFrom(Path.GetFullPath(args[0]));
             bool d3d12=Array.IndexOf(args,"--d3d12")>=0;
-            if(Array.IndexOf(args,"--fruc-subtitles")>=0) {
-                CheckFrucSubtitles(compiled,d3d12,new System.Drawing.Size(640,360));
-                CheckFrucSubtitles(compiled,d3d12,new System.Drawing.Size(960,540));
+            bool vulkanSubtitles=Array.IndexOf(args,"--vulkan-subtitles")>=0;
+            if(vulkanSubtitles || Array.IndexOf(args,"--fruc-subtitles")>=0) {
+                string backend=vulkanSubtitles ? "vulkan" : d3d12 ? "d3d12" : "d3d11";
+                foreach(string provider in vulkanSubtitles ? new[]{"amd","p5cast"} : new[]{"fruc"}) {
+                    CheckSubtitles(compiled,backend,provider,new System.Drawing.Size(640,360));
+                    CheckSubtitles(compiled,backend,provider,new System.Drawing.Size(960,540));
+                }
+                if(vulkanSubtitles) return 0;
             }
             Run(compiled,Array.IndexOf(args,"--nvidia")>=0,Array.IndexOf(args,"--fruc")>=0,d3d12);
             return 0;

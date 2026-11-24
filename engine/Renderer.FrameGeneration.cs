@@ -53,7 +53,7 @@ internal sealed partial class Renderer
             if(!fruc && Backend!="d3d12" && Backend!="vulkan") throw new InvalidOperationException("AMD frame generation requires Direct3D 12 or Vulkan.");
             Size size=vendor?neuralSize:srcSize;
             bool continuous=HasPrevious && sdkEvaluated==Captured-1 && !sdkNeedsReset;
-            if(fruc && vendor && !havePriorEnhanced) continuous=false;
+            if(vendor && !havePriorEnhanced) continuous=false;
             if(size!=sdkFrameSize) {
                 ReleaseFrameGeneration();
                 continuous=false;

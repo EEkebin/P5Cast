@@ -148,7 +148,7 @@ internal sealed partial class Renderer : IDisposable
             blend.RenderTarget[0]=targetBlend;
             handleBlend=new BlendState(Device,blend);
             vertex=new VertexShader(Device,Shader("Fullscreen"));
-            foreach(string name in new [] {"Original","Sharp","Easu","Rcas","Motion","Interpolate","OpticalField","NgxVectors","PreserveNgxStrokes","FitNgxFrame","FrucNrMidpoint","WipeDivider","WipeHandle","InspectionLoupe"})
+            foreach(string name in new [] {"Original","Sharp","Easu","Rcas","Motion","Interpolate","OpticalField","NgxVectors","PreserveNgxStrokes","FitNgxFrame","FitNrIntermediate","WipeDivider","WipeHandle","InspectionLoupe"})
                 shaders.Add(name,new PixelShader(Device,Shader(name)));
             InitHdrShaders();
             context.InputAssembler.PrimitiveTopology=PrimitiveTopology.TriangleList;
@@ -543,8 +543,8 @@ internal sealed partial class Renderer : IDisposable
         bool holdOriginal=(finishPrevious || (phase<1 && HasPrevious)) && (!vendor || havePriorEnhanced);
         if(!originalViewport.IsEmpty) DrawOriginal(originalViewport,holdOriginal);
         if(sdkIntermediate && vendor) {
-            if(FrameGenerationProvider=="fruc" && PictureLabels.IsNeuralRendering(mode))
-                Draw("FrucNrMidpoint",display,viewport,source,1,neuralPrevious.Read,strokeMask.Read);
+            if(PictureLabels.IsNeuralRendering(mode))
+                Draw("FitNrIntermediate",display,viewport,source,1,neuralPrevious.Read,strokeMask.Read);
             else Draw(HdrEnabled?"HdrToPq":"Original",display,viewport,source,1);
             return Present(samplePixel,holdOriginal);
         }
@@ -558,15 +558,16 @@ internal sealed partial class Renderer : IDisposable
             if(HdrEnabled) PrepareHdrMotion(); else PrepareMotion();
             if(vendor && havePriorEnhanced)
             {
-                DrawFinal("Interpolate",neuralCurrent.Read,phase,viewport,neuralPrevious.Read,motion.Read,HdrEnabled);
+                if(PictureLabels.IsNeuralRendering(mode)) {
+                    var frame=InterpolateSource(neuralCurrent.Read,neuralPrevious.Read,phase);
+                    Draw("FitNrIntermediate",display,viewport,frame,1,neuralPrevious.Read,strokeMask.Read);
+                } else DrawFinal("Interpolate",neuralCurrent.Read,phase,viewport,neuralPrevious.Read,motion.Read,HdrEnabled);
                 Generated++;
                 return Present(samplePixel,holdOriginal);
             }
             if(!vendor)
             {
-                if(mixed==null) mixed=new GpuImage(Device,srcSize.Width,srcSize.Height,Format.B8G8R8A8_UNorm,true);
-                Draw("Interpolate",mixed.Write,new Rectangle(System.Drawing.Point.Empty,srcSize),curr.Read,phase,prev.Read,motion.Read);
-                source=mixed.Read; Generated++;
+                source=InterpolateSource(curr.Read,prev.Read,phase); Generated++;
             }
         }
         if(mode=="nis") DrawNis(source,phase,viewport);
@@ -584,6 +585,12 @@ internal sealed partial class Renderer : IDisposable
             Draw("FitNgxFrame",display,viewport,source,HdrEnabled ? 1 : 0,finishPrevious && havePriorEnhanced ? prev.Read : curr.Read);
         else DrawFinal(mode=="sharp" ? "Sharp":"Original",source,phase,viewport,null,null,HdrEnabled && vendor);
         return Present(samplePixel,holdOriginal);
+    }
+    ShaderResourceView InterpolateSource(ShaderResourceView current,ShaderResourceView previous,float phase)
+    {
+        if(mixed==null) mixed=new GpuImage(Device,srcSize.Width,srcSize.Height,Format.B8G8R8A8_UNorm,true);
+        Draw("Interpolate",mixed.Write,new Rectangle(System.Drawing.Point.Empty,srcSize),current,phase,previous,motion.Read);
+        return mixed.Read;
     }
     void DrawOriginal(Rectangle area,bool holdPrevious,Rectangle? clip=null)
     {

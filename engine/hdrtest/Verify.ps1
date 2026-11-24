@@ -1,6 +1,6 @@
 # Run after building the player. This renders into an offscreen HDR10 texture on the active GPU.
 [CmdletBinding()]
-param([string]$PlayerDirectory=(Join-Path $PSScriptRoot '..\bin'), [switch]$Nvidia, [switch]$Fruc, [switch]$FrucSubtitles,
+param([string]$PlayerDirectory=(Join-Path $PSScriptRoot '..\bin'), [switch]$Nvidia, [switch]$Fruc, [switch]$FrucSubtitles, [switch]$VulkanSubtitles,
       [ValidateSet('d3d11','d3d12')][string]$Backend='d3d11')
 $ErrorActionPreference='Stop'
 $bin=(Resolve-Path -LiteralPath $PlayerDirectory).Path
@@ -19,6 +19,7 @@ try {
     $options=@((Join-Path $bin 'CadrivectPlayer.exe'))
     if($Fruc){$options+='--fruc'}
     if($FrucSubtitles){$options+='--fruc-subtitles'}
+    if($VulkanSubtitles){$options+='--vulkan-subtitles'}
     if($Backend -eq 'd3d12'){$options+='--d3d12'}
     if($Nvidia) {
         Copy-Item -LiteralPath (Join-Path $bin 'nvngx_dlss.dll'), (Join-Path $bin 'Cadrivect.Ngx.dll') -Destination $testDir

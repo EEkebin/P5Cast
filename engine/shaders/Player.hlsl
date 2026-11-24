@@ -178,9 +178,9 @@ float StrokeFootprint(float2 uv) {
     return max(ink,max(max4(flow.GatherRed(linearClamp,uv+float2(halfTexel.x,-halfTexel.y))),
                        max4(flow.GatherRed(linearClamp,uv+float2(-halfTexel.x,halfTexel.y)))));
 }
-float4 FrucNrMidpoint(Vertex v) : SV_Target {
+float4 FitNrIntermediate(Vertex v) : SV_Target {
     // A subtitle changes on a real frame boundary. Hold its last enhanced coverage
-    // through the midpoint, including strokes that appear or disappear in the pair.
+    // through each generated frame, including changes of text between endpoints.
     float ink=smoothstep(0.35,0.85,StrokeFootprint(v.uv));
     return float4(lerp(SamplePicture(v),SamplePictureTexture(previous,v),ink),1);
 }

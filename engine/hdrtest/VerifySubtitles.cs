@@ -9,20 +9,20 @@ using Device=SharpDX.Direct3D11.Device;
 
 partial class VerifyHdr
 {
-    // Sample the production renderer before Present on both flip-chain paths.
+    // Sample the production renderer before Present.
     // A narrow, outlined H appears, holds, and disappears over a camera pan.
-    static void CheckFrucSubtitles(Assembly compiled,bool d3d12,Size viewport)
+    static void CheckSubtitles(Assembly compiled,string backend,string provider,Size viewport)
     {
         const int w=640,h=360;
         var type=compiled.GetType("Renderer",true);
         var size=new Size(w,h);
         using(var window=new Form {ClientSize=viewport,ShowInTaskbar=false})
         using(var renderer=(IDisposable)Activator.CreateInstance(type,new object[]{window.Handle,viewport,Size.Empty,
-            "off","open-nr",false,d3d12?"d3d12":"d3d11"})) {
+            "off","open-nr",false,backend})) {
             var device=(Device)type.GetProperty("Device").GetValue(renderer,null);
             var receive=type.GetMethod("Receive"); var show=type.GetMethod("Show");
             var count=type.GetProperty("Generated");
-            type.GetMethod("SetFrameGenerationProvider").Invoke(renderer,new object[]{"fruc"});
+            type.GetMethod("SetFrameGenerationProvider").Invoke(renderer,new object[]{provider});
             using(var frame=new Image(device,w,h,Format.B8G8R8A8_UNorm)) {
                 int[] data=new int[w*h];
                 int lastReal=0,midpoints=0,transitions=0,sceneMidpoints=0,worst=0;
@@ -41,7 +41,8 @@ partial class VerifyHdr
                     device.ImmediateContext.UpdateSubresource(data,frame.texture,0,w*4,0);
                     receive.Invoke(renderer,new object[]{frame.texture,new Rectangle(Point.Empty,size),false});
                     int before=(int)count.GetValue(renderer,null);
-                    int midpoint=(int)show.Invoke(renderer,new object[]{"open-nr",.5f,true,false})&255;
+                    float phase=provider=="p5cast" ? (1+n%3)*.25f : .5f;
+                    int midpoint=(int)show.Invoke(renderer,new object[]{"open-nr",phase,true,false})&255;
                     int real=(int)show.Invoke(renderer,new object[]{"open-nr",1f,true,false})&255;
                     if(ink && real<(size==viewport ? 250 : 190)) throw new InvalidDataException("The real subtitle stroke dimmed to "+real+".");
                     if((int)count.GetValue(renderer,null)>before && (hadInk || ink)) {
@@ -54,9 +55,9 @@ partial class VerifyHdr
                     lastReal=real;
                     hadInk=ink;
                 }
-                Console.WriteLine("OpenDLSS-NR + FRUC at {0}: {1} caption midpoints, {2} transitions, worst stroke error {3}/255; {4} distinct scene midpoints.",viewport,midpoints,transitions,worst,sceneMidpoints);
+                Console.WriteLine("{0} / OpenDLSS-NR + {1} at {2}: {3} caption frames, {4} transitions, worst stroke error {5}/255; {6} distinct scene samples.",backend,provider,viewport,midpoints,transitions,worst,sceneMidpoints);
                 if((int)type.GetProperty("OpenNrEvaluations").GetValue(renderer,null)!=frameCount || midpoints<5 || transitions<2 || sceneMidpoints<1 || worst>3)
-                    throw new InvalidDataException("OpenDLSS-NR / FRUC subtitle regression. "+type.GetProperty("FrameGenerationNotice").GetValue(renderer,null));
+                    throw new InvalidDataException("OpenDLSS-NR / "+provider+" subtitle regression. "+type.GetProperty("FrameGenerationNotice").GetValue(renderer,null));
             }
         }
     }

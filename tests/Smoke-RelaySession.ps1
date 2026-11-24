@@ -33,13 +33,63 @@ try {
     [IO.File]::WriteAllText($state,($stateData | ConvertTo-Json))
     $stale=Relay StopHost
     if(!$stale.ok -or $child.HasExited){throw 'A stale record stopped a different process.'}
+    $conflict=(& $shell -NoProfile -ExecutionPolicy Bypass -File $relay -Action StartHost -Address 127.0.0.1 | ConvertFrom-Json)
+    if($conflict.ok -or $conflict.message -notmatch 'no matching session' -or (Test-Path (Join-Path (Split-Path $state) 'credentials.json'))){throw 'A second host could overwrite live credentials.'}
     $stateData.startTicks=$child.StartTime.ToUniversalTime().Ticks.ToString()
     [IO.File]::WriteAllText($state,($stateData | ConvertTo-Json))
     $active=Relay Status
     if(!$active.ok -or !$active.running){throw 'The current host was not recognized.'}
     $stopped=Relay StopHost
     if(!$stopped.ok -or !$child.WaitForExit(3000)){throw 'The verified host did not stop.'}
-    'Passed relay session recovery and process identity checks.'
+    # Interrupt the launcher while the fake host has no management endpoint.
+    [IO.File]::Delete($state)
+    $startupLog=Join-Path $fixture 'startup.json'
+    $launcher=Start-Process -FilePath $shell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$relay+'"'),'-Action','StartHost','-Address','127.0.0.1') -WindowStyle Hidden -PassThru -RedirectStandardOutput $startupLog
+    try {
+        $clock=[Diagnostics.Stopwatch]::StartNew()
+        while(!(Test-Path -LiteralPath $state) -and !$launcher.HasExited -and $clock.ElapsedMilliseconds -lt 8000){Start-Sleep -Milliseconds 50}
+        if (!(Test-Path -LiteralPath $state)) { throw "Missing startup record. $(Get-Content -LiteralPath $startupLog -Raw)" }
+        $pending=Get-Content -Raw -LiteralPath $state | ConvertFrom-Json
+        if(!$pending.starting){throw 'Host identity was not persisted before waiting for readiness.'}
+        $launcher.Kill();$launcher.WaitForExit()
+        $starting=Relay Status
+        if(!$starting.running -or $starting.message -notmatch 'awaiting confirmation'){throw 'Interrupted startup was reported as ready or stopped.'}
+        $recovered=Relay StopHost
+        if(!$recovered.ok -or (Relay Status).running){throw 'Interrupted startup could not be stopped.'}
+    } finally {
+        if(!$launcher.HasExited){$launcher.Kill();$launcher.WaitForExit()}
+        $launcher.Dispose()
+    }
+    $ast=[Management.Automation.Language.Parser]::ParseFile($relay,[ref]$null,[ref]$null)
+    foreach ($name in 'Approve-Pin','Confirm-HostDisplay') {
+        $node=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$false)
+        . ([scriptblock]::Create($node.Extent.Text))
+    }
+    function Get-Session { @{address='127.0.0.1'} }
+    function Invoke-HostApi($Session,$Route,$Body) {
+        if($null -eq $Body){return @{pairings=$script:pairings}}
+        $script:posts++
+        return @{status=$script:pairStatus}
+    }
+    $Pin='1234'; $script:posts=0
+    foreach ($badRequest in @($null,@{name='missing id'})) {
+        $script:pairings=$badRequest
+        $rejected=$false
+        try {$null=Approve-Pin} catch {$rejected=$true}
+        if(!$rejected -or $script:posts){throw 'A malformed pairing response reached approval.'}
+    }
+    $script:pairings=@{id='1';name='fixture'}; $script:pairStatus='false'; $rejected=$false
+    try {$null=Approve-Pin} catch {$rejected=$true}
+    if(!$rejected -or $script:posts -ne 1){throw 'Rejected PIN reported as a success.'}
+    $script:pairStatus=$true
+    if(!(Approve-Pin).ok){throw 'A valid PIN was rejected.'}
+    $log=Join-Path $fixture 'display.log'
+    if(Confirm-HostDisplay $log 'DISPLAY' 'fixture'){throw 'Missing log confirmed a display.'}
+    [IO.File]::WriteAllText($log,"Currently available display devices:`n[")
+    if(Confirm-HostDisplay $log 'DISPLAY' 'fixture'){throw 'Partial log confirmed a display.'}
+    [IO.File]::AppendAllText($log,'{"display_name":"DISPLAY","device_id":"fixture"}' + [Environment]::NewLine + ']')
+    if(!(Confirm-HostDisplay $log 'DISPLAY' 'fixture')){throw 'The completed inventory was not confirmed.'}
+    'Passed relay startup interruption, process ownership, pairing response, and display readiness checks.'
 } finally {
     if($child){if(!$child.HasExited){$child.Kill();$child.WaitForExit()};$child.Dispose()}
     $env:LOCALAPPDATA=$previous

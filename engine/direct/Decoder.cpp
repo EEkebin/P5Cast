@@ -34,6 +34,8 @@ struct Picture {
     void *planes[3];
     int stride[3], width, height, depth, fullRange, primaries, transfer, matrix;
 };
+// Stable bridge result for a damaged access unit which FFmpeg can recover from.
+static constexpr int corruptAccessUnit = -3;
 
 template<class T> bool bind(HMODULE module, const char *name, T &fn) {
     fn=reinterpret_cast<T>(GetProcAddress(module,name));
@@ -70,13 +72,17 @@ extern "C" __declspec(dllexport) int __cdecl SubmitPacket(Api *a,const uint8_t *
     int err=a->packetNew(p,n);
     if (err>=0) { memcpy(p->data,bytes,n); err=a->send(a->context,p); }
     a->packetFree(&p);
-    return err;
+    return err == AVERROR_INVALIDDATA ? corruptAccessUnit : err;
 }
 extern "C" __declspec(dllexport) int __cdecl NextPicture(Api *a,AVFrame **frame,Picture *pic) {
     AVFrame *f=a->frameAlloc();
     if (!f) return -1;
     int err=a->receive(a->context,f);
-    if (err<0) { a->frameFree(&f); return err==AVERROR(EAGAIN)||err==AVERROR_EOF ? 0:-1; }
+    if (err<0) {
+        a->frameFree(&f);
+        if (err==AVERROR(EAGAIN) || err==AVERROR_EOF) return 0;
+        return err==AVERROR_INVALIDDATA ? corruptAccessUnit : -1;
+    }
     int depth=f->format==AV_PIX_FMT_YUV420P10LE ? 10 :
         (f->format==AV_PIX_FMT_YUV420P || f->format==AV_PIX_FMT_YUVJ420P ? 8:0);
     if (!depth || f->width<1 || f->height<1 || f->width>4096 || f->height>2160) { a->frameFree(&f); return -2; }

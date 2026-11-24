@@ -134,6 +134,9 @@ namespace Cadrivect
         async void OnDashboardClosing(object sender,System.ComponentModel.CancelEventArgs e)
         {
             if(HistoryOpen) SetStatusHistory(false);
+            if(pairingCancellation!=null) {
+                e.Cancel=true; closeAfterPairing=true; pairingCancellation.Cancel(); return;
+            }
             if(OperationOpen && !closing) {
                 e.Cancel=true;
                 if(pendingStop!=null || requestingRest) {closeAfterStop=true; return;}

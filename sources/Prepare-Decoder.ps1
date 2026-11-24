@@ -32,18 +32,24 @@ function Test-Libraries([string]$Folder,[switch]$IsRuntime) {
     }
     return $true
 }
+function Test-CachedLibraries([string]$Folder,[switch]$IsRuntime) {
+    try { return Test-Libraries $Folder -IsRuntime:$IsRuntime }
+    catch [IO.IOException] { return $false }
+    catch [UnauthorizedAccessException] { return $false }
+    catch [Management.Automation.ItemNotFoundException] { return $false }
+}
 function Prepare-Libraries {
     if (![Environment]::Is64BitOperatingSystem) {throw 'Direct decoding needs 64-bit Windows.'}
     [IO.Directory]::CreateDirectory($cache) | Out-Null
     foreach($dir in (Get-ChildItem -LiteralPath $cache -Directory -Filter "$version*" | Sort-Object LastWriteTimeUtc -Descending)) {
-        if (Test-Libraries $dir.FullName -IsRuntime) {return $dir.FullName}
+        if (Test-CachedLibraries $dir.FullName -IsRuntime) {return $dir.FullName}
     }
     $stage=Join-Path $cache ('stage-'+[guid]::NewGuid().ToString('N'))
     $payload=Join-Path $stage 'runtime'
     [IO.Directory]::CreateDirectory($payload) | Out-Null
     try {
         $legacy=Split-Path -Parent $chiakiExe
-        if (!$Archive -and (Test-Libraries $legacy)) {
+        if (!$Archive -and (Test-CachedLibraries $legacy)) {
             foreach($name in $files.Keys) {[IO.File]::Copy((Join-Path $legacy $name),(Join-Path $payload $name))}
         } else {
             if ($Archive) {$zipPath=(Resolve-Path -LiteralPath $Archive).Path}

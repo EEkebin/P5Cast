@@ -1,6 +1,11 @@
 [CmdletBinding()]
 param([string]$InstalledMoonlight)
 $ErrorActionPreference = 'Stop'
+if ($PSVersionTable.PSEdition -eq 'Core') {
+    & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath @PSBoundParameters
+    if ($LASTEXITCODE) { throw 'Quiet preview smoke test failed.' }
+    return
+}
 
 # Load just the launch functions. This test never starts a streaming application.
 $relay = Join-Path $PSScriptRoot '..\streaming\Relay.ps1'

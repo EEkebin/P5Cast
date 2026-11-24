@@ -32,6 +32,7 @@ namespace Cadrivect.Streaming {
                 request.Proxy = null;
                 request.AllowAutoRedirect = false;
                 request.Timeout = 15000;
+                request.ReadWriteTimeout = 15000;
                 request.ServerCertificateValidationCallback = (sender, cert, chain, errors) =>
                     cert != null && String.Equals(cert.GetRawCertDataString(), expected.GetRawCertDataString(), StringComparison.Ordinal);
                 request.Headers[HttpRequestHeader.Authorization] = "Basic " +
@@ -43,7 +44,13 @@ namespace Cadrivect.Streaming {
                     request.ContentLength = body.Length;
                     using (var output = request.GetRequestStream()) output.Write(body, 0, body.Length);
                 }
-                using (var response = (HttpWebResponse)request.GetResponse())
+                HttpWebResponse response;
+                try { response = (HttpWebResponse)request.GetResponse(); }
+                catch (WebException ex) {
+                    if (ex.Response != null) ex.Response.Close();
+                    throw;
+                }
+                using (response)
                 using (var reader = new StreamReader(response.GetResponseStream())) {
                     if ((int)response.StatusCode != 200) throw new IOException("Host management returned " + (int)response.StatusCode);
                     return reader.ReadToEnd();

@@ -183,7 +183,7 @@ namespace Cadrivect.Engine
         }
         public void TakeChanges(Action<string,int,string> apply) {
             lock(gate) {
-                if(mode== -1 && factor== -1) return;
+                if(mode== -1 && factor== -1 && generation==null) return;
                 apply(mode<0 ? null : global::PlaybackControls.Modes[mode],factor,generation); mode=factor=-1; generation=null;
             }
         }

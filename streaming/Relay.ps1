@@ -115,6 +115,7 @@ function Get-Session {
     finally { if (!$owned) { $proc.Dispose() } }
 }
 function New-HostCredential {
+    Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop
     $random = [Security.Cryptography.RandomNumberGenerator]::Create()
     $passwordBytes = New-Object byte[] 32
     $saltBytes = New-Object byte[] 16
@@ -130,6 +131,7 @@ function New-HostCredential {
     Write-Text $secretFile (ConvertFrom-SecureString (ConvertTo-SecureString $password -AsPlainText -Force))
 }
 function Invoke-HostApi($Session, $Route, $Body) {
+    Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop
     if (!('Cadrivect.Streaming.HostApi' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'HostApi.cs') }
     $protectedPassword = Get-Content -Raw -LiteralPath $secretFile | ConvertTo-SecureString
     $cred = New-Object Net.NetworkCredential('lumarelay', $protectedPassword)
@@ -146,6 +148,7 @@ function Resolve-HostDisplay([string]$Device) {
 }
 function Confirm-HostDisplay($Log,$Device,$Id) {
     # Check the current binary's own documented startup inventory before announcing readiness.
+    if (![IO.File]::Exists($Log)) { return $false }
     $stream = [IO.File]::Open($Log,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
     try {
         $reader = New-Object IO.StreamReader($stream)
@@ -153,11 +156,12 @@ function Confirm-HostDisplay($Log,$Device,$Id) {
     } finally { $stream.Dispose() }
     $marker = 'Currently available display devices:'
     $start = $text.LastIndexOf($marker,[StringComparison]::Ordinal)
-    if ($start -lt 0) { throw 'Sunshine has not reported its active displays yet.' }
+    if ($start -lt 0) { return $false }
     $json = [regex]::Match($text.Substring($start+$marker.Length),'(?ms)^\s*(\[.*?^\])')
-    if (!$json.Success) { throw 'Sunshine has not finished reporting its active displays.' }
+    if (!$json.Success) { return $false }
     $selectedOutputs = @(($json.Groups[1].Value | ConvertFrom-Json) | Where-Object { $_.display_name -eq $Device })
     if ($selectedOutputs.Count -ne 1 -or $selectedOutputs[0].device_id -ne $Id) { throw 'Sunshine could not confirm the requested display. Refresh the display selection and restart the host.' }
+    return $true
 }
 function Write-HostApplications($Path) {
     $entries = @(@{name='P5Cast'; 'image-path'='desktop.png'})
@@ -170,26 +174,24 @@ function Write-HostApplications($Path) {
     }
     Write-Text $Path (@{env=@{}; apps=$entries} | ConvertTo-Json -Depth 4 -Compress)
 }
-function Start-RelayHost {
-    $chosen = $Address
-    $available = @(Get-LocalAddresses | Sort-Object hasGateway -Descending)
-    if (!$chosen -and $available.Count) { $chosen = $available[0].address }
-    if (!$chosen) { $chosen = '127.0.0.1' }
-    if (!(Test-PrivateAddress $chosen) -or ($chosen -ne '127.0.0.1' -and $available.address -notcontains $chosen)) { throw 'Choose a private IPv4 address assigned to an active LAN or VPN adapter on this host.' }
-    $current = Get-Session
-    $displayId = if ($DisplayDevice) { Resolve-HostDisplay $DisplayDevice } else { '' }
-    if ($current) {
-        if ($current.address -ne $chosen) { throw "Already hosting on $($current.address). Stop hosting before changing the address." }
-        if ([string]$current.displayId -ne $displayId) { throw 'Stop the host before changing the shared display.' }
-        return @{ok=$true; message="Already hosting on $chosen."; address=$chosen; displayDevice=$current.displayDevice; displayId=$current.displayId}
-    }
+function Save-HostSession($Session) {
+    $tempSession = Join-Path $private ([guid]::NewGuid().ToString('N')+'.tmp')
+    try {
+        Write-Text $tempSession ($Session | ConvertTo-Json -Compress)
+        if ([IO.File]::Exists($sessionFile)) { [IO.File]::Replace($tempSession,$sessionFile,[System.Management.Automation.Language.NullString]::Value) }
+        else { [IO.File]::Move($tempSession,$sessionFile) }
+    } finally { [IO.File]::Delete($tempSession) }
+}
+function Start-HostProcess($chosen,$displayId,$log) {
     $binary = Install-Binary sunshine
+    if (Get-Process -Name sunshine -ErrorAction SilentlyContinue | Where-Object Path -eq $binary) {
+        throw 'An existing P5Cast host has no matching session record. Close that Sunshine process before restarting the host.'
+    }
     [IO.Directory]::CreateDirectory($private) | Out-Null
     New-HostCredential
     $apps = Join-Path $private 'apps.json'
     Write-HostApplications $apps
     $configPath = Join-Path $private 'sunshine.conf'
-    $log = Join-Path $private 'sunshine.log'
     $config = @(
         'sunshine_name = P5Cast', "port = $port", "bind_address = $chosen", 'address_family = ipv4',
         "external_ip = $chosen", 'upnp = disabled', 'origin_web_ui_allowed = lan',
@@ -201,23 +203,39 @@ function Start-RelayHost {
     ) -join [Environment]::NewLine
     if ($displayId) { $config += [Environment]::NewLine + "output_name = $displayId" }
     Write-Text $configPath $config
-    $proc = Start-Process -FilePath $binary -ArgumentList ('"{0}"' -f $configPath) -WorkingDirectory (Split-Path $binary) -WindowStyle Hidden -PassThru
+    Start-Process -FilePath $binary -ArgumentList ('"{0}"' -f $configPath) -WorkingDirectory (Split-Path $binary) -WindowStyle Hidden -PassThru
+}
+function Start-RelayHost {
+    $chosen = $Address
+    $available = @(Get-LocalAddresses | Sort-Object hasGateway -Descending)
+    if (!$chosen -and $available.Count) { $chosen = $available[0].address }
+    if (!$chosen) { $chosen = '127.0.0.1' }
+    if (!(Test-PrivateAddress $chosen) -or ($chosen -ne '127.0.0.1' -and $available.address -notcontains $chosen)) { throw 'Choose a private IPv4 address assigned to an active LAN or VPN adapter on this host.' }
+    $current = Get-Session
+    $displayId = if ($DisplayDevice) { Resolve-HostDisplay $DisplayDevice } else { '' }
+    if ($current) {
+        if ($current.address -ne $chosen) { throw "Already hosting on $($current.address). Stop hosting before changing the address." }
+        if ([string]$current.displayId -ne $displayId) { throw 'Stop the host before changing the shared display.' }
+        if (!$current.starting) { return @{ok=$true; message="Already hosting on $chosen."; address=$chosen; displayDevice=$current.displayDevice; displayId=$current.displayId} }
+    }
+    $log = Join-Path $private 'sunshine.log'
+    $proc = if ($current) { $current.OwnedProcess } else { Start-HostProcess $chosen $displayId $log }
     try {
-        $session = @{processId=$proc.Id; startTicks=$proc.StartTime.ToUniversalTime().Ticks.ToString(); address=$chosen; displayDevice=$DisplayDevice; displayId=$displayId}
+        $session = @{processId=$proc.Id; startTicks=$proc.StartTime.ToUniversalTime().Ticks.ToString(); address=$chosen; displayDevice=$DisplayDevice; displayId=$displayId; starting=$true}
+        if (!$current) { Save-HostSession $session }
         $deadline = [DateTime]::UtcNow.AddSeconds(75)
         do {
             if ($proc.HasExited) { throw "Sunshine exited ($($proc.ExitCode)). Check $log for an occupied port or encoder error." }
             $ready = $false
             try { $ready = (Test-Path -LiteralPath $certificate) -and $null -ne (Invoke-HostApi $session 'pin' $null) }
             catch { $lastFailure = $_.Exception.GetBaseException().Message }
+            if ($ready -and $displayId) {
+                $ready = Confirm-HostDisplay $log $DisplayDevice $displayId
+                if (!$ready) { $lastFailure = 'Waiting for Sunshine to finish reporting its active displays.' }
+            }
             if ($ready) {
-                if ($displayId) { Confirm-HostDisplay $log $DisplayDevice $displayId }
-                $tempSession = Join-Path $private ([guid]::NewGuid().ToString('N')+'.tmp')
-                try {
-                    Write-Text $tempSession ($session | ConvertTo-Json -Compress)
-                    if ([IO.File]::Exists($sessionFile)) { [IO.File]::Replace($tempSession,$sessionFile,[System.Management.Automation.Language.NullString]::Value) }
-                    else { [IO.File]::Move($tempSession,$sessionFile) }
-                } finally { [IO.File]::Delete($tempSession) }
+                $session.starting=$false
+                Save-HostSession $session
                 return @{ok=$true; message="Hosting on $chosen. Pair a client, then open your game on the shared display."; address=$chosen; log=$log; displayDevice=$DisplayDevice; displayId=$displayId}
             }
             Start-Sleep -Milliseconds 250
@@ -226,7 +244,7 @@ function Start-RelayHost {
     } catch {
         if (!$proc.HasExited) { Stop-OwnedHost $proc }
         throw
-    }
+    } finally { $proc.Dispose() }
 }
 function Stop-OwnedHost($Process) {
     if (!('Cadrivect.Streaming.HostApi' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'HostApi.cs') }
@@ -239,7 +257,7 @@ function Get-Status {
     $session = Get-Session
     $addresses = @(Get-LocalAddresses | Sort-Object hasGateway -Descending)
     $vigem = Get-Service -Name ViGEmBus -ErrorAction SilentlyContinue
-    return @{ok=$true; message=$(if ($session) {"Hosting on $($session.address)."} else {'Host is stopped.'});
+    return @{ok=$true; message=$(if ($session.starting) {"Host startup on $($session.address) is awaiting confirmation."} elseif ($session) {"Hosting on $($session.address)."} else {'Host is stopped.'});
         running=[bool]$session; address=$session.address; addresses=$addresses; displayDevice=$session.displayDevice; displayId=$session.displayId;
         controllerDriver=[bool]$vigem; controllerDriverName='ViGEmBus';
         hostInstalled=(Test-Path -LiteralPath (Get-BinaryPath sunshine)); clientInstalled=(Test-Path -LiteralPath (Get-BinaryPath moonlight))}
@@ -348,12 +366,14 @@ function Approve-Pin {
     if (!$Pin) { throw 'Enter the four-digit PIN displayed on the client.' }
     $session = Get-Session
     if (!$session) { throw 'Start the host first.' }
-    $pending = @((Invoke-HostApi $session 'pin' $null).pairings)
+    $pairings = (Invoke-HostApi $session 'pin' $null).pairings
+    $pending = @($pairings | Where-Object { $null -ne $_ })
     if ($pending.Count -eq 0) { throw 'No pending request. Select Pair on the client first.' }
     if ($pending.Count -gt 1) { throw 'Multiple clients are requesting pairing. Cancel the other requests and try again.' }
     $request = $pending[0]
+    if ([string]::IsNullOrWhiteSpace([string]$request.id)) { throw 'The pending pairing has no request ID. Pair again on the client.' }
     $result = Invoke-HostApi $session 'pin' @{pairing_id=$request.id; pin=$Pin; name=$request.name}
-    if (!$result.status) { throw 'The pairing handshake failed. Start pairing again and confirm the new PIN.' }
+    if ([string]$result.status -notin 'true','1') { throw 'The pairing handshake failed. Start pairing again and confirm the new PIN.' }
     return @{ok=$true; message="Paired $($request.name)."; client=$request.name}
 }
 
@@ -393,7 +413,7 @@ try {
             $paired = (Invoke-HostApi $session 'clients/list' $null).named_certs | Where-Object uuid -eq $ClientId.ToString() | Select-Object -First 1
             if (!$paired) { throw 'That client pairing was not found.' }
             $response = Invoke-HostApi $session 'clients/unpair' @{uuid=$paired.uuid}
-            if (!$response.status) { throw 'The host could not revoke that client.' }
+            if ([string]$response.status -notin 'true','1') { throw 'The host could not revoke that client.' }
             @{ok=$true; message='Client pairing revoked.'}
         }
         default { Start-RelayClient }

@@ -122,7 +122,7 @@ internal static partial class EmbeddedProbe
         writer.Write(bitrate); writer.Write(rate); writer.Write(channels);
         if(lossStats) {writer.Write(4); writer.Write(7); writer.Write(1); writer.Write(2); writer.Write(27500); writer.Write(6000);}
     }
-    static void CheckDirectEndings(Assembly player,string runtime) {
+    static void CheckDirectEndings(Assembly player,string runtime,string keyframe) {
         var video=player.GetType("DirectVideo",true);
         // A clean boundary, a partial length, a partial picture, and a partial telemetry record.
         foreach(var tail in new[]{new byte[0],new byte[]{5,0},new byte[]{5,0,0,0,1},new byte[]{0,0,0,0,1}}) {
@@ -142,6 +142,29 @@ internal static partial class EmbeddedProbe
                 Check((bool)video.GetProperty("Closed").GetValue(source,null),"Direct source failed to close after EOF.");
                 string error=(string)video.GetProperty("Error").GetValue(source,null);
                 Check(tail.Length==0 ? error=="" : error.Contains("middle of a record"),"Unexpected Direct terminal status: "+error);
+            }
+        }
+        foreach(bool recover in new[]{true,false}) {
+            var name="P5CastRecovery"+Guid.NewGuid().ToString("N");
+            using(var source=(IDisposable)Activator.CreateInstance(video,new object[]{name,runtime})) {
+                using(var pipe=new NamedPipeClientStream(".",name,PipeDirection.Out))
+                using(var writer=new BinaryWriter(pipe)) {
+                    pipe.Connect(2000);
+                    writer.Write(0x33564443); writer.Write(1);
+                    writer.Write(3); writer.Write(new byte[3]);
+                    if(recover) {
+                        byte[] clean=File.ReadAllBytes(keyframe);
+                        writer.Write(clean.Length); writer.Write(clean);
+                    }
+                }
+                var wait=Stopwatch.StartNew();
+                while((int)video.GetProperty("DecodedFrames").GetValue(source,null)==0 &&
+                      !(bool)video.GetProperty("Closed").GetValue(source,null) && wait.ElapsedMilliseconds<3000) Thread.Sleep(5);
+                Check((int)video.GetProperty("CorruptUnits").GetValue(source,null)==1,"The damaged access unit was not counted.");
+                if(recover) Check((int)video.GetProperty("DecodedFrames").GetValue(source,null)==1 &&
+                      (string)video.GetProperty("Error").GetValue(source,null)=="","The next H.264 keyframe did not recover playback.");
+                else Check(((string)video.GetProperty("Error").GetValue(source,null)).Contains("before video recovered"),
+                           "A corrupt stream with no subsequent picture reported a clean end.");
             }
         }
     }
@@ -401,7 +424,9 @@ internal static partial class EmbeddedProbe
         Exception failure=null; int result=-1,exitCode=1;
         var api=Assembly.LoadFrom(Path.GetFullPath(args[0])).GetType("Cadrivect.Engine.EmbeddedPlayback",true);
         if(args[6]=="--offscreen-capture") return CheckCapture(api,args[4],renderer);
-        CheckDirectEndings(api.Assembly,args[1]);
+        CheckDirectEndings(api.Assembly,args[1],args[2]);
+        var recoverable=api.Assembly.GetType("Renderer",true).GetMethod("IsEffectFailure",BindingFlags.NonPublic|BindingFlags.Static);
+        Check((bool)recoverable.Invoke(null,new object[]{new InvalidDataException("Invalid optional runtime")}),"A damaged optional effect would end playback.");
         var host=new VideoHost(); var window=new Window { Title="WPF host test",Width=700,Height=420,Content=host };
         var end=new ManualResetEvent(false); var pause=new ManualResetEvent(false); Thread worker=null;
         try {

@@ -171,6 +171,19 @@ partial class VerifyHdr
             AddressU=TextureAddressMode.Clamp,AddressV=TextureAddressMode.Clamp,AddressW=TextureAddressMode.Clamp,
             Filter=Filter.MinMagMipLinear,ComparisonFunction=Comparison.Never,MaximumAnisotropy=1,MaximumLod=16})) {
             var c=d.ImmediateContext;
+            if(!d3d12) {
+                // A typeless texture can be allocated but a view requires a concrete format.
+                // A failed view must release its newly acquired texture reference immediately.
+                Marshal.AddRef(d.NativePointer);
+                int before=Marshal.Release(d.NativePointer);
+                var gpuImage=compiled.GetType("GpuImage",true);
+                try {
+                    using((IDisposable)Activator.CreateInstance(gpuImage,new object[]{d,64,64,Format.R32_Typeless,true,false})) {}
+                    throw new InvalidDataException("The driver unexpectedly accepted a typeless shader view.");
+                } catch(TargetInvocationException ex) { if(!(ex.InnerException is SharpDXException)) throw; }
+                Marshal.AddRef(d.NativePointer);
+                if(Marshal.Release(d.NativePointer)!=before) throw new InvalidDataException("Failed texture view creation leaked a device reference.");
+            }
             ushort[] data=new ushort[W*H*4];
             for(int y=0;y<H;y++) for(int x=0;x<W;x++) {
                 int p=(y*W+x)*4;

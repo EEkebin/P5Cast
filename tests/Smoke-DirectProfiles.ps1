@@ -60,6 +60,10 @@ namespace Cadrivect {
                     return 0;
                 }
                 if(!request.SequenceEqual(account.Concat(Encoding.ASCII.GetBytes("01234567")))) return 42;
+                if(args[1]=="slow.invalid") {
+                    using(var ready=EventWaitHandle.OpenExisting(Environment.GetEnvironmentVariable("P5CAST_PAIR_FIXTURE_READY"))) ready.Set();
+                    Thread.Sleep(30000);
+                }
                 if(args[1]=="failed.invalid") return 27;
                 byte[] answer=new byte[74]; Encoding.ASCII.GetBytes("CDR1").CopyTo(answer,0);
                 new byte[]{1,2,3,4,5,6}.CopyTo(answer,4);
@@ -96,6 +100,18 @@ namespace Cadrivect {
                 bool failed=false;
                 try {DirectConsole.Pair(host,a,"0123 4567").GetAwaiter().GetResult();} catch(InvalidOperationException){failed=true;}
                 Require(failed && !Directory.Exists(Path.Combine(local,"Cadrivect","consoles")),"Failed pairing persisted a record.");
+            }
+            string eventName="Local\\P5Cast.PairFixture."+Guid.NewGuid().ToString("N");
+            Environment.SetEnvironmentVariable("P5CAST_PAIR_FIXTURE_READY",eventName);
+            using(var ready=new EventWaitHandle(false,EventResetMode.ManualReset,eventName))
+            using(var cancel=new CancellationTokenSource()) {
+                var pending=DirectConsole.Pair("slow.invalid",a,"01234567",cancel.Token);
+                Require(ready.WaitOne(4000),"Pairing fixture did not start");
+                cancel.Cancel();
+                Require(((IAsyncResult)pending).AsyncWaitHandle.WaitOne(3000),"Cancelled pairing left its helper running");
+                bool cancelled=false;
+                try {pending.GetAwaiter().GetResult();} catch(OperationCanceledException){cancelled=true;}
+                Require(cancelled && !Directory.Exists(Path.Combine(local,"Cadrivect","consoles")),"Cancelled pair was persisted");
             }
             var row=DirectConsole.Pair("fixture.invalid",a,"01234567").GetAwaiter().GetResult();
             Require(row.Name=="Fixture PS5" && row.AccountId==a && row.Mac=="010203040506","Registration metadata");

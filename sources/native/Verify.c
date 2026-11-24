@@ -188,6 +188,19 @@ static void verify_audio(void)
 {
     CHECK(SDL_AudioInit("dummy") == 0);
     CHECK(!strcmp(SDL_GetCurrentAudioDriver(), "dummy"));
+    Audio low_rate = {0};
+    audio_settings(1, 8000, &low_rate);
+    CHECK(low_rate.device && !low_rate.failed);
+    SDL_PauseAudioDevice(low_rate.device, 1);
+    int16_t block8k[160], output8k[256];
+    for (size_t i = 0; i < 160; ++i) block8k[i] = 1000;
+    audio_frame(block8k, 160, &low_rate);
+    audio_render(&low_rate, (Uint8 *)output8k, sizeof(output8k));
+    CHECK(!low_rate.playing && low_rate.queued_frames == 160 && !low_rate.underruns && output8k[255] == 0);
+    audio_frame(block8k, 160, &low_rate);
+    audio_render(&low_rate, (Uint8 *)output8k, sizeof(output8k));
+    CHECK(low_rate.playing && low_rate.queued_frames == 64 && !low_rate.underruns && output8k[255] == 1000);
+    SDL_CloseAudioDevice(low_rate.device);
     uint32_t fixed = verify_burst_train(false);
     uint32_t adaptive = verify_burst_train(true);
     printf("Synthetic 48 kHz burst train: %u underruns with fixed 15 ms, %u adaptive; stable playback returned to 15 ms.\n",

@@ -86,7 +86,7 @@ namespace Cadrivect
                 try {
                     Reading reading;
                     int hr = VerifyOwnChildAudio(delegate {
-                        try { child = (Process)begin.Invoke(null, new object[] {"share-audio-fixture", false}); }
+                        try { child = (Process)begin.Invoke(null, new object[] {"share-audio-fixture", false, false}); }
                         catch (Exception error) { launchError = error; }
                     }, out reading);
                     Marshal.ThrowExceptionForHR(hr);

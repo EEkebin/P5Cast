@@ -25,7 +25,7 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 [assembly: AssemblyTitle("P5Cast")]
 [assembly: AssemblyProduct("P5Cast")]
 [assembly: AssemblyDescription("PS5 player and private network streaming host")]
-[assembly: AssemblyVersion("0.24.2.0")]
+[assembly: AssemblyVersion("0.24.3.0")]
 
 namespace Cadrivect
 {
@@ -314,10 +314,17 @@ namespace Cadrivect
                 e.Handled=true;
             };
             Bind("PairConsole",async delegate {
+                if(pairingCancellation!=null) return;
+                pairingCancellation=new System.Threading.CancellationTokenSource();
+                UpdateTransport();
                 Show("Pairing with your PS5...");
-                var c=await DirectConsole.Pair(UI<TextBox>("PairAddress").Text,UI<TextBox>("PsnAccount").Text,UI<TextBox>("PairCode").Text);
-                consoleAddresses[c.Mac]=c.Address; ReloadConsoles(c.Mac); SetPage("Play"); SaveSettings();
-                Show("Paired with "+c.Name+". Press the play button to connect.");
+                try {
+                    var c=await DirectConsole.Pair(UI<TextBox>("PairAddress").Text,UI<TextBox>("PsnAccount").Text,UI<TextBox>("PairCode").Text,pairingCancellation.Token);
+                    if(pairingCancellation.IsCancellationRequested) return;
+                    consoleAddresses[c.Mac]=c.Address; ReloadConsoles(c.Mac); SetPage("Play"); SaveSettings();
+                    Show("Paired with "+c.Name+". Press the play button to connect.");
+                } catch(OperationCanceledException) { Show("Pairing cancelled."); }
+                finally {EndPairing();}
             });
             Bind("StartHost", () => {
                 var hostTarget=hostScreen.SelectedItem as DisplayTarget;
@@ -404,7 +411,7 @@ namespace Cadrivect
                     if(cancellation.IsCancellationRequested || proc.ExitCode!=0 || !File.Exists(file)) return false;
                 }
                 var gpu=json.Deserialize<Dictionary<string,object>>(File.ReadAllText(file));
-                if(closing || generation!=gpuProbeGeneration) return false;
+                if(gpu==null || closing || generation!=gpuProbeGeneration) return false;
                 meter.SetCapabilities(gpu);
                 completed=true;
                 if(!Active && !preparing && revision==pictureSelectionRevision) {
@@ -413,11 +420,11 @@ namespace Cadrivect
                     if(meter.ProviderAvailable(restoreProvider)) {meter.FrameGenerationProvider=restoreProvider; factor=2;}
                     meter.Reset(mode,factor);
                 }
-            } catch(IOException) {} catch(System.ComponentModel.Win32Exception) {} catch(ArgumentException) {} catch(InvalidOperationException) {}
+            } catch(IOException) {} catch(UnauthorizedAccessException) {} catch(System.ComponentModel.Win32Exception) {} catch(ArgumentException) {} catch(InvalidOperationException) {}
             finally {
                 if(!completed && !closing && generation==gpuProbeGeneration)
                     meter.SetCapabilities(new Dictionary<string,object> {{"probeFailure","GPU support check could not finish for this graphics API."}});
-                try {File.Delete(file);} catch(IOException) {}
+                try {File.Delete(file);} catch(IOException) {} catch(UnauthorizedAccessException) {}
             }
             return completed;
         }
@@ -519,6 +526,7 @@ namespace Cadrivect
 
         void SetPage(string value,bool reveal=true)
         {
+            if(pairingCancellation!=null && !setupPairing) pairingCancellation.Cancel();
             if(reveal) SetSettingsDrawer(true);
             page = value;
             pendingRevocation=null;
@@ -635,6 +643,7 @@ namespace Cadrivect
             catch (IOException) {} catch (ArgumentException) {} catch (InvalidOperationException) {} catch (UnauthorizedAccessException) {}
             return new Dictionary<string,object>();
         }
+        bool saveFailureReported;
         void SaveSettings()
         {
             try {
@@ -650,10 +659,22 @@ namespace Cadrivect
                     clientHdr=UI<CheckBox>("ClientHdr").IsChecked==true,hostDisplay=hostTarget==null ? "" : hostTarget.DeviceName,
                     address=UI<TextBox>("HostAddress").Text.Trim(), bind=SelectedIP(), source=source, page=page, quality=UI<ComboBox>("Quality").SelectedIndex };
                 string temp = preferences+"."+Guid.NewGuid().ToString("N")+".tmp";
-                File.WriteAllText(temp,json.Serialize(settings));
-                if (File.Exists(preferences)) File.Replace(temp,preferences,null);
-                else File.Move(temp,preferences);
-            } catch (IOException) {} catch (UnauthorizedAccessException) {}
+                try {
+                    File.WriteAllText(temp,json.Serialize(settings));
+                    if(File.Exists(preferences)) File.Replace(temp,preferences,null);
+                    else {
+                        try {File.Move(temp,preferences);}
+                        catch(IOException) {if(!File.Exists(preferences)) throw; File.Replace(temp,preferences,null);}
+                    }
+                } finally {File.Delete(temp);}
+                saveFailureReported=false;
+            } catch (IOException) {ReportSaveFailure();} catch (UnauthorizedAccessException) {ReportSaveFailure();}
+        }
+        void ReportSaveFailure()
+        {
+            if(saveFailureReported) return;
+            saveFailureReported=true;
+            Show("Settings apply for this session. P5Cast could not save them to disk.",true);
         }
     }
 }

@@ -26,11 +26,13 @@ internal sealed class GpuImage : IDisposable
             BindFlags=BindFlags.ShaderResource | (target ? BindFlags.RenderTarget : BindFlags.None)
                 | (unordered ? BindFlags.UnorderedAccess : BindFlags.None)
         };
-        Texture=new Texture2D(device,description);
-        Read=new ShaderResourceView(device,Texture);
-        if(target) Write=new RenderTargetView(device,Texture);
+        try {
+            Texture=new Texture2D(device,description);
+            Read=new ShaderResourceView(device,Texture);
+            if(target) Write=new RenderTargetView(device,Texture);
+        } catch { Dispose(); throw; }
     }
-    public void Dispose() { if(Write!=null) Write.Dispose(); Read.Dispose(); Texture.Dispose(); }
+    public void Dispose() { if(Write!=null) Write.Dispose(); if(Read!=null) Read.Dispose(); if(Texture!=null) Texture.Dispose(); }
 }
 
 internal sealed partial class Renderer : IDisposable
@@ -444,7 +446,7 @@ internal sealed partial class Renderer : IDisposable
         var dx=error as SharpDXException;
         // Device removal, reset, and hung-device errors cannot be repaired by switching shaders.
         if(dx!=null) return dx.HResult!=unchecked((int)0x887A0005) && dx.HResult!=unchecked((int)0x887A0006) && dx.HResult!=unchecked((int)0x887A0007);
-        return error is InvalidOperationException || error is IOException || error is UnauthorizedAccessException ||
+        return error is InvalidOperationException || error is IOException || error is InvalidDataException || error is UnauthorizedAccessException ||
                error is DllNotFoundException || error is EntryPointNotFoundException || error is BadImageFormatException ||
                error is ArgumentException || error is OutOfMemoryException;
     }

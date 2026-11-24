@@ -19,6 +19,14 @@ cmake --build "$work/output" --parallel 6 --target CadrivectDirect
 
 # Resolve each imported DLL from the same signed UCRT64 package set used to link.
 stage=$(mktemp -d "$work/runtime-XXXXXXXX")
+cleanup_stage() {
+    local resolved
+    resolved=$(realpath -- "$stage") || return
+    if [[ $(dirname -- "$resolved") == "$(realpath -- "$work")" && $(basename -- "$resolved") =~ ^runtime-[a-zA-Z0-9]{8}$ ]]; then
+        rm -rf -- "$resolved"
+    fi
+}
+trap cleanup_stage EXIT
 mkdir -p "$stage/licenses"
 cp "$work/output/CadrivectDirect.exe" "$stage/"
 strip "$stage/CadrivectDirect.exe"
@@ -55,11 +63,10 @@ tar --exclude=.git --exclude=__pycache__ --exclude='*.pyc' -czf "$stage/Direct-s
     -C "$work" upstream/.gitmodules upstream/CMakeLists.txt upstream/COPYING upstream/LICENSES \
         upstream/cmake upstream/lib upstream/third-party/CMakeLists.txt \
         upstream/third-party/nanopb upstream/third-party/gf-complete upstream/third-party/jerasure
-mkdir -p "$src/bin"
-cp -R "$stage/." "$src/bin/"
-"$src/bin/CadrivectDirect.exe" --version
+"$stage/CadrivectDirect.exe" --version
 if [[ ${CADRIVECT_NATIVE_VERIFY:-0} == 1 ]]; then
     cmake --build "$work/output" --parallel 6 --target CadrivectDirectVerify
-    cp "$work/output/CadrivectDirectVerify.exe" "$stage/"
-    "$stage/CadrivectDirectVerify.exe"
+    PATH="$stage:$PATH" "$work/output/CadrivectDirectVerify.exe"
 fi
+mkdir -p "$src/bin"
+cp -R "$stage/." "$src/bin/"

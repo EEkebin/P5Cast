@@ -25,15 +25,26 @@ try {
     $priorSetup=$env:P5CAST_PROBE_SETUP
     $priorStop=$env:P5CAST_PROBE_STOP
     try {
-        $env:P5CAST_PROBE_SETUP=if($CheckSetup){'1'}else{'0'}
-        $env:P5CAST_PROBE_STOP=if($CheckStop){'1'}else{'0'}
-        $env:P5CAST_PROBE_TRANSPORT=if($CheckTransport){'1'}else{'0'}
-        $env:P5CAST_PROBE_DRAWERS=if($CheckDrawers){'1'}else{'0'}
         $env:P5CAST_SCREENSHOT=if($Screenshot){[IO.Path]::GetFullPath($Screenshot)}else{$null}
-        $env:P5CAST_PROBE_SCALING=if($CheckScaling){'1'}else{'0'}
-        $env:P5CAST_PROBE_WIPE_INPUT=if($CheckWipeInput){'1'}else{'0'}
-        $env:P5CAST_PROBE_RENDERERS=if($CheckHdr){'hdr'}elseif($CheckRenderers -or $CheckWipeInput){'1'}else{'0'}
-        & $probe $AppRoot $stage $id
+        # Setup requires a fresh profile; the Stop fixture requires a configured demo.
+        $cases=@()
+        if($CheckSetup){$cases+='setup'}
+        if($CheckStop){$cases+='stop'}
+        if(!$cases.Count -or $CheckTransport -or $CheckDrawers -or $CheckScaling -or $CheckRenderers -or $CheckHdr -or $CheckWipeInput -or $Screenshot){$cases+='window'}
+        foreach($case in $cases){
+            $caseDir=Join-Path $stage $case
+            [void][IO.Directory]::CreateDirectory($caseDir)
+            $env:P5CAST_PROBE_SETUP=if($case -eq 'setup'){'1'}else{'0'}
+            $env:P5CAST_PROBE_STOP=if($case -eq 'stop'){'1'}else{'0'}
+            $window=$case -eq 'window'
+            $env:P5CAST_PROBE_TRANSPORT=if($window -and $CheckTransport){'1'}else{'0'}
+            $env:P5CAST_PROBE_DRAWERS=if($window -and $CheckDrawers){'1'}else{'0'}
+            $env:P5CAST_PROBE_SCALING=if($window -and $CheckScaling){'1'}else{'0'}
+            $env:P5CAST_PROBE_WIPE_INPUT=if($window -and $CheckWipeInput){'1'}else{'0'}
+            $env:P5CAST_PROBE_RENDERERS=if($window -and $CheckHdr){'hdr'}elseif($window -and ($CheckRenderers -or $CheckWipeInput)){'1'}else{'0'}
+            & $probe $AppRoot $caseDir ($id+'-'+$case)
+            if($LASTEXITCODE){throw "Window chrome regression failed in the $case fixture."}
+        }
     } finally {
         $env:P5CAST_PROBE_RENDERERS=$prior; $env:P5CAST_PROBE_SCALING=$priorScale
         $env:P5CAST_PROBE_DRAWERS=$priorDrawer; $env:P5CAST_SCREENSHOT=$priorShot
@@ -42,7 +53,6 @@ try {
         $env:P5CAST_PROBE_SETUP=$priorSetup
         $env:P5CAST_PROBE_STOP=$priorStop
     }
-    if($LASTEXITCODE){throw 'Window chrome regression failed.'}
 } finally {
     $target=[IO.Path]::GetFullPath($stage)
     if([IO.Path]::GetDirectoryName($target) -eq $tempRoot -and [IO.Path]::GetFileName($target) -eq $id){

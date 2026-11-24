@@ -11,7 +11,7 @@ namespace Cadrivect
     // Keep Direct timing and counters off the rendering and audio threads.
     internal sealed class DirectDiagnostics
     {
-        static readonly string[] columns=("sampleId elapsedMs targetFps captured presented generated decodedFrames replacedFrames " +
+        static readonly string[] columns=("sampleId elapsedMs targetFps captured presented generated decodedFrames replacedFrames decoderCorruptUnits " +
             "sourceFps submittedFps decodeMs lastPcSubmitMs requestedVideoKbps bitrateMbps videoFramesLost slowVideoHandoffs " +
             "audioQueueMs audioTargetMs audioUnderruns audioConcealments audioQueueTrims audioFrameGapMaxMs audioCallbackGapMaxMs").Split(' ');
         readonly BlockingCollection<string> samples=new BlockingCollection<string>(32);

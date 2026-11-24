@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$Version = '0.24.2',[string]$BuildDir=$PSScriptRoot)
+param([string]$Version = '0.24.3',[string]$BuildDir=$PSScriptRoot)
 $ErrorActionPreference = 'Stop'
 if ($Version -notmatch '^\d+\.\d+\.\d+(-[a-z0-9.-]+)?$') { throw 'Invalid version.' }
 $dist = Join-Path $PSScriptRoot 'dist'
@@ -15,8 +15,10 @@ try {
         $sourceRoot=if ($file -eq 'P5Cast.exe') {$BuildDir} else {$PSScriptRoot}
         Copy-Item -LiteralPath (Join-Path $sourceRoot $file) -Destination (Join-Path $bundle $file)
     }
-    foreach ($folder in 'sources','streaming') {
-        Get-ChildItem -File -LiteralPath (Join-Path $PSScriptRoot $folder) | Copy-Item -Destination (Join-Path $bundle $folder)
+    foreach ($file in 'sources\Get-SourceStatus.ps1','sources\Install-DlssNeural.ps1','sources\Install-Fruc.ps1',
+             'sources\Prepare-Decoder.ps1','sources\SignalRun.cs','sources\SourceTools.ps1','sources\Start-Source.ps1',
+             'streaming\HostApi.cs','streaming\Relay.ps1','streaming\SunshineDisplay.cs','streaming\packages.json') {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination (Join-Path $bundle $file)
     }
     $runtimeFiles = @('CadrivectPlayer.exe','SharpDX.dll','SharpDX.Direct3D11.dll','SharpDX.DXGI.dll','SharpDX-LICENSE.txt','FSR-LICENSE.txt','NVIDIA-NIS-LICENSE.txt',
         'P5Cast.NeuralVk.dll','NVIDIA-NEURAL-RENDERING-LICENSE.txt','Cadrivect.Ngx.dll','nvngx_dlss.dll','NVIDIA-RTX-LICENSE.txt','Cadrivect.RtxVideo.dll','nvngx_vsr.dll',
@@ -28,12 +30,36 @@ try {
         Copy-Item -LiteralPath (Join-Path $BuildDir "engine\bin\$file") -Destination (Join-Path $bundle "engine\bin\$file")
     }
     Copy-Item -Recurse -LiteralPath (Join-Path $BuildDir 'engine\bin\direct') -Destination (Join-Path $bundle 'engine\bin\direct')
+    $files = @(Get-ChildItem -LiteralPath $bundle -Recurse -File | Sort-Object FullName | ForEach-Object {
+        [ordered]@{path=$_.FullName.Substring($bundle.Length+1); sha256=(Get-FileHash -LiteralPath $_.FullName).Hash}
+    })
+    [IO.File]::WriteAllText((Join-Path $bundle 'payload.json'),(@{version=$Version;files=$files} | ConvertTo-Json -Depth 3))
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = Join-Path $stage 'release.zip'
     [IO.Compression.ZipFile]::CreateFromDirectory($bundle,$archive,[IO.Compression.CompressionLevel]::Optimal,$true)
-    Copy-Item -LiteralPath $archive -Destination $package -Force
-    $hash = (Get-FileHash $package).Hash.ToLowerInvariant()
-    [IO.File]::WriteAllText("$package.sha256","$hash  $([IO.Path]::GetFileName($package))" + [Environment]::NewLine)
+    $hash = (Get-FileHash $archive).Hash.ToLowerInvariant()
+    $checksum = Join-Path $stage 'release.sha256'
+    [IO.File]::WriteAllText($checksum,"$hash  $([IO.Path]::GetFileName($package))" + [Environment]::NewLine)
+    $lock = New-Object Threading.Mutex($false,("Local\P5Cast.Package."+ $Version))
+    $locked = $false
+    try {
+        try { $locked=$lock.WaitOne(60000) } catch [Threading.AbandonedMutexException] { $locked=$true }
+        if (!$locked) { throw "Another package operation for $Version is still running." }
+        $backup = Join-Path $stage 'previous.zip'
+        if ([IO.File]::Exists($package)) { [IO.File]::Replace($archive,$package,$backup) }
+        else { [IO.File]::Move($archive,$package) }
+        try {
+            if ([IO.File]::Exists("$package.sha256")) { [IO.File]::Replace($checksum,"$package.sha256",[System.Management.Automation.Language.NullString]::Value) }
+            else { [IO.File]::Move($checksum,"$package.sha256") }
+        } catch {
+            if ([IO.File]::Exists($backup)) { [IO.File]::Replace($backup,$package,[System.Management.Automation.Language.NullString]::Value) }
+            else { [IO.File]::Delete($package) }
+            throw
+        }
+    } finally {
+        if ($locked) { $lock.ReleaseMutex() }
+        $lock.Dispose()
+    }
     Get-Item -LiteralPath $package
 } finally {
     if ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($stage)) -eq [IO.Path]::GetFullPath($dist)) {

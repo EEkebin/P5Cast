@@ -282,8 +282,9 @@ namespace Cadrivect
             catch {if(p!=null){StopHelper(p); p.Dispose();} throw;}
             finally {Clear(secret);}
         }
-        public static Task<DirectConsole> Pair(string host,string account,string pin)
+        public static Task<DirectConsole> Pair(string host,string account,string pin,CancellationToken cancel=default(CancellationToken))
         {
+            cancel.ThrowIfCancellationRequested();
             string address=Host(host);
             byte[] accountId;
             try {accountId=Convert.FromBase64String((account??"").Trim());} catch(FormatException) {throw new ArgumentException("Enter your eight-byte PSN Account ID in Base64.");}
@@ -295,15 +296,23 @@ namespace Cadrivect
             Clear(accountId);
             return Task.Run(delegate {
                 var data=new byte[74]; var keys=new byte[32];
-                try {using(var p=Begin("--register "+address,true)) {
-                    try {
-                        WriteSecrets(p,request); Clear(request);
-                        if(!p.WaitForExit(60000)) throw new TimeoutException("Pairing timed out. Get a fresh Link Device code and try again.");
-                    } catch {StopHelper(p); throw;}
-                    using(var reader=new BinaryReader(p.StandardOutput.BaseStream)) {
-                        int length=0; while(length<data.Length) {int n=reader.Read(data,length,data.Length-length); if(n==0) break; length+=n;}
-                        if(p.ExitCode!=0 || length!=data.Length || Encoding.ASCII.GetString(data,0,4)!="CDR1")
-                            throw new InvalidOperationException("The PS5 did not accept registration. Check its address, account and Link Device code.");
+                try {
+                    cancel.ThrowIfCancellationRequested();
+                    using(var p=Begin("--register "+address,true)) {
+                        try {
+                            WriteSecrets(p,request); Clear(request);
+                            var wait=Stopwatch.StartNew();
+                            while(!p.WaitForExit(100)) {
+                                cancel.ThrowIfCancellationRequested();
+                                if(wait.ElapsedMilliseconds>=60000) throw new TimeoutException("Pairing timed out. Get a fresh Link Device code and try again.");
+                            }
+                            cancel.ThrowIfCancellationRequested();
+                        } catch {StopHelper(p); throw;}
+                        using(var reader=new BinaryReader(p.StandardOutput.BaseStream)) {
+                            int length=0; while(length<data.Length) {int n=reader.Read(data,length,data.Length-length); if(n==0) break; length+=n;}
+                            if(p.ExitCode!=0 || length!=data.Length || Encoding.ASCII.GetString(data,0,4)!="CDR1")
+                                throw new InvalidOperationException("The PS5 did not accept registration. Check its address, account and Link Device code.");
+                        }
                     }
                     Array.Copy(data,42,keys,0,32);
                     var item=new DirectConsole {Name=Encoding.UTF8.GetString(data,10,32).TrimEnd('\0'),Mac=Hex(data.Skip(4).Take(6).ToArray()),Address=address,
@@ -312,10 +321,11 @@ namespace Cadrivect
                     string file=Path.Combine(DirectoryPath,item.Mac+".json"), temp=file+"."+Guid.NewGuid().ToString("N")+".tmp";
                     try {
                         File.WriteAllText(temp,new JavaScriptSerializer().Serialize(item));
+                        cancel.ThrowIfCancellationRequested();
                         try {File.Move(temp,file);} catch(IOException) {if(!File.Exists(file)) throw; File.Replace(temp,file,null);}
                     } finally {if(File.Exists(temp)) File.Delete(temp);}
                     return item;
-                }} finally {Clear(request); Clear(data); Clear(keys);}
+                } finally {Clear(request); Clear(data); Clear(keys);}
             });
         }
     }

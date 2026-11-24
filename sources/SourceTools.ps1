@@ -61,7 +61,8 @@ function Install-SourceTool([string]$source) {
                 throw 'The verified chiaki-ng archive did not have the expected layout.'
             }
         } else {
-            $compiler = Join-Path ([Runtime.InteropServices.RuntimeEnvironment]::GetRuntimeDirectory()) 'csc.exe'
+            $framework = if ([Environment]::Is64BitOperatingSystem) { 'Framework64' } else { 'Framework' }
+            $compiler = Join-Path $env:WINDIR "Microsoft.NET\$framework\v4.0.30319\csc.exe"
             $output = Join-Path $payload 'SignalRun.exe'
             $messages = & $compiler /nologo /target:winexe /optimize+ /r:System.Drawing.dll /r:System.Windows.Forms.dll "/out:$output" $demoCode 2>&1
             if ($LASTEXITCODE -ne 0) { throw "Could not build Signal Run. $messages" }

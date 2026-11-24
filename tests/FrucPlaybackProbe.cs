@@ -62,7 +62,7 @@ internal static partial class EmbeddedProbe
                         var next=WaitSnapshot(api,s=>Convert.ToInt32(s["presented"])>=Convert.ToInt32(ready["presented"])+7,"source continuing after FRUC failure");
                         Check(Convert.ToInt32(next["generated"])==0,"FRUC silently fell back to another interpolator.");
                     }
-                    api.GetMethod("ConfigureWithGeneration").Invoke(null,new object[]{0,2,"p5cast"});
+                    api.GetMethod("ConfigureWithGeneration").Invoke(null,new object[]{-1,-1,"p5cast"});
                     WaitSnapshot(api,s=>(string)s["frameGenerationProvider"]=="p5cast" && Convert.ToInt32(s["generated"])>before &&
                         string.IsNullOrEmpty(Convert.ToString(s["effectNotice"])),"switching back to P5Cast interpolation");
                     Console.WriteLine(supported?"NVIDIA FRUC generated frames, suspended for Original and resumed.":"Unavailable NVIDIA FRUC kept real video running without generating frames.");

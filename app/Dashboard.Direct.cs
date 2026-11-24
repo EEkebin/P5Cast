@@ -92,7 +92,7 @@ namespace Cadrivect
             else if(connecting) action="Cancel connection";
             else if(Active) action="Stop playback";
             string state=ending ? "Stopping" : connecting ? "Connecting" : Active ? "Playing" : "Ready";
-            button.IsEnabled=!ending && (!OperationOpen || connecting);
+            button.IsEnabled=!ending && (!OperationOpen || connecting) && (pairingCancellation==null || Active);
             button.ToolTip=connecting && !ending ? "Connecting… Click to cancel." : action;
             AutomationProperties.SetName(button,action);
             AutomationProperties.SetItemStatus(button,state);

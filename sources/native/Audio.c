@@ -137,7 +137,8 @@ void audio_settings(uint32_t channels, uint32_t rate, void *user)
         spec.freq = (int)rate;
         spec.format = AUDIO_S16SYS;
         spec.channels = (Uint8)channels;
-        spec.samples = 256;
+        // Keep the device callback below the initial 15 ms reserve at every Opus rate.
+        spec.samples = rate >= 32000 ? 256 : rate >= 16000 ? 128 : 64;
         spec.callback = audio_render;
         spec.userdata = audio;
         audio->device = SDL_OpenAudioDevice(NULL, 0, &spec, NULL, 0);
@@ -215,7 +216,7 @@ void SDLCALL audio_render(void *user, Uint8 *stream, int length)
     measure_gap(&audio->last_callback_tick, &audio->max_callback_ticks);
     audio->device_frames += frames;
     size_t target = (size_t)audio->rate * (uint64_t)audio->target_us / 1000000;
-    if (!audio->playing && audio->queued_frames >= target) {
+    if (!audio->playing && audio->queued_frames >= target && audio->queued_frames >= frames) {
         audio->playing = true;
         begin_ramp(audio);
     }

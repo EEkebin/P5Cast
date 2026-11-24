@@ -61,7 +61,17 @@ internal sealed class DirectVideo : IDisposable
     volatile string error="",codec="";
     volatile AudioTelemetry audio=new AudioTelemetry();
     int decodeUs=-1,rateKbps;
-    int codecId,decodedFrames,replacedFrames;
+    const int CorruptAccessUnit=-3;
+    internal const string RecoveryError="The Direct stream could not recover a decoded picture for 30 seconds after damaged video.";
+    int codecId,decodedFrames,replacedFrames,corruptUnits;
+    long corruptSince=-1;
+    public int CorruptUnits { get {return Volatile.Read(ref corruptUnits);} }
+    public bool RecoveryTimedOut {
+        get {
+            long start=Volatile.Read(ref corruptSince);
+            return start>=0 && Stopwatch.GetTimestamp()-start>=30L*Stopwatch.Frequency;
+        }
+    }
     public int DecodedFrames { get {return Volatile.Read(ref decodedFrames);} }
     public int ReplacedFrames { get {return Volatile.Read(ref replacedFrames);} }
     public bool Closed { get { lock(gate) return closed && pending==IntPtr.Zero; } }
@@ -93,6 +103,11 @@ internal sealed class DirectVideo : IDisposable
             offset+=count;
         }
     }
+    void DropCorruptUnit(long timestamp)
+    {
+        Interlocked.Increment(ref corruptUnits);
+        if(corruptSince<0) Volatile.Write(ref corruptSince,timestamp);
+    }
     void Decode()
     {
         try {
@@ -109,7 +124,11 @@ internal sealed class DirectVideo : IDisposable
             while(!stopping) {
                 // Only EOF between records is a clean disconnect. Pipes may split a four-byte prefix.
                 int prefix=reader.Read(buffer,0,sizeof(int));
-                if(prefix==0) break;
+                if(prefix==0) {
+                    if(corruptSince>=0) throw new InvalidDataException("The Direct stream ended before video recovered from a damaged frame.");
+                    break;
+                }
+                if(RecoveryTimedOut) throw new InvalidDataException(RecoveryError);
                 ReadRemaining(reader,buffer,prefix,sizeof(int));
                 int length=BitConverter.ToInt32(buffer,0);
                 if(length==0) {
@@ -125,12 +144,16 @@ internal sealed class DirectVideo : IDisposable
                     Volatile.Write(ref rateKbps,(int)(8*bytes/Math.Max(1,clock.ElapsedMilliseconds)));
                     clock.Restart(); bytes=0;
                 }
-                if(SubmitPacket(decoder,buffer,length)<0) throw new InvalidDataException("The decoder rejected a console video packet.");
+                int submitted=SubmitPacket(decoder,buffer,length);
+                if(submitted==CorruptAccessUnit) {DropCorruptUnit(start); continue;}
+                if(submitted<0) throw new InvalidDataException("The decoder rejected a console video packet.");
                 while(!stopping) {
                     IntPtr frame; Picture next;
                     int result=NextPicture(decoder,out frame,out next);
                     if(result==0) break;
+                    if(result==CorruptAccessUnit) {DropCorruptUnit(start); break;}
                     if(result<0) throw new InvalidDataException("Unsupported or damaged console video frame.");
+                    if(corruptSince>=0) Volatile.Write(ref corruptSince,-1);
                     Volatile.Write(ref decodeUs,(int)((Stopwatch.GetTimestamp()-start)*1000000.0/Stopwatch.Frequency));
                     lock(gate) {
                         Interlocked.Increment(ref decodedFrames);

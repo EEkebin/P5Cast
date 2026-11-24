@@ -389,6 +389,7 @@ internal static class Player
                                         step=0; previousTime=0; redraw=true;
                                     } catch(InvalidOperationException ex) { settingsNotice=ex.Message; }
                                 }
+                                if(direct && decoded.RecoveryTimedOut) throw new InvalidDataException(DirectVideo.RecoveryError);
                                 if(direct && decoded.Closed) {
                                     if(!string.IsNullOrEmpty(decoded.Error)) throw new IOException(decoded.Error);
                                     if(renderer.Captured==0) throw new IOException("The Direct session closed before the first video frame.");
@@ -540,7 +541,9 @@ internal static class Player
         {
             if(host!=null) { EmbeddedPlayback.Failed(ex.Message); return 1; }
             string log=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"LumaRelay","player-error.log");
-            Directory.CreateDirectory(Path.GetDirectoryName(log)); File.WriteAllText(log,DateTime.Now+Environment.NewLine+ex);
+            try {
+                Directory.CreateDirectory(Path.GetDirectoryName(log)); File.WriteAllText(log,DateTime.Now+Environment.NewLine+ex);
+            } catch(IOException) {} catch(UnauthorizedAccessException) {}
             Console.Error.WriteLine(ex.Message);
             if(!testing && Array.IndexOf(args,"--quiet")<0) MessageBox.Show(ex.Message,"P5Cast Player",MessageBoxButtons.OK,MessageBoxIcon.Error);
             return 1;
@@ -604,6 +607,7 @@ internal static class Player
                +",\"audioQueueTrims\":"+Number(audio==null ? -1:audio.AudioQueueTrims)+",\"slowVideoHandoffs\":"+Number(audio==null ? -1:audio.SlowVideoHandoffs)
                +",\"audioFrameGapMaxMs\":"+Number(audio==null ? -1:audio.AudioFrameGapMaxMs)+",\"audioCallbackGapMaxMs\":"+Number(audio==null ? -1:audio.AudioCallbackGapMaxMs)
                +",\"decodedFrames\":"+Number(direct==null ? -1:direct.DecodedFrames)+",\"replacedFrames\":"+Number(direct==null ? -1:direct.ReplacedFrames)
+               +",\"decoderCorruptUnits\":"+Number(direct==null ? -1:direct.CorruptUnits)
                +",\"decodeMs\":"+Number(direct==null ? -1:direct.DecodeMs)
                +(direct==null ? "" : ",\"codec\":"+JsonString(direct.CodecName)+",\"bitrateMbps\":"+Number(direct.BitrateMbps));
     }

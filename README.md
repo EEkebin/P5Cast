@@ -6,7 +6,7 @@ P5Cast is a Windows x64 app for playing a PS5 over a network. The dashboard cont
 
 Extract the entire Windows x64 ZIP and open `P5Cast.exe`. To install it for your Windows user, run **Install.cmd** from the extracted folder. The release includes a SHA-256 checksum. [Private Windows releases](https://github.com/EEkebin/P5Cast/releases)
 
-The installer places the app in `%LOCALAPPDATA%\Programs\P5Cast` and adds one **P5Cast** shortcut to the Start menu. Existing console registrations, preferences and network pairings carry over when upgrading from Cadrivect.
+The installer verifies the packaged files, installs each version under `%LOCALAPPDATA%\Programs\P5Cast\versions` and adds one **P5Cast** shortcut to the Start menu. Existing console registrations, preferences and network pairings carry over when upgrading from Cadrivect.
 
 1. Open **Play**, choose **Offline demo**, then click the triangular play button. A 960×540 scene runs inside the dashboard. Use the arrow keys or A/D to steer and Space to accelerate. The demo runs without a console, network connection, decoder download or controller.
 2. The two-line title bar button toggles the performance drawer. The **Settings** button beside **Fullscreen** toggles the bottom drawer. Drag the left edge of the performance drawer or the top edge of the settings drawer to resize it. You can also Tab to a handle and use the arrow keys. P5Cast remembers the sizes and open state of both drawers. Begin with **Original** and interpolation **Off**. Try **Sharpen**, **FSR 1 · Spatial** or an available NVIDIA mode. Pick **2×**, **3×** or **4×** to test interpolation.

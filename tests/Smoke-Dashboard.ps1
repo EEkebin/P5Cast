@@ -168,8 +168,8 @@ try {
     Click-Control 'OpenSource'
     $demoStatus=Wait-Text 'Status' '^Offline demo$'
     $null=Wait-For { (Get-Control 'FrameRateDial').Current.HelpText -match 'Output\s+[1-9]' } 'real frame rates on the dial'
-    $factorCondition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty,'2×')
-    $factor=$ui.FindFirst([Windows.Automation.TreeScope]::Descendants,$factorCondition)
+    $factorCondition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty,'P5Cast interpolation 2×')
+    $factor=Wait-For { $ui.FindFirst([Windows.Automation.TreeScope]::Descendants,$factorCondition) } 'P5Cast interpolation radio button'
     $factor.GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
     $null=Wait-For { (Get-Control 'FrameRateDial').Current.HelpText -match 'Generated\s+[1-9]' } 'generated frames on the dial'
     Assert-Layout

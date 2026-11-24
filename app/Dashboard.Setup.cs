@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -14,6 +15,8 @@ namespace Cadrivect
     {
         int setupVersion, setupStep;
         bool setupPairing, syncingSetupColor;
+        CancellationTokenSource pairingCancellation;
+        bool closeAfterPairing;
         int setupColorPreference;
         string pendingSetupConsole;
         bool SetupOpen {get {return UI<Grid>("SetupOverlay").Visibility==Visibility.Visible;}}
@@ -162,13 +165,15 @@ namespace Cadrivect
 
         async Task PairFromSetup()
         {
-            if(!SetupOpen || setupStep!=1 || setupPairing) return;
+            if(!SetupOpen || setupStep!=1 || pairingCancellation!=null) return;
             setupPairing=true;
+            pairingCancellation=new CancellationTokenSource();
             foreach(string n in new[]{"SetupPairForm","SetupAdd","SetupBack","SetupNext","SetupSkip","SetupConsole"})
                 UI<FrameworkElement>(n).IsEnabled=false;
             SetupMessage("Pairing with your PS5…");
             try {
-                var registered=await DirectConsole.Pair(UI<TextBox>("SetupAddress").Text,UI<TextBox>("SetupAccount").Text,UI<TextBox>("SetupCode").Text);
+                var registered=await DirectConsole.Pair(UI<TextBox>("SetupAddress").Text,UI<TextBox>("SetupAccount").Text,UI<TextBox>("SetupCode").Text,pairingCancellation.Token);
+                if(pairingCancellation.IsCancellationRequested) return;
                 consoleAddresses[registered.Mac]=registered.Address;
                 var previous=UI<ComboBox>("ConsolePicker").SelectedItem as DirectConsole;
                 if(!Active && !preparing) ReloadConsoles(previous==null ? registered.Mac : previous.Mac);
@@ -177,7 +182,8 @@ namespace Cadrivect
                 SaveSettings();
                 SetSetupPairForm(false);
                 SetupMessage("Paired with "+registered.Name+". Choose Next to review.");
-            } catch(Exception e) {
+            } catch(OperationCanceledException) {SetupMessage("Pairing cancelled.");}
+            catch(Exception e) {
                 SetupMessage(e.GetBaseException().Message);
             } finally {
                 setupPairing=false;
@@ -186,7 +192,16 @@ namespace Cadrivect
                 var list=UI<ComboBox>("SetupConsole"); list.IsEnabled=list.Items.Count>0;
                 if(UI<StackPanel>("SetupPairForm").Visibility==Visibility.Visible) UI<TextBox>("SetupCode").Focus();
                 else UI<Button>("SetupNext").Focus();
+                EndPairing();
             }
+        }
+
+        void EndPairing()
+        {
+            pairingCancellation.Dispose();
+            pairingCancellation=null;
+            UpdateTransport();
+            if(closeAfterPairing) {closeAfterPairing=false; QueueWindowClose();}
         }
 
         void SetSetupStep(int step)

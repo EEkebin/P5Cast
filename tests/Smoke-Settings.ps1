@@ -273,6 +273,12 @@ try {
     Require (!$orientation.GetValue($meter)) 'Existing preferences open with a vertical divider'
     $orientation.SetValue($meter,$true)
     Call SaveSettings
+    $settingsFile=Join-Path $tmp 'LumaRelay\dashboard.json'
+    $prior=[IO.File]::ReadAllText($settingsFile)
+    $lock=[IO.File]::Open($settingsFile,'Open','Read','None')
+    try {Call SaveSettings} finally {$lock.Dispose()}
+    Require ([IO.File]::ReadAllText($settingsFile) -eq $prior -and !(Get-ChildItem ($settingsFile+'.*.tmp'))) 'A failed settings save preserves the previous file and removes its staging file'
+    Require ((Widget Status).Text -match 'could not save') 'Report a failed settings save in the dashboard'
     $secondFile=[IO.File]::OpenRead((Join-Path $AppRoot 'app\Main.xaml'))
     try {$second=[Windows.Markup.XamlReader]::Load($secondFile)} finally {$secondFile.Dispose()}
     $reopened=[Activator]::CreateInstance($type,[Reflection.BindingFlags]'Instance,NonPublic',$null,@($second,$false),$null)
@@ -387,6 +393,27 @@ if($Action -eq 'InstallHost'){Start-Sleep -Milliseconds 200}
     Require ($startup.count -eq 1 -and $startup.applied -like '1440/*') 'The first frame applies the latest output size chosen during startup exactly once'
 
     # Closing during an operation must survive both cancellation and committed work.
+    $stream=[IO.File]::OpenRead((Join-Path $AppRoot 'app\Main.xaml'))
+    try {$pairWindow=[Windows.Markup.XamlReader]::Load($stream)} finally {$stream.Dispose()}
+    $pairDash=[Activator]::CreateInstance($type,$flags,$null,@($pairWindow,$false),$null)
+    $pairField=$type.GetField('pairingCancellation',$flags)
+    $pairCancel=[Threading.CancellationTokenSource]::new()
+    $pairField.SetValue($pairDash,$pairCancel)
+    $type.GetMethod('SetPage',$flags).Invoke($pairDash,@('Host',$false))
+    Require $pairCancel.IsCancellationRequested 'Leaving the pairing form cancels its active registration'
+    $type.GetMethod('EndPairing',$flags).Invoke($pairDash,$null)
+    $pairCancel=[Threading.CancellationTokenSource]::new()
+    $pairField.SetValue($pairDash,$pairCancel)
+    $pairClosed=@{value=$false}
+    $pairWindow.add_Closed({$pairClosed.value=$true})
+    $pairWindow.Close()
+    Require ($pairCancel.IsCancellationRequested -and !$pairClosed.value) 'Closing cancels the active registration and waits for its helper'
+    $type.GetMethod('EndPairing',$flags).Invoke($pairDash,$null)
+    $frame=[Windows.Threading.DispatcherFrame]::new()
+    [void]$window.Dispatcher.BeginInvoke([Windows.Threading.DispatcherPriority]::Background,[Action]{$frame.Continue=$false})
+    [Windows.Threading.Dispatcher]::PushFrame($frame)
+    Require $pairClosed.value 'The original close completes after the registration helper exits'
+
     foreach($committed in @($false,$true)) {
         $stream=[IO.File]::OpenRead((Join-Path $AppRoot 'app\Main.xaml'))
         try {$otherWindow=[Windows.Markup.XamlReader]::Load($stream)} finally {$stream.Dispose()}

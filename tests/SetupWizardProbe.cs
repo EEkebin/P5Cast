@@ -175,7 +175,20 @@ internal static partial class WindowChromeProbe
                 await PairWithFixture();
                 Click("SetupNext");await CheckModalPage("SetupFinishPage");
                 Require(Find<TextBlock>("SetupSummary").Text.Contains(RegisteredName),"New console missing from setup review.");
-                Click("SetupNext");await Until(()=>!Shown("SetupOverlay"),"Finish failed after registering a console.");
+                var program=AppDomain.CurrentDomain.GetAssemblies().Single(a=>a.GetType("Cadrivect.Program")!=null);
+                var root=program.GetType("Cadrivect.Program").GetField("Root",BindingFlags.Static|BindingFlags.NonPublic);
+                var actualRoot=root.GetValue(null);
+                string previousPrefs=File.ReadAllText(Preferences);
+                try {
+                    root.SetValue(null,Path.Combine(Path.GetDirectoryName(Preferences),"missing-player"));
+                    Click("SetupNext");await CheckModalPage("SetupDisplayPage");
+                    Require(Find<TextBlock>("SetupMessage").Text.Contains("Vulkan is unavailable") &&
+                        Equals(Find<ComboBox>("VideoRenderer").SelectedItem,original) && File.ReadAllText(Preferences)==previousPrefs,
+                        "A failed graphics check saved the draft or omitted the recovery message.");
+                } finally {root.SetValue(null,actualRoot);}
+                Click("SetupNext");await CheckModalPage("SetupConsolePage");
+                Click("SetupNext");await CheckModalPage("SetupFinishPage");
+                Click("SetupNext");await Until(()=>!Shown("SetupOverlay"),"Finish failed after retrying the graphics check.",45000);
                 var saved=ReadPrefs();
                 Require((string)saved["consoleMac"]==RegisteredMac && (string)saved["renderer"]=="vulkan","Registration or renderer choice was not committed.");
                 Note("Validated a mock registration through the real helper protocol, confidential credential storage and the stopped graphics API/HDR draft.");

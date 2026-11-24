@@ -8,6 +8,35 @@ using Device=SharpDX.Direct3D11.Device;
 
 internal static class VulkanCaptureProbe
 {
+    [DllImport("P5Cast.Dxvk.dll",ExactSpelling=true)]
+    static extern int D3D11CreateDevice(IntPtr adapter,int driverType,IntPtr software,DeviceCreationFlags flags,
+        ref int featureLevel,int featureLevelCount,int sdkVersion,out IntPtr device,out int selected,IntPtr context);
+
+    // Naming the Microsoft software adapter makes DXVK choose a fallback on systems
+    // with hardware Vulkan. DXGI still returns the originally requested adapter.
+    static void VerifyFallbackAdapter(Type importer)
+    {
+        using(var factory=new Factory1()) {
+            int count=factory.GetAdapterCount1();
+            for(int i=0;i<count;i++) using(var requested=factory.GetAdapter1(i)) {
+                if((requested.Description1.Flags & AdapterFlags.Software)==0) continue;
+                int feature=0xb000,selected;
+                IntPtr pointer;
+                int result=D3D11CreateDevice(requested.NativePointer,0,IntPtr.Zero,DeviceCreationFlags.BgraSupport,
+                    ref feature,1,7,out pointer,out selected,IntPtr.Zero);
+                if(result<0) continue;
+                using(var vk=new Device(pointer))
+                using(var bridge=(IDisposable)Activator.CreateInstance(importer,new object[]{vk})) {
+                    var capture=(Device)importer.GetProperty("CaptureDevice").GetValue(bridge,null);
+                    VerifySize(vk,capture,bridge,importer.GetMethod("Transfer",BindingFlags.Instance|BindingFlags.NonPublic),
+                        Format.B8G8R8A8_UNorm,37,29);
+                }
+                Console.WriteLine("Verified capture after requesting the Windows software adapter from DXVK.");
+                return;
+            }
+        }
+        Console.WriteLine("Skipped DXVK adapter fallback probe (no usable Windows software adapter).");
+    }
     static void VerifySize(Device vk,Device capture,object bridge,MethodInfo transfer,Format format,int width,int height)
     {
         var desc=new Texture2DDescription {
@@ -53,6 +82,7 @@ internal static class VulkanCaptureProbe
                 VerifySize(vk,capture,bridge,transfer,Format.R16G16B16A16_Float,257,131);
                 VerifySize(vk,capture,bridge,transfer,Format.B8G8R8A8_UNorm,319,205);
             }
+            VerifyFallbackAdapter(importer);
             Console.WriteLine("Verified exact Vulkan capture pixels across slot reuse, SDR/scRGB changes and resize.");
             return 0;
         } catch(Exception error) {Console.Error.WriteLine(error.GetBaseException());return 1;}

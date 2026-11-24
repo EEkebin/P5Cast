@@ -39,14 +39,30 @@ internal static class Presentation
         };
     }
 
+    public static SwapChain CreateSwapChain(string backend,Device device,SwapChainDescription desc)
+    {
+        if(backend=="vulkan") return VulkanSwapChain.Create(device,desc);
+        using(var dxgi=device.QueryInterface<SharpDX.DXGI.Device>())
+        using(var adapter=dxgi.Adapter)
+        using(var factory=adapter.GetParent<Factory>())
+            return new SwapChain(factory,device,desc);
+    }
+
+    public static Texture2D CreateTarget(Device device,Size size,bool hdr10)
+    {
+        return new Texture2D(device,new Texture2DDescription {
+            Width=size.Width,Height=size.Height,Format=DisplayHdr.OutputFormat(hdr10),
+            MipLevels=1,ArraySize=1,SampleDescription=new SampleDescription(1,0),BindFlags=BindFlags.RenderTarget
+        });
+    }
+
     // An effects device alone does not establish that its window-system interop works.
     public static void CheckOutput(string backend,Device device)
     {
-        if(backend=="d3d11") return;
         var size=new Size(32,32);
         using(var window=new System.Windows.Forms.Form {ClientSize=size,ShowInTaskbar=false}) {
-            if(backend=="vulkan") {
-                using(var chain=VulkanSwapChain.Create(device,DescribeSwapChain(window.Handle,size,false)))
+            if(backend=="vulkan" || backend=="d3d11") {
+                using(var chain=CreateSwapChain(backend,device,DescribeSwapChain(window.Handle,size,false)))
                 using(var target=Texture2D.FromSwapChain<Texture2D>(chain,0))
                 using(var view=new RenderTargetView(device,target)) {
                     device.ImmediateContext.ClearRenderTargetView(view,new SharpDX.Mathematics.Interop.RawColor4(0,0,0,1));
@@ -54,9 +70,10 @@ internal static class Presentation
                 }
             } else {
                 using(var presenter=Create(window.Handle,backend,device,size,false))
-                using(var target=new GpuImage(device,size.Width,size.Height,Format.B8G8R8A8_UNorm,true)) {
-                    device.ImmediateContext.ClearRenderTargetView(target.Write,new SharpDX.Mathematics.Interop.RawColor4(0,0,0,1));
-                    presenter.Present(target.Texture);
+                using(var target=CreateTarget(device,size,false))
+                using(var view=new RenderTargetView(device,target)) {
+                    device.ImmediateContext.ClearRenderTargetView(view,new SharpDX.Mathematics.Interop.RawColor4(0,0,0,1));
+                    presenter.Present(target);
                 }
             }
         }

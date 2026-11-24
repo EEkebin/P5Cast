@@ -34,6 +34,16 @@ struct CaptureSlot {
     VkCommandBuffer cmd{};
     bool pending{};
 };
+bool AdapterLuid(VkPhysicalDevice physical, LUID& luid) {
+    if (!physical) return false;
+    VkPhysicalDeviceIDProperties identity{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES};
+    VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,&identity};
+    vkGetPhysicalDeviceProperties2(physical,&properties);
+    if (!identity.deviceLUIDValid) return false;
+    static_assert(sizeof(luid)==VK_LUID_SIZE);
+    memcpy(&luid,identity.deviceLUID,sizeof(luid));
+    return true;
+}
 struct Capture {
     ComPtr<ID3D11Device> producer;
     ComPtr<ID3D11DeviceContext> context;
@@ -73,10 +83,8 @@ struct Capture {
         Require(SUCCEEDED(capture->QueryInterface(IID_PPV_ARGS(&captureDxgi))) &&
                 SUCCEEDED(captureDxgi->GetAdapter(&adapter)) && SUCCEEDED(adapter->GetDesc(&adapterDesc)),
             "Cannot identify the Windows capture GPU.");
-        VkPhysicalDeviceIDProperties identity{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES};
-        VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,&identity};
-        vkGetPhysicalDeviceProperties2(physical,&properties);
-        Require(identity.deviceLUIDValid && !memcmp(identity.deviceLUID,&adapterDesc.AdapterLuid,VK_LUID_SIZE),
+        LUID vulkanLuid{};
+        Require(AdapterLuid(physical,vulkanLuid) && !memcmp(&vulkanLuid,&adapterDesc.AdapterLuid,sizeof(LUID)),
             "Windows capture and Vulkan are using different GPUs.");
         // The pinned DXVK device enables win32_keyed_mutex whenever advertised.
         // This extension adds a submit structure rather than a queryable command.
@@ -228,6 +236,15 @@ void CALLBACK ReleaseAfterGpu(PTP_CALLBACK_INSTANCE callback, void* parameter) {
     FreeLibraryWhenCallbackReturns(callback,bridge->deferredModule);
     delete bridge;
 }
+}
+extern "C" __declspec(dllexport) int P5VkCaptureGetAdapterLuid(ID3D11Device* destination,LUID* luid) {
+    ComPtr<DxvkDevice> interop;
+    if (!destination || !luid || FAILED(destination->QueryInterface(IID_PPV_ARGS(&interop)))) return 0;
+    VkInstance instance{};
+    VkDevice device{};
+    VkPhysicalDevice physical{};
+    interop->GetVulkanHandles(&instance,&physical,&device);
+    return AdapterLuid(physical,*luid);
 }
 extern "C" __declspec(dllexport) Capture* P5VkCaptureOpen(ID3D11Device* capture,ID3D11Texture2D* output,char* error,int length) {
     try {

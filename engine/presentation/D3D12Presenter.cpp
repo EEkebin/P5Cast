@@ -34,12 +34,17 @@ struct D3D12Display {
     ComPtr<ID3D11DeviceContext> context;
     ComPtr<IDXGISwapChain3> chain;
     std::array<ComPtr<ID3D12Resource>, bufferCount> buffers;
+    HANDLE readyEvent{};
+    UINT64 retirement{};
+    HMODULE deferredModule{};
 
     HRESULT Open(HWND parent, ID3D11Device* device, UINT width, UINT height, bool hdr)
     {
         wrapper = device;
         HRESULT hr = gpu.Open(device);
         if (hr != S_OK) return hr == S_FALSE ? E_NOINTERFACE : hr;
+        readyEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (!readyEvent) return WindowFailure();
         wrapper->GetImmediateContext(&context);
         child = CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_NOPARENTNOTIFY, L"STATIC", L"",
             WS_CHILD | WS_DISABLED | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
@@ -90,20 +95,43 @@ struct D3D12Display {
         return S_OK;
     }
 
-    HRESULT Drain()
+    HRESULT SignalAfterPresent(UINT64& done)
     {
         // Queue the fence after the last Present, which follows the copy's own fence.
-        UINT64 done = gpu.submitted + 1;
-        HRESULT hr = gpu.queue->Signal(gpu.fence.Get(), done);
+        if (!gpu.submitted) return S_OK;
+        UINT64 value = gpu.submitted + 1;
+        HRESULT hr = gpu.queue->Signal(gpu.fence.Get(), value);
         if (FAILED(hr)) return hr;
-        gpu.submitted = done;
-        return gpu.Wait(done);
+        done = gpu.submitted = value;
+        return S_OK;
+    }
+
+    HRESULT WaitForCopy(UINT64 value)
+    {
+        if (!value) return S_OK;
+        auto completed = gpu.fence->GetCompletedValue();
+        if (completed == UINT64_MAX) return gpu.device->GetDeviceRemovedReason();
+        if (completed >= value) return S_OK;
+        HRESULT hr = gpu.fence->SetEventOnCompletion(value, readyEvent);
+        if (FAILED(hr)) return hr;
+        const ULONGLONG deadline = GetTickCount64() + 2000;
+        for (;;) {
+            auto now = GetTickCount64();
+            DWORD result = WaitForSingleObject(readyEvent, now < deadline ? DWORD(deadline - now) : 0);
+            completed = gpu.fence->GetCompletedValue();
+            if (completed == UINT64_MAX) return gpu.device->GetDeviceRemovedReason();
+            if (completed >= value) return S_OK;
+            if (result == WAIT_FAILED) return WindowFailure();
+            if (result == WAIT_TIMEOUT || GetTickCount64() >= deadline) return DXGI_ERROR_WAIT_TIMEOUT;
+        }
     }
 
     HRESULT EnsureSize(UINT width, UINT height)
     {
         if (width == bufferWidth && height == bufferHeight && buffers[0]) return S_OK;
-        HRESULT hr = Drain();
+        UINT64 done = 0;
+        HRESULT hr = SignalAfterPresent(done);
+        if (SUCCEEDED(hr)) hr = WaitForCopy(done);
         if (FAILED(hr)) return hr;
         for (auto& buffer : buffers) buffer.Reset();
         hr = chain->ResizeBuffers(bufferCount, width, height, format, 0);
@@ -121,6 +149,8 @@ struct D3D12Display {
         texture->GetDevice(&owner);
         if (owner.Get() != wrapper.Get()) return E_INVALIDARG;
         HRESULT hr = EnsureSize(desc.Width, desc.Height);
+        if (FAILED(hr)) return hr;
+        hr = WaitForCopy(gpu.slots[gpu.next].submitted);
         if (FAILED(hr)) return hr;
 
         ComPtr<ID3D12Resource> source;
@@ -156,14 +186,29 @@ struct D3D12Display {
         return chain->Present(0, 0);
     }
 
+    void CloseWindow()
+    {
+        if (child) { DestroyWindow(child); child = nullptr; }
+    }
+
     ~D3D12Display()
     {
-        if (chain) Drain();
+        if (!retirement) SignalAfterPresent(retirement);
+        if (retirement) gpu.Wait(retirement);
         for (auto& buffer : buffers) buffer.Reset();
         chain.Reset();
-        if (child) DestroyWindow(child);
+        if (readyEvent) CloseHandle(readyEvent);
+        CloseWindow();
     }
 };
+
+int moduleAnchor;
+void CALLBACK ReleaseAfterPresent(PTP_CALLBACK_INSTANCE callback, void* parameter)
+{
+    auto* display = static_cast<D3D12Display*>(parameter);
+    FreeLibraryWhenCallbackReturns(callback, display->deferredModule);
+    delete display;
+}
 }
 
 extern "C" __declspec(dllexport) HRESULT p5_d3d12_display_create(HWND parent, ID3D11Device* device,
@@ -195,5 +240,14 @@ extern "C" __declspec(dllexport) HRESULT p5_d3d12_display_resize(D3D12Display* d
 
 extern "C" __declspec(dllexport) void p5_d3d12_display_destroy(D3D12Display* display)
 {
+    if (!display) return;
+    display->CloseWindow();
+    if (SUCCEEDED(display->SignalAfterPresent(display->retirement)) && display->retirement &&
+        display->gpu.fence->GetCompletedValue() < display->retirement &&
+        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, reinterpret_cast<LPCWSTR>(&moduleAnchor),
+            &display->deferredModule)) {
+        if (TrySubmitThreadpoolCallback(ReleaseAfterPresent, display, nullptr)) return;
+        FreeLibrary(display->deferredModule);
+    }
     delete display;
 }

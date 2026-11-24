@@ -684,7 +684,7 @@ internal static partial class WindowChromeProbe
             try {
                 // The HDR suite starts four backends and exercises NVIDIA fullscreen in addition to the base UI checks.
                 uint timeoutMs=Environment.GetEnvironmentVariable("P5CAST_PROBE_RENDERERS")=="hdr" ? 120000u :
-                    CheckTransportOption ? 90000u : 30000u;
+                    CheckTransportOption || Environment.GetEnvironmentVariable("P5CAST_WIZARD_CASE")=="pair" ? 90000u : 30000u;
                 if(WaitForSingleObject(pi.Process,timeoutMs)!=0) {
                     TerminateProcess(pi.Process,2); WaitForSingleObject(pi.Process,3000);
                     throw new TimeoutException("The private dashboard did not close in time.");

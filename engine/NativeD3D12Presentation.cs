@@ -39,6 +39,9 @@ internal sealed class NativeD3D12Presentation : IFramePresenter
     }
     static void Check(int hr,string operation)
     {
+        // Preserve device loss for the renderer, including during HDR negotiation.
+        if(hr==unchecked((int)0x887A0005) || hr==unchecked((int)0x887A0006) || hr==unchecked((int)0x887A0007))
+            new SharpDX.Result(hr).CheckError();
         if(hr<0) throw new InvalidOperationException(string.Format("Direct3D 12 presentation {0} failed (0x{1:X8}). {2}",
             operation,hr,Marshal.GetExceptionForHR(hr).Message));
     }

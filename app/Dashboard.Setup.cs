@@ -15,7 +15,8 @@ namespace Cadrivect
     {
         int setupVersion, setupStep;
         bool setupPairing, syncingSetupColor;
-        CancellationTokenSource pairingCancellation;
+        CancellationTokenSource pairingCancellation, setupProbe;
+        Dictionary<string,object> setupRendererReport;
         bool closeAfterPairing;
         int setupColorPreference;
         string pendingSetupConsole;
@@ -29,10 +30,10 @@ namespace Cadrivect
             UI<Button>("OpenSetup").Click+=delegate {OpenSetup();};
             UI<Button>("SetupSkip").Click+=delegate {CloseSetup(true);};
             UI<Button>("SetupBack").Click+=delegate {if(!setupPairing && setupStep>0) SetSetupStep(setupStep-1);};
-            UI<Button>("SetupNext").Click+=delegate {
-                if(setupPairing) return;
+            UI<Button>("SetupNext").Click+=async delegate {
+                if(setupPairing || setupProbe!=null) return;
                 if(setupStep==0 && !SetupDisplayValid()) return;
-                if(setupStep<2) SetSetupStep(setupStep+1); else FinishSetup();
+                if(setupStep<2) SetSetupStep(setupStep+1); else await FinishSetup();
             };
             UI<Button>("SetupAdd").Click+=delegate {SetSetupPairForm(UI<StackPanel>("SetupPairForm").Visibility!=Visibility.Visible);};
             UI<Button>("SetupPair").Click+=async delegate {await PairFromSetup();};
@@ -231,8 +232,36 @@ namespace Cadrivect
             window.Dispatcher.BeginInvoke(DispatcherPriority.Input,new Action(delegate {if(SetupOpen && setupStep==step) title.Focus();}));
         }
 
-        void FinishSetup()
+        async Task FinishSetup()
         {
+            var draft=UI<ComboBox>("SetupRenderer");
+            var currentRenderer=UI<ComboBox>("VideoRenderer");
+            Dictionary<string,object> report=null;
+            if(!Active && !preparing && draft.SelectedIndex!=currentRenderer.SelectedIndex) {
+                using(var probe=new CancellationTokenSource()) {
+                    setupProbe=probe;
+                    UI<Button>("SetupNext").IsEnabled=UI<Button>("SetupBack").IsEnabled=false;
+                    SetupMessage("Checking playback support for "+draft.SelectedItem+"…");
+                    string failure=null;
+                    try {
+                        report=await ProbeGpuReport(rendererIds[draft.SelectedIndex],null,probe.Token);
+                        failure=report==null ? "The GPU check could not finish." : Field(report,"presentationError");
+                    } catch(Exception error) {failure=error.GetBaseException().Message;}
+                    finally {
+                        if(setupProbe==probe) {
+                            setupProbe=null;
+                            UI<Button>("SetupNext").IsEnabled=true;
+                            UI<Button>("SetupBack").IsEnabled=setupStep>0;
+                        }
+                    }
+                    if(probe.IsCancellationRequested || closing || !SetupOpen) return;
+                    if(!string.IsNullOrEmpty(failure)) {
+                        SetSetupStep(0);
+                        SetupMessage(draft.SelectedItem+" is unavailable. "+failure+" Choose another graphics API or try again.");
+                        return;
+                    }
+                }
+            }
             var monitor=UI<ComboBox>("SetupDisplay").SelectedItem as DisplayTarget;
             string device=monitor==null ? null : monitor.DeviceName;
             var available=DisplayTarget.Enumerate().FirstOrDefault(x=>x.DeviceName==device);
@@ -246,7 +275,12 @@ namespace Cadrivect
             RefreshDisplays(device);
             MoveDashboard();
             preferredHdr=setupColorPreference;
-            if(!Active && !preparing) UI<ComboBox>("VideoRenderer").SelectedItem=UI<ComboBox>("SetupRenderer").SelectedItem;
+            if(!Active && !preparing) {
+                // SelectionChanged consumes the preflight report before the draft is saved.
+                setupRendererReport=report;
+                try {currentRenderer.SelectedItem=draft.SelectedItem;}
+                finally {setupRendererReport=null;}
+            }
             UI<ComboBox>("HdrOutput").SelectedItem=UI<ComboBox>("SetupColor").SelectedItem;
             UI<ComboBox>("DirectStreamSize").SelectedItem=UI<ComboBox>("SetupStream").SelectedItem;
             var console=UI<ComboBox>("SetupConsole").SelectedItem as DirectConsole;
@@ -264,6 +298,10 @@ namespace Cadrivect
         void CloseSetup(bool remember)
         {
             if(!SetupOpen || setupPairing) return;
+            if(setupProbe!=null) {
+                setupProbe.Cancel(); setupProbe=null;
+                UI<Button>("SetupNext").IsEnabled=true;
+            }
             UI<Grid>("SetupOverlay").Visibility=Visibility.Collapsed;
             SetSetupPairForm(false);
             SetModalBackgroundEnabled(true);

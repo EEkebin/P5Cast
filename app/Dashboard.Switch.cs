@@ -95,7 +95,7 @@ namespace Cadrivect
             if(!window.IsLoaded || Active || preparing || closing) return;
             if(mode>=3) {mode=0; meter.Reset(mode,factor);}
             meter.SetCapabilities(null);
-            if(old==null || SetupOpen) {await ReadGpu(previousMode);return;}
+            if(old==null || SetupOpen) {await ReadGpu(previousMode,verified:setupRendererReport);return;}
 
             using(var cancel=new CancellationTokenSource()) {
                 string target=Convert.ToString(picker.SelectedItem);

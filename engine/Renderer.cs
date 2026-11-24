@@ -111,19 +111,18 @@ internal sealed partial class Renderer : IDisposable
         Backend=Presentation.Resolve(backend);
         HdrEnabled=ChooseHdr(hdrMode);
         try {
+            string startupNotice=null;
+            Device=CreateEffectDevice(Backend);
             if(Backend=="d3d11" || Backend=="vulkan") {
                 var desc=Presentation.DescribeSwapChain(hwnd,window,HdrEnabled);
-                if(Backend=="vulkan") {
-                    Device=CreateEffectDevice(Backend);
-                    swap=VulkanSwapChain.Create(Device,desc);
-                } else {
-                    Device device; SwapChain chain;
-                    Device.CreateWithSwapChain(DriverType.Hardware,DeviceCreationFlags.BgraSupport,desc,out device,out chain);
-                    Device=device; swap=chain;
+                try {swap=Presentation.CreateSwapChain(Backend,Device,desc);}
+                catch(SharpDXException error) {
+                    if(hdrMode!="auto" || !HdrEnabled || !IsEffectFailure(error)) throw;
+                    swap=Presentation.CreateSwapChain(Backend,Device,Presentation.DescribeSwapChain(hwnd,window,false));
+                    HdrEnabled=false;
+                    startupNotice="Using SDR on this display. "+error.Message;
                 }
                 using(var factory=swap.GetParent<Factory>()) factory.MakeWindowAssociation(hwnd,WindowAssociationFlags.IgnoreAltEnter);
-            } else {
-                Device=CreateEffectDevice(Backend);
             }
             context=Device.ImmediateContext;
             SampleMinLuma=255;
@@ -157,6 +156,7 @@ internal sealed partial class Renderer : IDisposable
             context.PixelShader.SetSampler(0,sampler);
             context.PixelShader.SetConstantBuffer(0,constants);
             Resize(window);
+            if(startupNotice!=null) OutputNotice=startupNotice;
         } catch { Dispose(); throw; }
     }
     internal static Device CreateEffectDevice(string backend)
@@ -265,11 +265,7 @@ internal sealed partial class Renderer : IDisposable
                         candidate=Presentation.Create(hwnd,Backend,Device,window,false);
                 }
             }
-            var desc=new Texture2DDescription {
-                Width=window.Width,Height=window.Height,Format=DisplayHdr.OutputFormat(hdr),
-                MipLevels=1,ArraySize=1,SampleDescription=new SampleDescription(1,0),BindFlags=BindFlags.RenderTarget
-            };
-            target=new Texture2D(Device,desc);
+            target=Presentation.CreateTarget(Device,window,hdr);
             view=new RenderTargetView(Device,target);
         } catch {
             if(view!=null) view.Dispose();

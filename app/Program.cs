@@ -398,7 +398,7 @@ namespace Cadrivect
                 if(!closing) Show("Neural rendering setup failed. "+error.Message,true);
             } finally {meter.SetNeuralSetupBusy(false);}
         }
-        async Task<bool> ReadGpu(int requested,System.Threading.CancellationToken cancellation=default(System.Threading.CancellationToken))
+        async Task<bool> ReadGpu(int requested,System.Threading.CancellationToken cancellation=default(System.Threading.CancellationToken),Dictionary<string,object> verified=null)
         {
             int generation=++gpuProbeGeneration, revision=pictureSelectionRevision;
             string restoreProvider=PlaybackMeter.SavedProvider(meter.FrameGenerationProvider,factor);
@@ -407,7 +407,7 @@ namespace Cadrivect
             }
             bool completed=false;
             try {
-                var gpu=await ProbeGpuReport(SelectedRenderer,null,cancellation);
+                var gpu=verified ?? await ProbeGpuReport(SelectedRenderer,null,cancellation);
                 if(gpu==null || closing || generation!=gpuProbeGeneration) return false;
                 meter.SetCapabilities(gpu);
                 completed=true;

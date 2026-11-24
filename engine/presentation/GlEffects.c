@@ -41,6 +41,8 @@ typedef struct {
     SDL_GLContext context;
     SDL_Window *priorWindow;
     SDL_GLContext priorContext;
+    HGLRC priorWgl;
+    HDC priorDC;
     GLuint fbo,program[6];
     GLint sourceSize[6],areaSize[6],origin[6],phase[6];
     uint64_t clock;
@@ -55,11 +57,22 @@ typedef struct {
 #undef FIELD
 } GlEffects;
 
-static bool enter(GlEffects *g) {
-    g->priorWindow=SDL_GL_GetCurrentWindow();g->priorContext=SDL_GL_GetCurrentContext();
-    return SDL_GL_MakeCurrent(g->window,g->context);
+static void restore_wgl(HDC dc,HGLRC context) {
+    if(wglGetCurrentContext()!=context || wglGetCurrentDC()!=dc) wglMakeCurrent(dc,context);
 }
-static void leave(GlEffects *g) { SDL_GL_MakeCurrent(g->priorWindow,g->priorContext); }
+static bool enter(GlEffects *g) {
+    g->priorWgl=wglGetCurrentContext();g->priorDC=wglGetCurrentDC();
+    g->priorWindow=SDL_GL_GetCurrentWindow();g->priorContext=SDL_GL_GetCurrentContext();
+    if(SDL_GL_MakeCurrent(g->window,g->context)) return true;
+    restore_wgl(g->priorDC,g->priorWgl);
+    return false;
+}
+static void leave(GlEffects *g) {
+    SDL_GL_MakeCurrent(g->priorWindow,g->priorContext);
+    /* SDL tracks only contexts bound through SDL. Windows hosts and overlays
+     * may have left their own native WGL context current on this thread. */
+    restore_wgl(g->priorDC,g->priorWgl);
+}
 static void release_texture(GlEffects *g,SharedTexture *t) {
     if(t->handle) g->dxUnregister(g->device,t->handle);
     if(t->name) glDeleteTextures(1,&t->name);
@@ -85,8 +98,9 @@ static void destroy(GlEffects *g,bool current) {
     }
     if(g->window) SDL_DestroyWindow(g->window);
     if(g->child) DestroyWindow(g->child);
-    SDL_free(g);
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    restore_wgl(g->priorDC,g->priorWgl);
+    SDL_free(g);
 }
 P5_API int p5_gl_shared_textures(const GlEffects *g) {
     int count=0;
@@ -117,9 +131,12 @@ static bool supports_d3d11_interop(void) {
     return false;
 }
 P5_API GlEffects *p5_gl_create(HWND parent,ID3D11Device *device,const char *body,char *error,int length) {
-    if(!SDL_InitSubSystem(SDL_INIT_VIDEO)) {SDL_strlcpy(error,SDL_GetError(),length);return NULL;}
+    HGLRC priorWgl=wglGetCurrentContext();
+    HDC priorDC=wglGetCurrentDC();
+    if(!SDL_InitSubSystem(SDL_INIT_VIDEO)) {SDL_strlcpy(error,SDL_GetError(),length);restore_wgl(priorDC,priorWgl);return NULL;}
     GlEffects *g=SDL_calloc(1,sizeof(*g));
-    if(!g) {SDL_QuitSubSystem(SDL_INIT_VIDEO);return NULL;}
+    if(!g) {SDL_QuitSubSystem(SDL_INIT_VIDEO);restore_wgl(priorDC,priorWgl);return NULL;}
+    g->priorWgl=priorWgl;g->priorDC=priorDC;
     g->priorWindow=SDL_GL_GetCurrentWindow();g->priorContext=SDL_GL_GetCurrentContext();
     g->window=p5_gl_hidden_child(parent,&g->child);
     if(!g->window || !(g->context=SDL_GL_CreateContext(g->window))) {SDL_strlcpy(error,SDL_GetError(),length);goto fail;}

@@ -3,6 +3,7 @@
 #include <dxgi1_6.h>
 #include <cstdio>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -116,6 +117,47 @@ void VerifyPixels(D3D12Display& display, UINT width, UINT height, unsigned seque
     display.context->UpdateSubresource(source.Get(), 0, nullptr, pixels.data(), width * 4, 0);
     Require(p5_d3d12_display_frame(&display, source.Get()), "Present completed frame");
 }
+
+void VerifyStopWhileQueueBusy(HWND window, ID3D11Device* device)
+{
+    D3D12Display* raw = nullptr;
+    Require(p5_d3d12_display_create(window, device, 137, 95, 0, &raw), "Create stop test presenter");
+    std::unique_ptr<D3D12Display> display(raw);
+    VerifyPixels(*display, 137, 95, 1);
+    ComPtr<ID3D12Fence> gate;
+    Require(display->gpu.device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&gate)), "Create queue gate");
+    HANDLE returned = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (!returned) throw std::runtime_error("Cannot create queue test event");
+    Require(display->gpu.queue->Wait(gate.Get(), 1), "Pause shared queue during resize");
+    std::thread recover([&] {
+        // Rescue a regressed, infinitely blocking implementation as well.
+        WaitForSingleObject(returned, 5000);
+        gate->Signal(1);
+    });
+    HRESULT resize = display->EnsureSize(163, 101);
+    SetEvent(returned);
+    recover.join();
+    if (resize != DXGI_ERROR_WAIT_TIMEOUT) throw std::runtime_error("Stalled resize did not time out");
+    VerifyPixels(*display, 163, 101, 2);
+    std::puts("D3D12 stalled resize timed out and recovered with exact pixels.");
+    ResetEvent(returned);
+    // Release the queue after Stop returns, with a watchdog for the blocking implementation.
+    std::thread release([&] {
+        WaitForSingleObject(returned, 1500);
+        gate->Signal(2);
+    });
+    HRESULT hr = display->gpu.queue->Wait(gate.Get(), 2);
+    HWND child = display->child;
+    auto start = GetTickCount64();
+    p5_d3d12_display_destroy(display.release());
+    auto elapsed = GetTickCount64() - start;
+    SetEvent(returned);
+    release.join();
+    CloseHandle(returned);
+    Require(hr, "Pause shared D3D12 queue");
+    if (elapsed >= 1200 || IsWindow(child)) throw std::runtime_error("Stop waited for a blocked GPU or retained the playback child");
+    std::printf("D3D12 closed its window in %llu ms with a blocked shared queue.\n", elapsed);
+}
 }
 
 int wmain(int argc, wchar_t** argv)
@@ -148,6 +190,7 @@ int wmain(int argc, wchar_t** argv)
             std::printf("D3D12 %s swap-chain pixels, source reuse, and resize passed.\n", hdr ? "PQ/10-bit" : "SDR/8-bit");
         }
         if (!hasHdr) std::puts("HDR10 pixel test skipped because Windows has no active HDR output.");
+        VerifyStopWhileQueueBusy(window, device.Get());
         status = 0;
     } catch (const std::exception& e) {std::fprintf(stderr, "%s\n", e.what());}
     if (window) DestroyWindow(window);

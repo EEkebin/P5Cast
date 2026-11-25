@@ -4,9 +4,9 @@ P5Cast is a Windows x64 app for playing a PS5 over a network. The dashboard cont
 
 ## Try it offline
 
-Extract the entire Windows x64 ZIP and open `P5Cast.exe`. To install it for your Windows user, run **Install.cmd** from the extracted folder. The release includes a SHA-256 checksum. [Private Windows releases](https://github.com/EEkebin/P5Cast/releases)
+Download the **Windows x64 setup EXE** and run it to install P5Cast for your Windows account. Open **P5Cast** from Start. To run the portable version, extract the entire Windows x64 ZIP and open `P5Cast.exe`. Each download has a SHA-256 checksum. [Windows releases](https://github.com/EEkebin/P5Cast/releases)
 
-The installer verifies the packaged files, installs each version under `%LOCALAPPDATA%\Programs\P5Cast\versions` and adds one **P5Cast** shortcut to the Start menu. Existing console registrations, preferences and network pairings carry over when upgrading from Cadrivect.
+Setup installs under `%LOCALAPPDATA%\Programs\P5Cast` by default. You can remove it from **Settings → Apps → Installed apps**. Console registrations and preferences are stored separately and carry over on upgrades.
 
 1. Open **Play**, choose **Offline demo**, then click the triangular play button. A 960×540 scene runs inside the dashboard. Use the arrow keys or A/D to steer and Space to accelerate. The demo runs without a console, network connection, decoder download or controller.
 2. The two-line title bar button toggles the performance drawer. The **Settings** button beside **Fullscreen** toggles the bottom drawer. Drag the left edge of the performance drawer or the top edge of the settings drawer to resize it. You can also Tab to a handle and use the arrow keys. P5Cast remembers the sizes and open state of both drawers. Begin with **Original** and interpolation **Off**. Try **Sharpen**, **FSR 1 · Spatial** or an available NVIDIA mode. Pick **2×**, **3×** or **4×** to test interpolation.
@@ -186,6 +186,8 @@ Use Windows 11 x64, .NET Framework 4.8, Windows PowerShell 5.1, a hardware Direc
 .\engine\hdrtest\Verify.ps1
 .\Package.ps1
 ```
+
+To build the setup EXE from that ZIP, install Inno Setup 7 and run `.\installer\Build-Installer.ps1 -Archive .\dist\P5Cast-0.32.0-windows-x64.zip`. Pass `-Compiler` with the path to `ISCC.exe` if it is outside your PATH. [Inno Setup downloads](https://jrsoftware.org/inno-setup/downloads)
 
 The decoder test compares every YUV sample in lossless H.264, HEVC and HEVC Main 10 fixtures. The embedded test renders fixture packets in a WPF child surface. The HDR test checks GPU transfer functions and a one-pixel stroke target. A physical controller, the actual console and a second client on the intended network are needed to check their behavior together. [Player diagnostics and CLI](engine/README.md)
 

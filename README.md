@@ -8,6 +8,8 @@ Download the **Windows x64 setup EXE** and run it to install P5Cast for your Win
 
 Setup installs under `%LOCALAPPDATA%\Programs\P5Cast` by default. You can remove it from **Settings → Apps → Installed apps**. Console registrations and preferences are stored separately and carry over on upgrades.
 
+For optional DLSS 5 neural rendering on a compatible GPU, see [Set up OpenDLSS-NR](#set-up-opendlss-nr).
+
 1. Open **Play**, choose **Offline demo**, then click the triangular play button. A 960×540 scene runs inside the dashboard. Use the arrow keys or A/D to steer and Space to accelerate. The demo runs without a console, network connection, decoder download or controller.
 2. The two-line title bar button toggles the performance drawer. The **Settings** button beside **Fullscreen** toggles the bottom drawer. Drag the left edge of the performance drawer or the top edge of the settings drawer to resize it. You can also Tab to a handle and use the arrow keys. P5Cast remembers the sizes and open state of both drawers. Begin with **Original** and interpolation **Off**. Try **Sharpen**, **FSR 1 · Spatial** or an available NVIDIA mode. Pick **2×**, **3×** or **4×** to test interpolation.
 3. Use **Fullscreen** or F11 for edge-to-edge video. Press Escape or double-click the picture to return. **Stop** turns the same video area black and clears the live measurements. With the dashboard focused, Ctrl+Alt+O toggles the sidebar, Ctrl+Alt+B toggles comparison, and Ctrl+Alt+Q stops playback.
@@ -132,7 +134,32 @@ XeSS FG and DLSS FG receive the final picture after P5Cast composes the comparis
 | **NVIDIA DLSS FG 2×** | Experimental Direct3D 12 provider on compatible RTX hardware. P5Cast asks NVIDIA NGX for one intermediate frame, checks whether the SDK suppressed it, and presents it between source frames. The dashboard checks SDK and driver support. |
 | **NVIDIA FRUC 2×** | Direct3D 11 and 12, in SDR or HDR10, on NVIDIA hardware that passes the midpoint test. With HDR10, FRUC interpolates 8-bit PQ guides. P5Cast uses the full-precision source frames to recover finer gradations where the generated color agrees. Some moving gradients can still show banding. To set up a new PC, select **Import FRUC runtime…** and choose NVIDIA's Optical Flow SDK ZIP or its x64 `NvOFFRUC.dll`. The importer also installs the matching CUDA 11 runtime. [NVIDIA SDK download](https://developer.nvidia.com/opticalflow/download) · [FRUC programming guide](https://docs.nvidia.com/video-technologies/optical-flow-sdk/nvfruc-programming-guide/index.html) |
 
-Under **Picture → DLSS 5 NR**, check **Use open source** to choose OpenDLSS-NR, then select the picture mode to apply it. **Download model** prepares the 310.8.0 full model from NVIDIA’s published RTX Remix package in your Windows user profile. To use a model stored elsewhere, choose its `manifest.json`. The installer and release ZIP contain only the open provider, kernels, and setup tools for this option. The app verifies the model on the selected adapter before enabling the effect. Neural rendering can change lighting, materials and faces. P5Cast estimates motion from decoded frames and has no game geometry. Use the split view to judge the change on your game. [OpenDLSS-NR model format](https://github.com/maanHimself/OpenDLSS-NR#model-directory)
+### Set up OpenDLSS-NR
+
+P5Cast includes the open-source neural renderer. Its compatible **310.8.0 full model** is a separate download from NVIDIA. The setup EXE and portable ZIP use the same model folder.
+
+1. Open **Picture** in the right-hand drawer and check **Use open source for DLSS 5 NR**.
+2. Click **Download model**. P5Cast downloads NVIDIA’s RTX Remix package (about 368 MB), checks its SHA-256 and the NVIDIA runtime signature, and prepares the model in your Windows profile. The button handles the download and file placement for you. [NVIDIA model package](https://d1oqksizpb0e3d.cloudfront.net/rtx-remix-ngx_sdk_dlnr@2.7z)
+3. Wait for **OpenDLSS-NR model verified.** Select **DLSS 5 NR** to use it on its own. To combine it with an upscaler, select that upscaler and check **Apply OpenDLSS-NR first (AI)**.
+
+**Where the files go.** Paste `%LOCALAPPDATA%\P5Cast\providers\open-nr\model` into File Explorer’s address bar. It contains the manifest, NVIDIA’s license, and a nested folder with 11 stage files.
+
+```text
+%LOCALAPPDATA%\P5Cast\providers\open-nr\model\
+  manifest.json
+  NVIDIA-LICENSE.txt
+  model\stage-0.bin
+  …
+  model\stage-10.bin
+```
+
+**Already have the prepared model?** Keep the whole folder together wherever you want it. In **Picture → Model… → Choose model…**, select the top-level `manifest.json`. P5Cast checks the model on your selected GPU and remembers the location. [OpenDLSS-NR model format](https://github.com/maanHimself/OpenDLSS-NR#model-directory)
+
+**Already downloaded the NVIDIA `.7z`?** Open PowerShell in the folder containing `P5Cast.exe` and run the following command, adjusting the archive path if needed. The helper prints the prepared folder as `modelDirectory`. Use **Choose model…** to select its manifest.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\sources\Install-OpenNrModel.ps1" -ArchivePath "$env:USERPROFILE\Downloads\rtx-remix-ngx_sdk_dlnr@2.7z"
+```
 
 On an RTX 4090 with driver 621.24, a local 60 FPS HEVC test clip with OpenDLSS-NR and frame generation off presented about 48 FPS on Direct3D 11, 49 FPS on Direct3D 12, and 44 FPS on Vulkan at 1080p. At 720p, Direct3D 11 presented 60 FPS. Choose a 720p console stream if you want to try this effect at 60 FPS on similar hardware.
 
